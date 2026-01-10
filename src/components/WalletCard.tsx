@@ -36,7 +36,7 @@ export const WalletCard = ({ balance, onAddFunds, onViewHistory }: WalletCardPro
             <p className="text-primary-foreground/70 text-sm font-medium">Your Balance</p>
             <div className="flex items-center gap-2 mt-1">
               <h2 className="text-3xl font-black text-primary-foreground">
-                {showBalance ? `₦${balance.toLocaleString()}` : "₦•••,•••"}
+                {showBalance ? `₦${(balance ?? 0).toLocaleString()}` : "₦•••,•••"}
               </h2>
               <button
                 onClick={() => setShowBalance(!showBalance)}
