@@ -7,12 +7,19 @@ import { AuthFlow } from "@/components/AuthFlow";
 import { BottomNav } from "@/components/BottomNav";
 import { WalletCard } from "@/components/WalletCard";
 import { EventList } from "@/components/EventList";
+import { FundWalletSheet } from "@/components/FundWalletSheet";
+import { TransactionHistory } from "@/components/TransactionHistory";
+import { useWallet } from "@/hooks/useWallet";
 
 type AppState = "onboarding" | "dashboard";
 
 const Index = () => {
   const [appState, setAppState] = useState<AppState>("onboarding");
   const [activeTab, setActiveTab] = useState("home");
+  const [showFundSheet, setShowFundSheet] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  
+  const { balance, transactions, addFunds } = useWallet();
 
   const handleAuthComplete = () => {
     setAppState("dashboard");
@@ -80,7 +87,11 @@ const Index = () => {
             </motion.header>
 
             {/* Wallet */}
-            <WalletCard />
+            <WalletCard 
+              balance={balance}
+              onAddFunds={() => setShowFundSheet(true)}
+              onViewHistory={() => setShowHistory(true)}
+            />
 
             {/* Quick Actions */}
             <motion.div
@@ -119,6 +130,27 @@ const Index = () => {
       {appState === "dashboard" && (
         <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
       )}
+
+      {/* Fund Wallet Sheet */}
+      <FundWalletSheet
+        isOpen={showFundSheet}
+        onClose={() => setShowFundSheet(false)}
+        onFundComplete={(amount, method, description) => {
+          addFunds(amount, method, description);
+          setShowFundSheet(false);
+        }}
+      />
+
+      {/* Transaction History */}
+      <AnimatePresence>
+        {showHistory && (
+          <TransactionHistory
+            transactions={transactions}
+            isOpen={showHistory}
+            onClose={() => setShowHistory(false)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };

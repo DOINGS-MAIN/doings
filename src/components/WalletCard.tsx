@@ -1,11 +1,16 @@
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Plus, ArrowUpRight, ArrowDownLeft } from "lucide-react";
+import { Eye, EyeOff, Plus, ArrowUpRight, ArrowDownLeft, History } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 
-export const WalletCard = () => {
+interface WalletCardProps {
+  balance: number;
+  onAddFunds: () => void;
+  onViewHistory: () => void;
+}
+
+export const WalletCard = ({ balance, onAddFunds, onViewHistory }: WalletCardProps) => {
   const [showBalance, setShowBalance] = useState(true);
-  const balance = 125000;
 
   return (
     <motion.div
@@ -55,30 +60,40 @@ export const WalletCard = () => {
         </div>
 
         {/* Action buttons */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-4 gap-2">
           <Button
             variant="glass"
             size="sm"
-            className="bg-white/20 border-white/30 text-primary-foreground hover:bg-white/30"
+            className="bg-white/20 border-white/30 text-primary-foreground hover:bg-white/30 flex-col h-auto py-3"
+            onClick={onAddFunds}
           >
-            <Plus className="w-4 h-4" />
-            Add
+            <Plus className="w-5 h-5 mb-1" />
+            <span className="text-xs">Add</span>
           </Button>
           <Button
             variant="glass"
             size="sm"
-            className="bg-white/20 border-white/30 text-primary-foreground hover:bg-white/30"
+            className="bg-white/20 border-white/30 text-primary-foreground hover:bg-white/30 flex-col h-auto py-3"
           >
-            <ArrowUpRight className="w-4 h-4" />
-            Send
+            <ArrowUpRight className="w-5 h-5 mb-1" />
+            <span className="text-xs">Send</span>
           </Button>
           <Button
             variant="glass"
             size="sm"
-            className="bg-white/20 border-white/30 text-primary-foreground hover:bg-white/30"
+            className="bg-white/20 border-white/30 text-primary-foreground hover:bg-white/30 flex-col h-auto py-3"
           >
-            <ArrowDownLeft className="w-4 h-4" />
-            Withdraw
+            <ArrowDownLeft className="w-5 h-5 mb-1" />
+            <span className="text-xs">Withdraw</span>
+          </Button>
+          <Button
+            variant="glass"
+            size="sm"
+            className="bg-white/20 border-white/30 text-primary-foreground hover:bg-white/30 flex-col h-auto py-3"
+            onClick={onViewHistory}
+          >
+            <History className="w-5 h-5 mb-1" />
+            <span className="text-xs">History</span>
           </Button>
         </div>
       </div>
