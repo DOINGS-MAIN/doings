@@ -11,6 +11,7 @@ import { FundWalletSheet } from "@/components/FundWalletSheet";
 import { TransactionHistory } from "@/components/TransactionHistory";
 import { SpraySetupSheet } from "@/components/SpraySetupSheet";
 import { SprayAnimation } from "@/components/SprayAnimation";
+import { AvatarCustomization, AvatarData } from "@/components/AvatarCustomization";
 import { useWallet } from "@/hooks/useWallet";
 import { toast } from "sonner";
 
@@ -28,6 +29,15 @@ const Index = () => {
   const [isSprayActive, setIsSprayActive] = useState(false);
   const [sprayAmount, setSprayAmount] = useState(0);
   const [sprayDenomination, setSprayDenomination] = useState(0);
+  
+  // Avatar state
+  const [showAvatarCustomization, setShowAvatarCustomization] = useState(false);
+  const [avatarData, setAvatarData] = useState<AvatarData>({
+    photoUrl: null,
+    outfit: "agbada",
+    accessory: "none",
+    background: "gold-gradient",
+  });
   
   const { balance, transactions, addFunds, deductFunds } = useWallet();
 
@@ -129,13 +139,18 @@ const Index = () => {
                 <p className="text-muted-foreground text-sm">Welcome back,</p>
                 <h1 className="text-2xl font-bold text-foreground">Champion 👋</h1>
               </div>
-              <motion.div
-                className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-xl font-bold text-primary-foreground"
+              <motion.button
+                onClick={() => setShowAvatarCustomization(true)}
+                className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-xl font-bold text-primary-foreground overflow-hidden"
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
               >
-                C
-              </motion.div>
+                {avatarData.photoUrl ? (
+                  <img src={avatarData.photoUrl} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  "C"
+                )}
+              </motion.button>
             </motion.header>
 
             {/* Wallet */}
@@ -229,6 +244,14 @@ const Index = () => {
           />
         )}
       </AnimatePresence>
+
+      {/* Avatar Customization */}
+      <AvatarCustomization
+        isOpen={showAvatarCustomization}
+        onClose={() => setShowAvatarCustomization(false)}
+        onSave={setAvatarData}
+        currentAvatar={avatarData}
+      />
     </div>
   );
 };
