@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
-import { MapPin, Users, Clock, ChevronRight } from "lucide-react";
+import { MapPin, Users, Clock, ChevronRight, Zap } from "lucide-react";
 
-interface Event {
+export interface Event {
   id: string;
   title: string;
   type: string;
@@ -12,7 +12,7 @@ interface Event {
   gradient: string;
 }
 
-const liveEvents: Event[] = [
+export const liveEvents: Event[] = [
   {
     id: "1",
     title: "Ade & Bimpe Wedding",
@@ -45,7 +45,11 @@ const liveEvents: Event[] = [
   },
 ];
 
-export const EventList = () => {
+interface EventListProps {
+  onJoinEvent?: (event: Event) => void;
+}
+
+export const EventList = ({ onJoinEvent }: EventListProps) => {
   return (
     <section className="px-6 py-4">
       <div className="flex items-center justify-between mb-4">
@@ -65,8 +69,10 @@ export const EventList = () => {
             transition={{ delay: 0.5 + index * 0.1 }}
             whileHover={{ scale: 1.02, x: 4 }}
             whileTap={{ scale: 0.98 }}
-            className="glass rounded-2xl p-4 cursor-pointer card-interactive flex items-center gap-4"
+            className="glass rounded-2xl p-4 cursor-pointer card-interactive"
+            onClick={() => onJoinEvent?.(event)}
           >
+            <div className="flex items-center gap-4">
             {/* Event icon */}
             <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${event.gradient} flex items-center justify-center text-2xl shrink-0`}>
               {event.emoji}
@@ -99,6 +105,22 @@ export const EventList = () => {
             </div>
 
             <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
+            </div>
+            
+            {/* Join to spray button */}
+            {event.timeLeft === "Live Now" && (
+              <motion.div
+                className="mt-3 flex justify-end"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.6 + index * 0.1 }}
+              >
+                <button className="flex items-center gap-2 bg-primary/20 hover:bg-primary/30 text-primary px-4 py-2 rounded-xl text-sm font-semibold transition-colors">
+                  <Zap className="w-4 h-4" />
+                  Join & Spray
+                </button>
+              </motion.div>
+            )}
           </motion.div>
         ))}
       </div>

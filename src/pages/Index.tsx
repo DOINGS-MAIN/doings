@@ -6,10 +6,13 @@ import { FeatureCards } from "@/components/FeatureCards";
 import { AuthFlow } from "@/components/AuthFlow";
 import { BottomNav } from "@/components/BottomNav";
 import { WalletCard } from "@/components/WalletCard";
-import { EventList } from "@/components/EventList";
+import { EventList, Event, liveEvents } from "@/components/EventList";
 import { FundWalletSheet } from "@/components/FundWalletSheet";
 import { TransactionHistory } from "@/components/TransactionHistory";
+import { SpraySetupSheet } from "@/components/SpraySetupSheet";
+import { SprayAnimation } from "@/components/SprayAnimation";
 import { useWallet } from "@/hooks/useWallet";
+import { toast } from "sonner";
 
 type AppState = "onboarding" | "dashboard";
 
@@ -19,10 +22,59 @@ const Index = () => {
   const [showFundSheet, setShowFundSheet] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   
-  const { balance, transactions, addFunds } = useWallet();
+  // Spray state
+  const [showSpraySetup, setShowSpraySetup] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
+  const [isSprayActive, setIsSprayActive] = useState(false);
+  const [sprayAmount, setSprayAmount] = useState(0);
+  const [sprayDenomination, setSprayDenomination] = useState(0);
+  
+  const { balance, transactions, addFunds, deductFunds } = useWallet();
 
   const handleAuthComplete = () => {
     setAppState("dashboard");
+  };
+
+  const handleJoinEvent = (event: Event) => {
+    if (event.timeLeft !== "Live Now") {
+      toast.info("This event hasn't started yet");
+      return;
+    }
+    setSelectedEvent(event);
+    setShowSpraySetup(true);
+  };
+
+  const handleStartSpray = (amount: number, denomination: number) => {
+    setSprayAmount(amount);
+    setSprayDenomination(denomination);
+    setShowSpraySetup(false);
+    setIsSprayActive(true);
+  };
+
+  const handleSprayComplete = (sprayedAmount: number) => {
+    try {
+      deductFunds(sprayedAmount, `Sprayed at ${selectedEvent?.title || "Event"}`);
+      toast.success(`Successfully sprayed ₦${sprayedAmount.toLocaleString()}! 🎉`);
+    } catch (error) {
+      toast.error("Failed to complete spray");
+    }
+    setIsSprayActive(false);
+    setSelectedEvent(null);
+  };
+
+  const handleSprayCancel = (sprayedAmount: number) => {
+    if (sprayedAmount > 0) {
+      try {
+        deductFunds(sprayedAmount, `Sprayed at ${selectedEvent?.title || "Event"} (cancelled)`);
+        toast.info(`Spray stopped. ₦${sprayedAmount.toLocaleString()} was sprayed.`);
+      } catch (error) {
+        toast.error("Failed to record spray");
+      }
+    } else {
+      toast.info("Spray cancelled");
+    }
+    setIsSprayActive(false);
+    setSelectedEvent(null);
   };
 
   return (
@@ -121,7 +173,7 @@ const Index = () => {
             </motion.div>
 
             {/* Events */}
-            <EventList />
+            <EventList onJoinEvent={handleJoinEvent} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -148,6 +200,32 @@ const Index = () => {
             transactions={transactions}
             isOpen={showHistory}
             onClose={() => setShowHistory(false)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Spray Setup Sheet */}
+      <SpraySetupSheet
+        isOpen={showSpraySetup}
+        onClose={() => {
+          setShowSpraySetup(false);
+          setSelectedEvent(null);
+        }}
+        onStartSpray={handleStartSpray}
+        balance={balance}
+        eventName={selectedEvent?.title || ""}
+      />
+
+      {/* Spray Animation */}
+      <AnimatePresence>
+        {isSprayActive && (
+          <SprayAnimation
+            isActive={isSprayActive}
+            amount={sprayAmount}
+            denomination={sprayDenomination}
+            onComplete={handleSprayComplete}
+            onCancel={handleSprayCancel}
+            eventName={selectedEvent?.title || "Event"}
           />
         )}
       </AnimatePresence>
