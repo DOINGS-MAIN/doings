@@ -16,6 +16,10 @@ import { CreateEventSheet } from "@/components/CreateEventSheet";
 import { MyEventsScreen } from "@/components/MyEventsScreen";
 import { EventDetailsSheet } from "@/components/EventDetailsSheet";
 import { JoinEventSheet } from "@/components/JoinEventSheet";
+import { BankAccountsSheet } from "@/components/BankAccountsSheet";
+import { KYCVerificationSheet } from "@/components/KYCVerificationSheet";
+import { WithdrawSheet } from "@/components/WithdrawSheet";
+import { SendMoneySheet } from "@/components/SendMoneySheet";
 import { useWallet } from "@/hooks/useWallet";
 import { useEvents, EventData } from "@/hooks/useEvents";
 import { toast } from "sonner";
@@ -49,6 +53,12 @@ const Index = () => {
   const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [showEventDetails, setShowEventDetails] = useState(false);
   const [selectedEventDetails, setSelectedEventDetails] = useState<EventData | null>(null);
+  
+  // Banking & Withdrawal state
+  const [showBankAccounts, setShowBankAccounts] = useState(false);
+  const [showKYC, setShowKYC] = useState(false);
+  const [showWithdraw, setShowWithdraw] = useState(false);
+  const [showSendMoney, setShowSendMoney] = useState(false);
   const [showJoinEvent, setShowJoinEvent] = useState(false);
   
   const { balance, transactions, addFunds, deductFunds } = useWallet();
@@ -196,6 +206,8 @@ const Index = () => {
               balance={balance}
               onAddFunds={() => setShowFundSheet(true)}
               onViewHistory={() => setShowHistory(true)}
+              onSend={() => setShowSendMoney(true)}
+              onWithdraw={() => setShowWithdraw(true)}
             />
 
             {/* Quick Actions */}
@@ -437,6 +449,32 @@ const Index = () => {
         onJoinEvent={handleJoinEvent}
         findEventByCode={findEventByCode}
         liveEvents={getLiveEvents()}
+      />
+
+      {/* Bank Accounts Sheet */}
+      <BankAccountsSheet
+        open={showBankAccounts}
+        onOpenChange={setShowBankAccounts}
+      />
+
+      {/* KYC Verification Sheet */}
+      <KYCVerificationSheet
+        open={showKYC}
+        onOpenChange={setShowKYC}
+      />
+
+      {/* Withdraw Sheet */}
+      <WithdrawSheet
+        open={showWithdraw}
+        onOpenChange={setShowWithdraw}
+        onOpenBankAccounts={() => setShowBankAccounts(true)}
+        onOpenKYC={() => setShowKYC(true)}
+      />
+
+      {/* Send Money Sheet */}
+      <SendMoneySheet
+        open={showSendMoney}
+        onOpenChange={setShowSendMoney}
       />
     </div>
   );
