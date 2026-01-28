@@ -7,9 +7,11 @@ interface WalletCardProps {
   balance: number;
   onAddFunds: () => void;
   onViewHistory: () => void;
+  onSend: () => void;
+  onWithdraw: () => void;
 }
 
-export const WalletCard = ({ balance, onAddFunds, onViewHistory }: WalletCardProps) => {
+export const WalletCard = ({ balance, onAddFunds, onViewHistory, onSend, onWithdraw }: WalletCardProps) => {
   const [showBalance, setShowBalance] = useState(true);
 
   return (
@@ -74,6 +76,7 @@ export const WalletCard = ({ balance, onAddFunds, onViewHistory }: WalletCardPro
             variant="glass"
             size="sm"
             className="bg-white/20 border-white/30 text-primary-foreground hover:bg-white/30 flex-col h-auto py-3"
+            onClick={onSend}
           >
             <ArrowUpRight className="w-5 h-5 mb-1" />
             <span className="text-xs">Send</span>
@@ -82,6 +85,7 @@ export const WalletCard = ({ balance, onAddFunds, onViewHistory }: WalletCardPro
             variant="glass"
             size="sm"
             className="bg-white/20 border-white/30 text-primary-foreground hover:bg-white/30 flex-col h-auto py-3"
+            onClick={onWithdraw}
           >
             <ArrowDownLeft className="w-5 h-5 mb-1" />
             <span className="text-xs">Withdraw</span>
