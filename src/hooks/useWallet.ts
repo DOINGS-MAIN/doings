@@ -79,15 +79,15 @@ export const useWallet = () => {
     localStorage.setItem(WALLET_STORAGE_KEY, JSON.stringify(state));
   }, [state]);
 
-  const addFunds = useCallback((amount: number, method: "bank" | "card", description: string) => {
+  const addFunds = useCallback((amount: number, method: "bank" | "card" | "giveaway" | "refund", description: string) => {
     const transaction: Transaction = {
       id: `txn-${Date.now()}`,
-      type: "deposit",
+      type: method === "giveaway" ? "received" : method === "refund" ? "deposit" : "deposit",
       amount,
       description,
       timestamp: new Date(),
       status: "completed",
-      method,
+      method: method === "bank" || method === "card" ? method : undefined,
       reference: `TXN-${method.toUpperCase()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
     };
 

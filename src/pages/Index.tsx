@@ -20,8 +20,13 @@ import { BankAccountsSheet } from "@/components/BankAccountsSheet";
 import { KYCVerificationSheet } from "@/components/KYCVerificationSheet";
 import { WithdrawSheet } from "@/components/WithdrawSheet";
 import { SendMoneySheet } from "@/components/SendMoneySheet";
+import { GiftsScreen } from "@/components/GiftsScreen";
+import { CreateGiveawaySheet } from "@/components/CreateGiveawaySheet";
+import { GiveawayDetailsSheet } from "@/components/GiveawayDetailsSheet";
+import { RedeemGiveawaySheet } from "@/components/RedeemGiveawaySheet";
 import { useWallet } from "@/hooks/useWallet";
 import { useEvents, EventData } from "@/hooks/useEvents";
+import { useGiveaways, Giveaway } from "@/hooks/useGiveaways";
 import { toast } from "sonner";
 import { Plus, ChevronRight, Sparkles } from "lucide-react";
 
@@ -61,6 +66,12 @@ const Index = () => {
   const [showSendMoney, setShowSendMoney] = useState(false);
   const [showJoinEvent, setShowJoinEvent] = useState(false);
   
+  // Giveaway state
+  const [showCreateGiveaway, setShowCreateGiveaway] = useState(false);
+  const [showRedeemGiveaway, setShowRedeemGiveaway] = useState(false);
+  const [showGiveawayDetails, setShowGiveawayDetails] = useState(false);
+  const [selectedGiveaway, setSelectedGiveaway] = useState<Giveaway | null>(null);
+  
   const { balance, transactions, addFunds, deductFunds } = useWallet();
   const { 
     events, 
@@ -74,6 +85,14 @@ const Index = () => {
     addSprayAmount,
     joinEvent
   } = useEvents();
+  
+  const {
+    createGiveaway,
+    redeemGiveaway,
+    stopGiveaway,
+    getMyGiveaways,
+    findGiveawayByCode,
+  } = useGiveaways();
 
   const handleAuthComplete = () => {
     setAppState("dashboard");
@@ -147,6 +166,37 @@ const Index = () => {
     setShowEventDetails(true);
   };
 
+  // Giveaway handlers
+  const handleCreateGiveaway = (data: Parameters<typeof createGiveaway>[0]) => {
+    const giveaway = createGiveaway(data);
+    deductFunds(data.totalAmount, `Created giveaway: ${data.title}`);
+    toast.success("Giveaway created! 🎁");
+    return { code: giveaway.code, id: giveaway.id };
+  };
+
+  const handleRedeemGiveaway = (code: string) => {
+    const result = redeemGiveaway(code);
+    if (result.success && result.amount) {
+      addFunds(result.amount, "giveaway", `Redeemed giveaway`);
+    }
+    return result;
+  };
+
+  const handleStopGiveaway = (giveawayId: string) => {
+    const refund = stopGiveaway(giveawayId);
+    if (refund > 0) {
+      addFunds(refund, "refund", `Giveaway refund`);
+      toast.success(`₦${refund.toLocaleString()} refunded to your wallet`);
+    } else {
+      toast.info("Giveaway stopped");
+    }
+  };
+
+  const handleViewGiveaway = (giveaway: Giveaway) => {
+    setSelectedGiveaway(giveaway);
+    setShowGiveawayDetails(true);
+  };
+
   // Convert EventData to the format expected by EventList
   const liveEventsForList = getLiveEvents().map(event => ({
     id: event.id,
@@ -159,6 +209,7 @@ const Index = () => {
     gradient: event.gradient,
   }));
 
+
   const renderDashboardContent = () => {
     switch (activeTab) {
       case "events":
@@ -169,6 +220,16 @@ const Index = () => {
             onGoLive={handleGoLive}
             onEndEvent={handleEndEvent}
             onManageEvent={handleManageEvent}
+          />
+        );
+      
+      case "gifts":
+        return (
+          <GiftsScreen
+            myGiveaways={getMyGiveaways()}
+            onCreateGiveaway={() => setShowCreateGiveaway(true)}
+            onRedeemGiveaway={() => setShowRedeemGiveaway(true)}
+            onViewGiveaway={handleViewGiveaway}
           />
         );
       
@@ -475,6 +536,34 @@ const Index = () => {
       <SendMoneySheet
         open={showSendMoney}
         onOpenChange={setShowSendMoney}
+      />
+
+      {/* Create Giveaway Sheet */}
+      <CreateGiveawaySheet
+        isOpen={showCreateGiveaway}
+        onClose={() => setShowCreateGiveaway(false)}
+        onCreateGiveaway={handleCreateGiveaway}
+        balance={balance}
+        liveEvents={getLiveEvents()}
+      />
+
+      {/* Giveaway Details Sheet */}
+      <GiveawayDetailsSheet
+        giveaway={selectedGiveaway}
+        isOpen={showGiveawayDetails}
+        onClose={() => {
+          setShowGiveawayDetails(false);
+          setSelectedGiveaway(null);
+        }}
+        onStop={handleStopGiveaway}
+      />
+
+      {/* Redeem Giveaway Sheet */}
+      <RedeemGiveawaySheet
+        isOpen={showRedeemGiveaway}
+        onClose={() => setShowRedeemGiveaway(false)}
+        onRedeem={handleRedeemGiveaway}
+        findGiveawayByCode={findGiveawayByCode}
       />
     </div>
   );
