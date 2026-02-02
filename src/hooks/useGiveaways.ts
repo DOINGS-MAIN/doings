@@ -97,12 +97,20 @@ export const useGiveaways = () => {
     userId: string = 'current_user',
     userName: string = 'Champion'
   ): { success: boolean; message: string; amount?: number } => {
-    const giveaway = giveaways.find(
+    // Re-read from localStorage to get latest state
+    const stored = localStorage.getItem(STORAGE_KEY);
+    const latestGiveaways: Giveaway[] = stored ? JSON.parse(stored) : giveaways;
+    
+    const giveaway = latestGiveaways.find(
       (g) => g.code.toUpperCase() === code.toUpperCase()
     );
 
     if (!giveaway) {
       return { success: false, message: 'Invalid giveaway code' };
+    }
+
+    if (giveaway.creatorId === userId) {
+      return { success: false, message: 'You cannot redeem your own giveaway' };
     }
 
     if (giveaway.status === 'stopped') {
