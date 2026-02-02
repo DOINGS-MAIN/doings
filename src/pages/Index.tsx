@@ -21,6 +21,7 @@ import { KYCVerificationSheet } from "@/components/KYCVerificationSheet";
 import { WithdrawSheet } from "@/components/WithdrawSheet";
 import { SendMoneySheet } from "@/components/SendMoneySheet";
 import { GiftsScreen } from "@/components/GiftsScreen";
+import { LeaderboardScreen } from "@/components/LeaderboardScreen";
 import { CreateGiveawaySheet } from "@/components/CreateGiveawaySheet";
 import { GiveawayDetailsSheet } from "@/components/GiveawayDetailsSheet";
 import { RedeemGiveawaySheet } from "@/components/RedeemGiveawaySheet";
@@ -232,6 +233,9 @@ const Index = () => {
             onViewGiveaway={handleViewGiveaway}
           />
         );
+      
+      case "leaderboard":
+        return <LeaderboardScreen />;
       
       case "home":
       default:

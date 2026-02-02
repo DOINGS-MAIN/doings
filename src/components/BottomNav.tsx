@@ -1,11 +1,11 @@
 import { motion } from "framer-motion";
-import { Home, Wallet, Gift, User, Sparkles } from "lucide-react";
+import { Home, Wallet, Gift, User, Sparkles, Trophy } from "lucide-react";
 import { useState } from "react";
 
 const navItems = [
   { icon: Home, label: "Home", id: "home" },
   { icon: Sparkles, label: "Events", id: "events" },
-  { icon: Wallet, label: "Wallet", id: "wallet" },
+  { icon: Trophy, label: "Board", id: "leaderboard" },
   { icon: Gift, label: "Gifts", id: "gifts" },
   { icon: User, label: "Profile", id: "profile" },
 ];
