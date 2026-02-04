@@ -7,14 +7,16 @@ export interface LeaderboardEntry {
   name: string;
   username: string;
   avatar: string;
-  totalSprayed: number;
+  totalGifted: number; // Renamed from totalSprayed - includes sprays + giveaways
+  sprayAmount: number;
+  giveawayAmount: number;
   eventsAttended: number;
   isCurrentUser: boolean;
   previousRank?: number;
   rankChange: 'up' | 'down' | 'same' | 'new';
 }
 
-type TimePeriod = 'weekly' | 'monthly' | 'allTime';
+export type TimePeriod = 'weekly' | 'monthly' | 'allTime';
 
 // Mock data for demonstration - in production this would come from a backend
 const mockUsers = [
@@ -33,8 +35,9 @@ const mockUsers = [
 const generateMockData = (period: TimePeriod): LeaderboardEntry[] => {
   const multiplier = period === 'weekly' ? 1 : period === 'monthly' ? 4 : 12;
   
-  const entries = mockUsers.map((user, index) => {
-    const baseAmount = Math.floor(Math.random() * 500000) + 50000;
+  const entries = mockUsers.map((user) => {
+    const sprayAmount = Math.floor(Math.random() * 400000) + 30000;
+    const giveawayAmount = Math.floor(Math.random() * 200000) + 10000;
     const previousRank = Math.floor(Math.random() * 10) + 1;
     
     return {
@@ -43,7 +46,9 @@ const generateMockData = (period: TimePeriod): LeaderboardEntry[] => {
       name: user.name,
       username: user.username,
       avatar: user.avatar,
-      totalSprayed: baseAmount * multiplier,
+      sprayAmount: sprayAmount * multiplier,
+      giveawayAmount: giveawayAmount * multiplier,
+      totalGifted: (sprayAmount + giveawayAmount) * multiplier,
       eventsAttended: Math.floor(Math.random() * 15) + 1,
       isCurrentUser: user.id === 'current_user',
       previousRank,
@@ -51,8 +56,8 @@ const generateMockData = (period: TimePeriod): LeaderboardEntry[] => {
     };
   });
 
-  // Sort by totalSprayed descending
-  entries.sort((a, b) => b.totalSprayed - a.totalSprayed);
+  // Sort by totalGifted descending
+  entries.sort((a, b) => b.totalGifted - a.totalGifted);
   
   // Assign ranks and calculate rank changes
   return entries.map((entry, index) => {
@@ -78,16 +83,32 @@ export const useLeaderboard = () => {
       .reduce((sum, t) => sum + Math.abs(t.amount), 0);
   }, [transactions]);
 
+  // Calculate current user's giveaway total from actual transactions
+  const currentUserGiveawayTotal = useMemo(() => {
+    return transactions
+      .filter(t => t.type === 'giveaway')
+      .reduce((sum, t) => sum + Math.abs(t.amount), 0);
+  }, [transactions]);
+
+  // Combined total for "Top Gifters"
+  const currentUserTotalGifted = currentUserSprayTotal + currentUserGiveawayTotal;
+
   const getLeaderboard = (period: TimePeriod): LeaderboardEntry[] => {
     const data = generateMockData(period);
     
-    // Update current user's actual spray amount
+    // Update current user's actual gifted amounts
     return data.map(entry => {
       if (entry.isCurrentUser) {
-        return { ...entry, totalSprayed: currentUserSprayTotal || entry.totalSprayed };
+        const totalGifted = currentUserTotalGifted || entry.totalGifted;
+        return { 
+          ...entry, 
+          sprayAmount: currentUserSprayTotal || entry.sprayAmount,
+          giveawayAmount: currentUserGiveawayTotal || entry.giveawayAmount,
+          totalGifted 
+        };
       }
       return entry;
-    }).sort((a, b) => b.totalSprayed - a.totalSprayed)
+    }).sort((a, b) => b.totalGifted - a.totalGifted)
       .map((entry, index) => ({ ...entry, rank: index + 1 }));
   };
 
@@ -104,5 +125,8 @@ export const useLeaderboard = () => {
     getLeaderboard,
     getCurrentUserRank,
     getTopThree,
+    currentUserTotalGifted,
+    currentUserSprayTotal,
+    currentUserGiveawayTotal,
   };
 };

@@ -2,7 +2,7 @@ import { motion } from "framer-motion";
 import { 
   X, Calendar, Clock, MapPin, Users, Copy, Share2, 
   Play, Square, Edit2, Trash2, TrendingUp, QrCode,
-  Globe, Lock, ChevronRight
+  Globe, Lock, ChevronRight, Tv
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { EventData } from "@/hooks/useEvents";
@@ -15,6 +15,7 @@ interface EventDetailsSheetProps {
   onGoLive: (eventId: string) => void;
   onEndEvent: (eventId: string) => void;
   onDelete: (eventId: string) => void;
+  onOpenEventScreen?: (event: EventData) => void;
 }
 
 const statusConfig = {
@@ -30,7 +31,8 @@ export const EventDetailsSheet = ({
   onClose, 
   onGoLive, 
   onEndEvent,
-  onDelete 
+  onDelete,
+  onOpenEventScreen
 }: EventDetailsSheetProps) => {
   if (!event) return null;
 
@@ -200,6 +202,33 @@ export const EventDetailsSheet = ({
               </div>
             </div>
           </div>
+
+          {/* Event Screen Button (for live events) */}
+          {event.status === 'live' && onOpenEventScreen && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-6"
+            >
+              <motion.button
+                onClick={() => onOpenEventScreen(event)}
+                className="w-full glass rounded-2xl p-4 flex items-center justify-between"
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center">
+                    <Tv className="w-6 h-6 text-primary-foreground" />
+                  </div>
+                  <div className="text-left">
+                    <p className="font-bold text-foreground">Event Screen</p>
+                    <p className="text-sm text-muted-foreground">Display on TV/Projector</p>
+                  </div>
+                </div>
+                <ChevronRight className="w-5 h-5 text-muted-foreground" />
+              </motion.button>
+            </motion.div>
+          )}
 
           {/* Danger Zone */}
           {event.status !== 'live' && (
