@@ -5,7 +5,7 @@ import { useState } from "react";
 const navItems = [
   { icon: Home, label: "Home", id: "home" },
   { icon: Sparkles, label: "Events", id: "events" },
-  { icon: Trophy, label: "Board", id: "leaderboard" },
+  { icon: Trophy, label: "Gifters", id: "leaderboard" },
   { icon: Gift, label: "Gifts", id: "gifts" },
   { icon: User, label: "Profile", id: "profile" },
 ];

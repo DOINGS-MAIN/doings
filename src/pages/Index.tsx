@@ -25,6 +25,7 @@ import { LeaderboardScreen } from "@/components/LeaderboardScreen";
 import { CreateGiveawaySheet } from "@/components/CreateGiveawaySheet";
 import { GiveawayDetailsSheet } from "@/components/GiveawayDetailsSheet";
 import { RedeemGiveawaySheet } from "@/components/RedeemGiveawaySheet";
+import { EventScreenDisplay } from "@/components/EventScreenDisplay";
 import { useWallet } from "@/hooks/useWallet";
 import { useEvents, EventData } from "@/hooks/useEvents";
 import { useGiveaways, Giveaway } from "@/hooks/useGiveaways";
@@ -72,6 +73,10 @@ const Index = () => {
   const [showRedeemGiveaway, setShowRedeemGiveaway] = useState(false);
   const [showGiveawayDetails, setShowGiveawayDetails] = useState(false);
   const [selectedGiveaway, setSelectedGiveaway] = useState<Giveaway | null>(null);
+  
+  // Event Screen Display state
+  const [showEventScreen, setShowEventScreen] = useState(false);
+  const [eventScreenEvent, setEventScreenEvent] = useState<EventData | null>(null);
   
   const { balance, transactions, addFunds, deductFunds } = useWallet();
   const { 
@@ -505,6 +510,10 @@ const Index = () => {
         onGoLive={handleGoLive}
         onEndEvent={handleEndEvent}
         onDelete={deleteEvent}
+        onOpenEventScreen={(event) => {
+          setEventScreenEvent(event);
+          setShowEventScreen(true);
+        }}
       />
 
       {/* Join Event Sheet */}
@@ -568,6 +577,17 @@ const Index = () => {
         onClose={() => setShowRedeemGiveaway(false)}
         onRedeem={handleRedeemGiveaway}
         findGiveawayByCode={findGiveawayByCode}
+      />
+
+      {/* Event Screen Display */}
+      <EventScreenDisplay
+        event={eventScreenEvent}
+        isOpen={showEventScreen}
+        onClose={() => {
+          setShowEventScreen(false);
+          setEventScreenEvent(null);
+        }}
+        giveaways={getMyGiveaways()}
       />
     </div>
   );
