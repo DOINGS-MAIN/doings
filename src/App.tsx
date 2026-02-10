@@ -13,6 +13,9 @@ import { AdminUsers } from "./pages/admin/AdminUsers";
 import { AdminTransactions } from "./pages/admin/AdminTransactions";
 import { AdminKYC } from "./pages/admin/AdminKYC";
 import { AdminEvents } from "./pages/admin/AdminEvents";
+import { AdminLogin } from "./pages/admin/AdminLogin";
+import { AdminChangePassword } from "./pages/admin/AdminChangePassword";
+import { AdminSettings } from "./pages/admin/AdminSettings";
 
 const queryClient = new QueryClient();
 
@@ -25,16 +28,20 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Index />} />
           
-          {/* Admin Routes */}
+          {/* Admin Auth Routes */}
+          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/admin/change-password" element={<AdminChangePassword />} />
+          
+          {/* Protected Admin Routes */}
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminDashboard />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="transactions" element={<AdminTransactions />} />
             <Route path="kyc" element={<AdminKYC />} />
             <Route path="events" element={<AdminEvents />} />
+            <Route path="settings" element={<AdminSettings />} />
           </Route>
           
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
