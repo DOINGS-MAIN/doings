@@ -1,24 +1,24 @@
-import { Outlet } from "react-router-dom";
+import { Navigate, Outlet } from "react-router-dom";
 import { AdminSidebar } from "./AdminSidebar";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useAdminAuth } from "@/hooks/useAdminAuth";
 
 export const AdminLayout = () => {
-  const { currentAdmin, getStats, setAdminRole } = useAdminData();
+  const { isAuthenticated, currentAccount, logout } = useAdminAuth();
+  const { getStats } = useAdminData();
   const stats = getStats();
 
-  if (!currentAdmin) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <p className="text-muted-foreground">Loading admin panel...</p>
-      </div>
-    );
+  if (!isAuthenticated || !currentAccount) {
+    return <Navigate to="/admin/login" replace />;
   }
 
   return (
     <div className="min-h-screen flex bg-background">
       <AdminSidebar
-        currentRole={currentAdmin.role}
-        onRoleChange={setAdminRole}
+        currentRole={currentAccount.role}
+        adminName={currentAccount.name}
+        adminEmail={currentAccount.email}
+        onLogout={logout}
         pendingKYC={stats.pendingKYC}
         flaggedTransactions={stats.flaggedTransactions}
       />

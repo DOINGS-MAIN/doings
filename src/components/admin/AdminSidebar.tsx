@@ -12,52 +12,22 @@ import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { AdminRole, ROLE_LABELS, ROLE_PERMISSIONS } from "@/types/admin";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 interface AdminSidebarProps {
   currentRole: AdminRole;
-  onRoleChange: (role: AdminRole) => void;
+  adminName: string;
+  adminEmail: string;
+  onLogout: () => void;
   pendingKYC: number;
   flaggedTransactions: number;
 }
 
 const navItems = [
-  { 
-    path: "/admin", 
-    label: "Dashboard", 
-    icon: LayoutDashboard,
-    permission: "dashboard"
-  },
-  { 
-    path: "/admin/users", 
-    label: "User Management", 
-    icon: Users,
-    permission: "users"
-  },
-  { 
-    path: "/admin/transactions", 
-    label: "Transactions", 
-    icon: CreditCard,
-    permission: "transactions"
-  },
-  { 
-    path: "/admin/kyc", 
-    label: "KYC Review", 
-    icon: FileCheck,
-    permission: "kyc"
-  },
-  { 
-    path: "/admin/events", 
-    label: "Event Moderation", 
-    icon: Calendar,
-    permission: "events"
-  },
+  { path: "/admin", label: "Dashboard", icon: LayoutDashboard, permission: "dashboard" },
+  { path: "/admin/users", label: "User Management", icon: Users, permission: "users" },
+  { path: "/admin/transactions", label: "Transactions", icon: CreditCard, permission: "transactions" },
+  { path: "/admin/kyc", label: "KYC Review", icon: FileCheck, permission: "kyc" },
+  { path: "/admin/events", label: "Event Moderation", icon: Calendar, permission: "events" },
 ];
 
 const hasPermission = (role: AdminRole, permission: string): boolean => {
@@ -68,8 +38,10 @@ const hasPermission = (role: AdminRole, permission: string): boolean => {
 };
 
 export const AdminSidebar = ({ 
-  currentRole, 
-  onRoleChange, 
+  currentRole,
+  adminName,
+  adminEmail,
+  onLogout,
   pendingKYC, 
   flaggedTransactions 
 }: AdminSidebarProps) => {
@@ -96,23 +68,11 @@ export const AdminSidebar = ({
         </div>
       </div>
 
-      {/* Role Switcher (for demo purposes) */}
+      {/* Current Admin Info */}
       <div className="p-4 border-b border-border">
-        <label className="text-xs font-medium text-muted-foreground mb-2 block">
-          Current Role
-        </label>
-        <Select value={currentRole} onValueChange={(v) => onRoleChange(v as AdminRole)}>
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {Object.entries(ROLE_LABELS).map(([role, label]) => (
-              <SelectItem key={role} value={role}>
-                {label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <p className="text-sm font-semibold text-foreground truncate">{adminName}</p>
+        <p className="text-xs text-muted-foreground truncate">{adminEmail}</p>
+        <Badge variant="outline" className="mt-1 text-xs">{ROLE_LABELS[currentRole]}</Badge>
       </div>
 
       {/* Navigation */}
@@ -155,20 +115,22 @@ export const AdminSidebar = ({
             to="/admin/settings"
             className={cn(
               "flex items-center gap-3 px-4 py-3 rounded-xl transition-all",
-              "text-muted-foreground hover:bg-muted hover:text-foreground"
+              location.pathname === "/admin/settings"
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground"
             )}
           >
             <Settings className="w-5 h-5" />
             <span className="font-medium">Settings</span>
           </NavLink>
         )}
-        <NavLink
-          to="/"
-          className="flex items-center gap-3 px-4 py-3 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all"
+        <button
+          onClick={onLogout}
+          className="flex items-center gap-3 px-4 py-3 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all w-full"
         >
           <LogOut className="w-5 h-5" />
-          <span className="font-medium">Exit Admin</span>
-        </NavLink>
+          <span className="font-medium">Logout</span>
+        </button>
       </div>
     </aside>
   );
