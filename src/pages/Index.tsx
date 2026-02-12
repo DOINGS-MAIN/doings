@@ -26,11 +26,13 @@ import { CreateGiveawaySheet } from "@/components/CreateGiveawaySheet";
 import { GiveawayDetailsSheet } from "@/components/GiveawayDetailsSheet";
 import { RedeemGiveawaySheet } from "@/components/RedeemGiveawaySheet";
 import { EventScreenDisplay } from "@/components/EventScreenDisplay";
-import { useWallet } from "@/hooks/useWallet";
+import { useMultiWallet } from "@/hooks/useMultiWallet";
+import { useKYC } from "@/hooks/useKYC";
 import { useEvents, EventData } from "@/hooks/useEvents";
 import { useGiveaways, Giveaway } from "@/hooks/useGiveaways";
 import { toast } from "sonner";
 import { Plus, ChevronRight, Sparkles } from "lucide-react";
+import { Currency } from "@/types/finance";
 
 type AppState = "onboarding" | "dashboard";
 
@@ -39,6 +41,7 @@ const Index = () => {
   const [activeTab, setActiveTab] = useState("home");
   const [showFundSheet, setShowFundSheet] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const [activeCurrency, setActiveCurrency] = useState<Currency>("NGN");
   
   // Spray state
   const [showSpraySetup, setShowSpraySetup] = useState(false);
@@ -77,8 +80,30 @@ const Index = () => {
   // Event Screen Display state
   const [showEventScreen, setShowEventScreen] = useState(false);
   const [eventScreenEvent, setEventScreenEvent] = useState<EventData | null>(null);
-  
-  const { balance, transactions, addFunds, deductFunds } = useWallet();
+
+  // Finance hooks
+  const {
+    ngnBalance,
+    usdtBalance,
+    transactions,
+    monnifyAccount,
+    blockradarAddresses,
+    creditWallet,
+    debitWallet,
+    withdrawNGN,
+    withdrawUSDT,
+    createMonnifyAccount,
+    createBlockradarAddress,
+    getTransactions,
+  } = useMultiWallet();
+
+  const {
+    currentLevel: kycLevel,
+    verifyLevel1,
+    verifyLevel2,
+    verifyLevel3,
+  } = useKYC();
+
   const { 
     events, 
     myEvents, 
@@ -123,7 +148,7 @@ const Index = () => {
 
   const handleSprayComplete = (sprayedAmount: number) => {
     try {
-      deductFunds(sprayedAmount, `Sprayed at ${selectedEvent?.title || "Event"}`);
+      debitWallet("NGN", sprayedAmount, `Sprayed at ${selectedEvent?.title || "Event"}`, "spray");
       if (selectedEvent) {
         addSprayAmount(selectedEvent.id, sprayedAmount);
       }
@@ -138,7 +163,7 @@ const Index = () => {
   const handleSprayCancel = (sprayedAmount: number) => {
     if (sprayedAmount > 0) {
       try {
-        deductFunds(sprayedAmount, `Sprayed at ${selectedEvent?.title || "Event"} (cancelled)`);
+        debitWallet("NGN", sprayedAmount, `Sprayed at ${selectedEvent?.title || "Event"} (cancelled)`, "spray");
         if (selectedEvent) {
           addSprayAmount(selectedEvent.id, sprayedAmount);
         }
@@ -175,7 +200,7 @@ const Index = () => {
   // Giveaway handlers
   const handleCreateGiveaway = (data: Parameters<typeof createGiveaway>[0]) => {
     const giveaway = createGiveaway(data);
-    deductFunds(data.totalAmount, `Created giveaway: ${data.title}`);
+    debitWallet("NGN", data.totalAmount, `Created giveaway: ${data.title}`, "giveaway");
     toast.success("Giveaway created! 🎁");
     return { code: giveaway.code, id: giveaway.id };
   };
@@ -183,7 +208,7 @@ const Index = () => {
   const handleRedeemGiveaway = (code: string) => {
     const result = redeemGiveaway(code);
     if (result.success && result.amount) {
-      addFunds(result.amount, "giveaway", `Redeemed giveaway`);
+      creditWallet("NGN", result.amount, `Redeemed giveaway`, "internal", "receive");
     }
     return result;
   };
@@ -191,7 +216,7 @@ const Index = () => {
   const handleStopGiveaway = (giveawayId: string) => {
     const refund = stopGiveaway(giveawayId);
     if (refund > 0) {
-      addFunds(refund, "refund", `Giveaway refund`);
+      creditWallet("NGN", refund, `Giveaway refund`, "internal", "deposit");
       toast.success(`₦${refund.toLocaleString()} refunded to your wallet`);
     } else {
       toast.info("Giveaway stopped");
@@ -201,6 +226,22 @@ const Index = () => {
   const handleViewGiveaway = (giveaway: Giveaway) => {
     setSelectedGiveaway(giveaway);
     setShowGiveawayDetails(true);
+  };
+
+  // Fund wallet handlers
+  const handleFundNGN = (amount: number, method: "bank" | "card", description: string) => {
+    const fee = method === "card" ? Math.round(amount * 0.015) : 0;
+    creditWallet("NGN", amount, description, "monnify", "deposit", fee);
+    setShowFundSheet(false);
+  };
+
+  const handleFundUSDT = (amount: number, provider: "blockradar", description: string) => {
+    creditWallet("USDT", amount, description, provider, "deposit");
+    setShowFundSheet(false);
+  };
+
+  const handleCreateMonnifyAccount = async () => {
+    return createMonnifyAccount("12345678901", "Demo User", "user@doings.app");
   };
 
   // Convert EventData to the format expected by EventList
@@ -271,13 +312,41 @@ const Index = () => {
               </motion.button>
             </motion.header>
 
+            {/* KYC Banner */}
+            {kycLevel < 3 && (
+              <motion.div
+                className="mx-6 mb-4 p-3 rounded-2xl bg-primary/10 border border-primary/20 flex items-center gap-3 cursor-pointer"
+                onClick={() => setShowKYC(true)}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                whileTap={{ scale: 0.98 }}
+              >
+                <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center text-lg">
+                  🛡️
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-bold text-foreground">
+                    {kycLevel === 0 && "Complete verification to get started"}
+                    {kycLevel === 1 && "Verify BVN to unlock funding"}
+                    {kycLevel === 2 && "Complete full KYC to enable withdrawals"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Level {kycLevel}/3 • Tap to continue</p>
+                </div>
+                <ChevronRight className="w-5 h-5 text-primary" />
+              </motion.div>
+            )}
+
             {/* Wallet */}
             <WalletCard 
-              balance={balance}
+              ngnBalance={ngnBalance}
+              usdtBalance={usdtBalance}
               onAddFunds={() => setShowFundSheet(true)}
               onViewHistory={() => setShowHistory(true)}
               onSend={() => setShowSendMoney(true)}
               onWithdraw={() => setShowWithdraw(true)}
+              activeCurrency={activeCurrency}
+              onCurrencyChange={setActiveCurrency}
             />
 
             {/* Quick Actions */}
@@ -441,10 +510,15 @@ const Index = () => {
       <FundWalletSheet
         isOpen={showFundSheet}
         onClose={() => setShowFundSheet(false)}
-        onFundComplete={(amount, method, description) => {
-          addFunds(amount, method, description);
-          setShowFundSheet(false);
-        }}
+        onFundNGN={handleFundNGN}
+        onFundUSDT={handleFundUSDT}
+        activeCurrency={activeCurrency}
+        kycLevel={kycLevel}
+        onOpenKYC={() => { setShowFundSheet(false); setShowKYC(true); }}
+        monnifyAccount={monnifyAccount}
+        onCreateMonnifyAccount={handleCreateMonnifyAccount}
+        blockradarAddresses={blockradarAddresses}
+        onCreateBlockradarAddress={createBlockradarAddress}
       />
 
       {/* Transaction History */}
@@ -466,7 +540,7 @@ const Index = () => {
           setSelectedEvent(null);
         }}
         onStartSpray={handleStartSpray}
-        balance={balance}
+        balance={ngnBalance}
         eventName={selectedEvent?.title || ""}
       />
 
@@ -535,6 +609,10 @@ const Index = () => {
       <KYCVerificationSheet
         open={showKYC}
         onOpenChange={setShowKYC}
+        currentLevel={kycLevel}
+        onVerifyLevel1={verifyLevel1}
+        onVerifyLevel2={verifyLevel2}
+        onVerifyLevel3={verifyLevel3}
       />
 
       {/* Withdraw Sheet */}
@@ -543,6 +621,16 @@ const Index = () => {
         onOpenChange={setShowWithdraw}
         onOpenBankAccounts={() => setShowBankAccounts(true)}
         onOpenKYC={() => setShowKYC(true)}
+        activeCurrency={activeCurrency}
+        kycLevel={kycLevel}
+        ngnBalance={ngnBalance}
+        usdtBalance={usdtBalance}
+        onWithdrawNGN={(amount, bankName, accountNumber, fee) => {
+          withdrawNGN(amount, bankName, accountNumber, fee);
+        }}
+        onWithdrawUSDT={(amount, toAddress, network, provider, fee) => {
+          withdrawUSDT(amount, toAddress, network, provider, fee);
+        }}
       />
 
       {/* Send Money Sheet */}
@@ -556,7 +644,7 @@ const Index = () => {
         isOpen={showCreateGiveaway}
         onClose={() => setShowCreateGiveaway(false)}
         onCreateGiveaway={handleCreateGiveaway}
-        balance={balance}
+        balance={ngnBalance}
         liveEvents={getLiveEvents()}
       />
 

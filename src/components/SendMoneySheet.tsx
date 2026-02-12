@@ -5,7 +5,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useWallet } from "@/hooks/useWallet";
+import { useMultiWallet } from "@/hooks/useMultiWallet";
 import { toast } from "sonner";
 
 interface SendMoneySheetProps {
@@ -34,7 +34,8 @@ const RECENT_RECIPIENTS: Recipient[] = [
 ];
 
 export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
-  const { balance, deductFunds } = useWallet();
+  const { ngnBalance, debitWallet } = useMultiWallet();
+  const balance = ngnBalance;
   const [step, setStep] = useState<SendStep>("recipient");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRecipient, setSelectedRecipient] = useState<Recipient | null>(null);
@@ -80,7 +81,7 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
     try {
       await new Promise((resolve) => setTimeout(resolve, 2000));
       
-      deductFunds(numericAmount, `Sent to ${selectedRecipient?.name}`, "spray");
+      debitWallet("NGN", numericAmount, `Sent to ${selectedRecipient?.name}`, "send");
       
       setStep("success");
     } catch (error) {
