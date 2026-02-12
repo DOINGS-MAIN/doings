@@ -1,123 +1,180 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Shield, Upload, Check, Clock, AlertCircle, Camera, FileText, User, CreditCard } from "lucide-react";
+import {
+  Shield,
+  Check,
+  Clock,
+  AlertCircle,
+  Camera,
+  Phone,
+  Mail,
+  CreditCard,
+  Fingerprint,
+  ChevronRight,
+  Lock,
+} from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { useBankAccounts } from "@/hooks/useBankAccounts";
 import { toast } from "sonner";
+import { KYCLevel, KYC_GATES } from "@/types/finance";
 
 interface KYCVerificationSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  currentLevel: KYCLevel;
+  onVerifyLevel1: (phone: string, email: string, fullName: string) => Promise<boolean>;
+  onVerifyLevel2: (bvn: string, dateOfBirth: string) => Promise<{ success: boolean; message: string }>;
+  onVerifyLevel3: (nin: string, selfieBase64: string) => Promise<{ success: boolean; message: string; confidence?: number }>;
 }
 
-type KYCStep = "intro" | "personal" | "document" | "selfie" | "review" | "submitted";
+type Step = "overview" | "level1" | "level2" | "level3" | "processing" | "success";
 
-interface KYCData {
-  fullName: string;
-  bvn: string;
-  dateOfBirth: string;
-  address: string;
-  documentType: "nin" | "passport" | "drivers_license" | "";
-  documentUploaded: boolean;
-  selfieUploaded: boolean;
-}
+export const KYCVerificationSheet = ({
+  open,
+  onOpenChange,
+  currentLevel,
+  onVerifyLevel1,
+  onVerifyLevel2,
+  onVerifyLevel3,
+}: KYCVerificationSheetProps) => {
+  const [step, setStep] = useState<Step>("overview");
+  const [isProcessing, setIsProcessing] = useState(false);
 
-export const KYCVerificationSheet = ({ open, onOpenChange }: KYCVerificationSheetProps) => {
-  const { kycStatus, submitKYC } = useBankAccounts();
-  const [step, setStep] = useState<KYCStep>("intro");
-  const [kycData, setKycData] = useState<KYCData>({
-    fullName: "",
-    bvn: "",
-    dateOfBirth: "",
-    address: "",
-    documentType: "",
-    documentUploaded: false,
-    selfieUploaded: false,
-  });
+  // Level 1 fields
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [otp, setOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
 
-  const getProgress = () => {
-    switch (step) {
-      case "intro": return 0;
-      case "personal": return 25;
-      case "document": return 50;
-      case "selfie": return 75;
-      case "review": return 90;
-      case "submitted": return 100;
-      default: return 0;
+  // Level 2 fields
+  const [bvn, setBvn] = useState("");
+  const [dateOfBirth, setDateOfBirth] = useState("");
+
+  // Level 3 fields
+  const [nin, setNin] = useState("");
+  const [selfieUploaded, setSelfieUploaded] = useState(false);
+  const [confidence, setConfidence] = useState<number | null>(null);
+
+  const handleSendOtp = () => {
+    if (!phone || phone.length < 10) {
+      toast.error("Enter a valid phone number");
+      return;
+    }
+    setOtpSent(true);
+    toast.success("OTP sent to your phone!");
+  };
+
+  const handleVerifyLevel1 = async () => {
+    if (otp.length !== 6) {
+      toast.error("Enter the 6-digit OTP");
+      return;
+    }
+    setIsProcessing(true);
+    setStep("processing");
+    try {
+      await onVerifyLevel1(phone, email, fullName);
+      setStep("success");
+      toast.success("Level 1 verified! 🎉");
+    } catch {
+      toast.error("Verification failed");
+      setStep("level1");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
-  const handleSubmit = () => {
-    submitKYC();
-    setStep("submitted");
-    toast.success("KYC submitted for verification!");
+  const handleVerifyLevel2 = async () => {
+    setIsProcessing(true);
+    setStep("processing");
+    try {
+      const result = await onVerifyLevel2(bvn, dateOfBirth);
+      if (result.success) {
+        setStep("success");
+        toast.success("BVN verified! Level 2 unlocked 🎉");
+      } else {
+        toast.error(result.message);
+        setStep("level2");
+      }
+    } catch {
+      toast.error("BVN verification failed");
+      setStep("level2");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
-  const simulateUpload = (type: "document" | "selfie") => {
-    toast.loading(`Uploading ${type}...`, { id: type });
+  const handleVerifyLevel3 = async () => {
+    setIsProcessing(true);
+    setStep("processing");
+    try {
+      const result = await onVerifyLevel3(nin, "mock-base64-selfie");
+      if (result.success) {
+        setConfidence(result.confidence || 0);
+        setStep("success");
+        toast.success(`Identity verified! Confidence: ${result.confidence}% 🎉`);
+      } else {
+        toast.error(result.message);
+        setStep("level3");
+      }
+    } catch {
+      toast.error("Identity verification failed");
+      setStep("level3");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const simulateSelfie = () => {
+    toast.loading("Capturing selfie...", { id: "selfie" });
     setTimeout(() => {
-      setKycData((prev) => ({
-        ...prev,
-        [type === "document" ? "documentUploaded" : "selfieUploaded"]: true,
-      }));
-      toast.success(`${type === "document" ? "Document" : "Selfie"} uploaded!`, { id: type });
+      setSelfieUploaded(true);
+      toast.success("Selfie captured!", { id: "selfie" });
     }, 1500);
   };
 
-  // If already verified or pending
-  if (kycStatus === "verified") {
-    return (
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="h-[50vh] rounded-t-3xl bg-background">
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              className="w-20 h-20 rounded-full bg-green-500/20 flex items-center justify-center mb-4"
-            >
-              <Check className="w-10 h-10 text-green-500" />
-            </motion.div>
-            <h2 className="text-2xl font-bold mb-2">KYC Verified! ✓</h2>
-            <p className="text-muted-foreground">
-              Your identity has been verified. You can now withdraw funds.
-            </p>
-            <Button className="mt-6" onClick={() => onOpenChange(false)}>
-              Continue
-            </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
-    );
-  }
+  const resetAndClose = () => {
+    setStep("overview");
+    setOtp("");
+    setOtpSent(false);
+    setIsProcessing(false);
+    setConfidence(null);
+    setSelfieUploaded(false);
+    onOpenChange(false);
+  };
 
-  if (kycStatus === "pending") {
-    return (
-      <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="h-[50vh] rounded-t-3xl bg-background">
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-              className="w-20 h-20 rounded-full bg-primary/20 flex items-center justify-center mb-4"
-            >
-              <Clock className="w-10 h-10 text-primary" />
-            </motion.div>
-            <h2 className="text-2xl font-bold mb-2">Verification in Progress</h2>
-            <p className="text-muted-foreground">
-              We're reviewing your documents. This usually takes 24-48 hours.
-            </p>
-            <Button variant="outline" className="mt-6" onClick={() => onOpenChange(false)}>
-              Close
-            </Button>
-          </div>
-        </SheetContent>
-      </Sheet>
-    );
-  }
+  const levels = [
+    {
+      level: 1 as KYCLevel,
+      title: "Basic Verification",
+      subtitle: "Phone & Email OTP",
+      icon: Phone,
+      benefits: ["Receive in-app transfers", "View wallet & transactions"],
+      color: "text-secondary",
+      bgColor: "bg-secondary/20",
+    },
+    {
+      level: 2 as KYCLevel,
+      title: "BVN Verification",
+      subtitle: "Dojah Identity Check",
+      icon: CreditCard,
+      benefits: ["Fund NGN wallet (Monnify)", "Receive USDT", "Send money in-app"],
+      color: "text-primary",
+      bgColor: "bg-primary/20",
+    },
+    {
+      level: 3 as KYCLevel,
+      title: "Full Identity Verification",
+      subtitle: "NIN + Selfie Match",
+      icon: Fingerprint,
+      benefits: ["Withdraw NGN to bank", "Withdraw USDT externally", "Unlimited transactions"],
+      color: "text-accent",
+      bgColor: "bg-accent/20",
+    },
+  ];
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -128,95 +185,230 @@ export const KYCVerificationSheet = ({ open, onOpenChange }: KYCVerificationShee
             Identity Verification
           </SheetTitle>
           <SheetDescription>
-            Complete KYC to enable withdrawals
+            {currentLevel === 3
+              ? "Fully verified — all features unlocked"
+              : `Level ${currentLevel}/3 — Complete verification to unlock features`}
           </SheetDescription>
         </SheetHeader>
 
-        {/* Progress Bar */}
+        {/* Progress */}
         <div className="mb-6">
-          <Progress value={getProgress()} className="h-2" />
-          <p className="text-sm text-muted-foreground mt-2">Step {Math.ceil(getProgress() / 25)} of 4</p>
+          <Progress value={(currentLevel / 3) * 100} className="h-2" />
+          <div className="flex justify-between mt-2">
+            {[1, 2, 3].map((l) => (
+              <span
+                key={l}
+                className={`text-xs font-medium ${
+                  l <= currentLevel ? "text-primary" : "text-muted-foreground"
+                }`}
+              >
+                Level {l} {l <= currentLevel && "✓"}
+              </span>
+            ))}
+          </div>
         </div>
 
         <div className="overflow-y-auto max-h-[60vh] pb-6">
           <AnimatePresence mode="wait">
-            {/* Intro Step */}
-            {step === "intro" && (
+            {/* Overview */}
+            {step === "overview" && (
               <motion.div
-                key="intro"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="space-y-6"
-              >
-                <div className="text-center py-6">
-                  <div className="w-24 h-24 mx-auto rounded-full bg-primary/10 flex items-center justify-center mb-4">
-                    <Shield className="w-12 h-12 text-primary" />
-                  </div>
-                  <h3 className="text-xl font-bold mb-2">Verify Your Identity</h3>
-                  <p className="text-muted-foreground">
-                    To withdraw funds, we need to verify your identity as required by CBN regulations.
-                  </p>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center gap-3 p-3 rounded-xl bg-card border border-border">
-                    <User className="w-5 h-5 text-primary" />
-                    <div>
-                      <p className="font-medium">Personal Information</p>
-                      <p className="text-sm text-muted-foreground">Name, BVN, Date of Birth</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 p-3 rounded-xl bg-card border border-border">
-                    <FileText className="w-5 h-5 text-primary" />
-                    <div>
-                      <p className="font-medium">Valid ID Document</p>
-                      <p className="text-sm text-muted-foreground">NIN, Passport, or Driver's License</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 p-3 rounded-xl bg-card border border-border">
-                    <Camera className="w-5 h-5 text-primary" />
-                    <div>
-                      <p className="font-medium">Selfie Verification</p>
-                      <p className="text-sm text-muted-foreground">Take a photo holding your ID</p>
-                    </div>
-                  </div>
-                </div>
-
-                <Button className="w-full" size="lg" onClick={() => setStep("personal")}>
-                  Start Verification
-                </Button>
-              </motion.div>
-            )}
-
-            {/* Personal Info Step */}
-            {step === "personal" && (
-              <motion.div
-                key="personal"
+                key="overview"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
                 className="space-y-4"
               >
+                {levels.map((lvl) => {
+                  const completed = currentLevel >= lvl.level;
+                  const isNext = currentLevel === lvl.level - 1;
+                  const locked = currentLevel < lvl.level - 1;
+
+                  return (
+                    <motion.button
+                      key={lvl.level}
+                      onClick={() => {
+                        if (completed) return;
+                        if (locked) {
+                          toast.info(`Complete Level ${lvl.level - 1} first`);
+                          return;
+                        }
+                        setStep(`level${lvl.level}` as Step);
+                      }}
+                      className={`w-full p-4 rounded-2xl border-2 text-left transition-all ${
+                        completed
+                          ? "border-success/50 bg-success/5"
+                          : isNext
+                          ? "border-primary/50 bg-primary/5 hover:border-primary"
+                          : "border-border bg-card opacity-60"
+                      }`}
+                      whileHover={isNext ? { scale: 1.01 } : {}}
+                      whileTap={isNext ? { scale: 0.99 } : {}}
+                    >
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className={`w-12 h-12 rounded-xl ${lvl.bgColor} flex items-center justify-center`}>
+                          {completed ? (
+                            <Check className="w-6 h-6 text-success" />
+                          ) : locked ? (
+                            <Lock className="w-6 h-6 text-muted-foreground" />
+                          ) : (
+                            <lvl.icon className={`w-6 h-6 ${lvl.color}`} />
+                          )}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-foreground">{lvl.title}</h3>
+                            {completed && (
+                              <span className="text-xs bg-success/20 text-success px-2 py-0.5 rounded-full">
+                                Verified
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-muted-foreground">{lvl.subtitle}</p>
+                        </div>
+                        {isNext && <ChevronRight className="w-5 h-5 text-primary" />}
+                      </div>
+                      <div className="space-y-1 ml-15">
+                        {lvl.benefits.map((b) => (
+                          <p key={b} className="text-xs text-muted-foreground flex items-center gap-1">
+                            <span className={completed ? "text-success" : "text-muted-foreground"}>
+                              {completed ? "✓" : "•"}
+                            </span>
+                            {b}
+                          </p>
+                        ))}
+                      </div>
+                    </motion.button>
+                  );
+                })}
+
+                {currentLevel === 3 && (
+                  <div className="text-center py-4">
+                    <p className="text-success font-bold text-lg">🎉 Fully Verified!</p>
+                    <p className="text-muted-foreground text-sm">All features are unlocked</p>
+                  </div>
+                )}
+              </motion.div>
+            )}
+
+            {/* Level 1: Phone + Email */}
+            {step === "level1" && (
+              <motion.div
+                key="level1"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-4"
+              >
+                <div className="text-center mb-4">
+                  <div className="w-16 h-16 mx-auto rounded-full bg-secondary/20 flex items-center justify-center mb-3">
+                    <Phone className="w-8 h-8 text-secondary" />
+                  </div>
+                  <h3 className="font-bold text-lg">Basic Verification</h3>
+                  <p className="text-sm text-muted-foreground">Verify your phone number and email</p>
+                </div>
+
                 <div className="space-y-2">
-                  <Label>Full Legal Name</Label>
+                  <Label>Full Name</Label>
                   <Input
-                    placeholder="As it appears on your ID"
-                    value={kycData.fullName}
-                    onChange={(e) => setKycData({ ...kycData, fullName: e.target.value })}
+                    placeholder="Your full name"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Phone Number</Label>
+                  <Input
+                    type="tel"
+                    placeholder="+234 800 000 0000"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Email Address</Label>
+                  <Input
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+
+                {!otpSent ? (
+                  <Button
+                    className="w-full"
+                    onClick={handleSendOtp}
+                    disabled={!phone || !email || !fullName}
+                  >
+                    <Mail className="w-4 h-4 mr-2" />
+                    Send OTP
+                  </Button>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Enter OTP</Label>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="000000"
+                        value={otp}
+                        onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                        maxLength={6}
+                        className="text-center text-2xl tracking-[0.5em] font-bold"
+                      />
+                      <p className="text-xs text-muted-foreground text-center">
+                        Demo: enter any 6 digits
+                      </p>
+                    </div>
+                    <Button className="w-full" onClick={handleVerifyLevel1} disabled={otp.length !== 6}>
+                      Verify
+                    </Button>
+                  </>
+                )}
+
+                <Button variant="ghost" className="w-full" onClick={() => setStep("overview")}>
+                  Back
+                </Button>
+              </motion.div>
+            )}
+
+            {/* Level 2: BVN */}
+            {step === "level2" && (
+              <motion.div
+                key="level2"
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -20 }}
+                className="space-y-4"
+              >
+                <div className="text-center mb-4">
+                  <div className="w-16 h-16 mx-auto rounded-full bg-primary/20 flex items-center justify-center mb-3">
+                    <CreditCard className="w-8 h-8 text-primary" />
+                  </div>
+                  <h3 className="font-bold text-lg">BVN Verification</h3>
+                  <p className="text-sm text-muted-foreground">
+                    We'll validate your BVN with Dojah to unlock funding
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-xl bg-primary/10 border border-primary/20">
+                  <p className="text-xs text-muted-foreground flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-primary" />
+                    Your BVN is only used for identity verification and is never stored
+                  </p>
                 </div>
 
                 <div className="space-y-2">
                   <Label>BVN (Bank Verification Number)</Label>
                   <Input
-                    type="tel"
+                    type="text"
+                    inputMode="numeric"
                     placeholder="Enter your 11-digit BVN"
-                    value={kycData.bvn}
-                    onChange={(e) => {
-                      const value = e.target.value.replace(/\D/g, "").slice(0, 11);
-                      setKycData({ ...kycData, bvn: value });
-                    }}
+                    value={bvn}
+                    onChange={(e) => setBvn(e.target.value.replace(/\D/g, "").slice(0, 11))}
                     maxLength={11}
                   />
                 </div>
@@ -225,226 +417,115 @@ export const KYCVerificationSheet = ({ open, onOpenChange }: KYCVerificationShee
                   <Label>Date of Birth</Label>
                   <Input
                     type="date"
-                    value={kycData.dateOfBirth}
-                    onChange={(e) => setKycData({ ...kycData, dateOfBirth: e.target.value })}
+                    value={dateOfBirth}
+                    onChange={(e) => setDateOfBirth(e.target.value)}
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Residential Address</Label>
-                  <Input
-                    placeholder="Your current address"
-                    value={kycData.address}
-                    onChange={(e) => setKycData({ ...kycData, address: e.target.value })}
-                  />
-                </div>
+                <Button
+                  className="w-full"
+                  onClick={handleVerifyLevel2}
+                  disabled={bvn.length !== 11 || !dateOfBirth}
+                >
+                  Verify BVN
+                </Button>
 
-                <div className="flex gap-3 pt-4">
-                  <Button variant="outline" className="flex-1" onClick={() => setStep("intro")}>
-                    Back
-                  </Button>
-                  <Button
-                    className="flex-1"
-                    disabled={!kycData.fullName || kycData.bvn.length !== 11 || !kycData.dateOfBirth}
-                    onClick={() => setStep("document")}
-                  >
-                    Continue
-                  </Button>
-                </div>
+                <Button variant="ghost" className="w-full" onClick={() => setStep("overview")}>
+                  Back
+                </Button>
               </motion.div>
             )}
 
-            {/* Document Step */}
-            {step === "document" && (
+            {/* Level 3: NIN + Selfie */}
+            {step === "level3" && (
               <motion.div
-                key="document"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="space-y-4"
-              >
-                <h3 className="font-semibold">Select ID Type</h3>
-                <div className="grid grid-cols-3 gap-3">
-                  {[
-                    { type: "nin", label: "NIN Slip", icon: CreditCard },
-                    { type: "passport", label: "Passport", icon: FileText },
-                    { type: "drivers_license", label: "Driver's License", icon: CreditCard },
-                  ].map(({ type, label, icon: Icon }) => (
-                    <button
-                      key={type}
-                      onClick={() => setKycData({ ...kycData, documentType: type as "nin" | "passport" | "drivers_license" })}
-                      className={`p-4 rounded-xl border-2 transition-all ${
-                        kycData.documentType === type
-                          ? "border-primary bg-primary/10"
-                          : "border-border bg-card hover:border-primary/50"
-                      }`}
-                    >
-                      <Icon className="w-8 h-8 mx-auto mb-2" />
-                      <p className="text-xs font-medium">{label}</p>
-                    </button>
-                  ))}
-                </div>
-
-                {kycData.documentType && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="space-y-4"
-                  >
-                    <div className="p-6 rounded-2xl border-2 border-dashed border-border bg-card/50 text-center">
-                      {kycData.documentUploaded ? (
-                        <div className="flex flex-col items-center">
-                          <Check className="w-12 h-12 text-green-500 mb-2" />
-                          <p className="font-medium text-green-500">Document Uploaded</p>
-                        </div>
-                      ) : (
-                        <>
-                          <Upload className="w-12 h-12 mx-auto text-muted-foreground mb-2" />
-                          <p className="font-medium mb-1">Upload Document Photo</p>
-                          <p className="text-sm text-muted-foreground mb-4">
-                            Make sure all details are clearly visible
-                          </p>
-                          <Button onClick={() => simulateUpload("document")}>
-                            <Camera className="w-4 h-4 mr-2" />
-                            Take Photo
-                          </Button>
-                        </>
-                      )}
-                    </div>
-                  </motion.div>
-                )}
-
-                <div className="flex gap-3 pt-4">
-                  <Button variant="outline" className="flex-1" onClick={() => setStep("personal")}>
-                    Back
-                  </Button>
-                  <Button
-                    className="flex-1"
-                    disabled={!kycData.documentUploaded}
-                    onClick={() => setStep("selfie")}
-                  >
-                    Continue
-                  </Button>
-                </div>
-              </motion.div>
-            )}
-
-            {/* Selfie Step */}
-            {step === "selfie" && (
-              <motion.div
-                key="selfie"
+                key="level3"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
                 className="space-y-4"
               >
                 <div className="text-center mb-4">
-                  <h3 className="font-semibold mb-1">Selfie Verification</h3>
+                  <div className="w-16 h-16 mx-auto rounded-full bg-accent/20 flex items-center justify-center mb-3">
+                    <Fingerprint className="w-8 h-8 text-accent" />
+                  </div>
+                  <h3 className="font-bold text-lg">Full Identity Verification</h3>
                   <p className="text-sm text-muted-foreground">
-                    Take a clear selfie holding your ID next to your face
+                    NIN + selfie biometric match via Dojah
                   </p>
                 </div>
 
+                <div className="space-y-2">
+                  <Label>NIN (National Identification Number)</Label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="Enter your 11-digit NIN"
+                    value={nin}
+                    onChange={(e) => setNin(e.target.value.replace(/\D/g, "").slice(0, 11))}
+                    maxLength={11}
+                  />
+                </div>
+
                 <div className="p-6 rounded-2xl border-2 border-dashed border-border bg-card/50 text-center">
-                  {kycData.selfieUploaded ? (
+                  {selfieUploaded ? (
                     <div className="flex flex-col items-center">
-                      <Check className="w-12 h-12 text-green-500 mb-2" />
-                      <p className="font-medium text-green-500">Selfie Uploaded</p>
+                      <Check className="w-12 h-12 text-success mb-2" />
+                      <p className="font-medium text-success">Selfie Captured</p>
                     </div>
                   ) : (
                     <>
-                      <div className="w-24 h-24 mx-auto rounded-full bg-muted flex items-center justify-center mb-4">
+                      <div className="w-20 h-20 mx-auto rounded-full bg-muted flex items-center justify-center mb-3">
                         <Camera className="w-10 h-10 text-muted-foreground" />
                       </div>
                       <p className="font-medium mb-1">Take a Selfie</p>
                       <p className="text-sm text-muted-foreground mb-4">
-                        Hold your ID next to your face and look at the camera
+                        Look directly at the camera
                       </p>
-                      <Button onClick={() => simulateUpload("selfie")}>
+                      <Button onClick={simulateSelfie}>
                         <Camera className="w-4 h-4 mr-2" />
-                        Take Selfie
+                        Capture Selfie
                       </Button>
                     </>
                   )}
                 </div>
 
-                <div className="p-3 rounded-xl bg-primary/10 text-sm">
-                  <p className="flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4" />
-                    <span>Make sure your face and ID are clearly visible</span>
-                  </p>
-                </div>
+                <Button
+                  className="w-full"
+                  onClick={handleVerifyLevel3}
+                  disabled={nin.length !== 11 || !selfieUploaded}
+                >
+                  Verify Identity
+                </Button>
 
-                <div className="flex gap-3 pt-4">
-                  <Button variant="outline" className="flex-1" onClick={() => setStep("document")}>
-                    Back
-                  </Button>
-                  <Button
-                    className="flex-1"
-                    disabled={!kycData.selfieUploaded}
-                    onClick={() => setStep("review")}
-                  >
-                    Review
-                  </Button>
-                </div>
+                <Button variant="ghost" className="w-full" onClick={() => setStep("overview")}>
+                  Back
+                </Button>
               </motion.div>
             )}
 
-            {/* Review Step */}
-            {step === "review" && (
+            {/* Processing */}
+            {step === "processing" && (
               <motion.div
-                key="review"
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="space-y-4"
+                key="processing"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex flex-col items-center justify-center py-16"
               >
-                <h3 className="font-semibold">Review Your Information</h3>
-
-                <div className="space-y-3">
-                  <div className="p-4 rounded-xl bg-card border border-border">
-                    <p className="text-sm text-muted-foreground mb-1">Full Name</p>
-                    <p className="font-medium">{kycData.fullName}</p>
-                  </div>
-                  <div className="p-4 rounded-xl bg-card border border-border">
-                    <p className="text-sm text-muted-foreground mb-1">BVN</p>
-                    <p className="font-medium">{kycData.bvn.replace(/(\d{4})(\d{4})(\d{3})/, "$1****$3")}</p>
-                  </div>
-                  <div className="p-4 rounded-xl bg-card border border-border">
-                    <p className="text-sm text-muted-foreground mb-1">Date of Birth</p>
-                    <p className="font-medium">{new Date(kycData.dateOfBirth).toLocaleDateString()}</p>
-                  </div>
-                  <div className="p-4 rounded-xl bg-card border border-border">
-                    <p className="text-sm text-muted-foreground mb-1">Document Type</p>
-                    <p className="font-medium capitalize">{kycData.documentType.replace("_", " ")}</p>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="flex-1 p-4 rounded-xl bg-green-500/10 border border-green-500/30 text-center">
-                      <Check className="w-6 h-6 text-green-500 mx-auto mb-1" />
-                      <p className="text-sm font-medium text-green-500">ID Uploaded</p>
-                    </div>
-                    <div className="flex-1 p-4 rounded-xl bg-green-500/10 border border-green-500/30 text-center">
-                      <Check className="w-6 h-6 text-green-500 mx-auto mb-1" />
-                      <p className="text-sm font-medium text-green-500">Selfie Uploaded</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex gap-3 pt-4">
-                  <Button variant="outline" className="flex-1" onClick={() => setStep("selfie")}>
-                    Back
-                  </Button>
-                  <Button className="flex-1" onClick={handleSubmit}>
-                    Submit for Verification
-                  </Button>
-                </div>
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                  className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full mb-6"
+                />
+                <p className="text-xl font-bold">Verifying with Dojah...</p>
+                <p className="text-muted-foreground text-sm">This may take a few seconds</p>
               </motion.div>
             )}
 
-            {/* Submitted Step */}
-            {step === "submitted" && (
+            {/* Success */}
+            {step === "success" && (
               <motion.div
-                key="submitted"
+                key="success"
                 initial={{ opacity: 0, scale: 0.9 }}
                 animate={{ opacity: 1, scale: 1 }}
                 className="flex flex-col items-center justify-center py-12 text-center"
@@ -453,17 +534,20 @@ export const KYCVerificationSheet = ({ open, onOpenChange }: KYCVerificationShee
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
                   transition={{ type: "spring", delay: 0.2 }}
-                  className="w-24 h-24 rounded-full bg-green-500/20 flex items-center justify-center mb-4"
+                  className="w-24 h-24 rounded-full bg-success/20 flex items-center justify-center mb-4"
                 >
-                  <Check className="w-12 h-12 text-green-500" />
+                  <Check className="w-12 h-12 text-success" />
                 </motion.div>
-                <h3 className="text-2xl font-bold mb-2">Submitted! 🎉</h3>
-                <p className="text-muted-foreground mb-6">
-                  Your verification is being processed. We'll notify you once it's complete.
+                <h3 className="text-2xl font-bold mb-2">Verification Complete! 🎉</h3>
+                <p className="text-muted-foreground mb-2">
+                  You're now at Level {currentLevel}
                 </p>
-                <Button onClick={() => onOpenChange(false)}>
-                  Done
-                </Button>
+                {confidence && (
+                  <p className="text-sm text-success mb-4">
+                    Biometric confidence: {confidence}%
+                  </p>
+                )}
+                <Button onClick={resetAndClose}>Continue</Button>
               </motion.div>
             )}
           </AnimatePresence>
