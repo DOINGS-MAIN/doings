@@ -12,6 +12,25 @@ dist
 dist-ssr
 *.local
 
+# Environment variables
+.env
+.env.*
+.env.local
+.env.production
+.env.staging
+
+# Supabase local
+supabase/.temp/
+
+# Local-only docs (architecture specs, deploy checklists)
+public/docs/
+supabase/EXECUTION_PLAN.md
+supabase/LIVE_DEPLOY_AND_INTEGRATION_TEST.md
+
+# Bun lockfile (using npm)
+bun.lock
+bun.lockb
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
