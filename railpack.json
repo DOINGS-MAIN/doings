@@ -1,13 +1,3 @@
 {
-  "steps": {
-    "install": {
-      "commands": ["npm install"]
-    },
-    "build": {
-      "commands": ["npm run build"]
-    }
-  },
-  "start": {
-    "command": "npx serve dist -s -l $PORT"
-  }
+  "provider": "node"
 }
