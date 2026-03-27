@@ -1,7 +1,7 @@
 {
   "steps": {
     "install": {
-      "commands": ["npm ci"]
+      "commands": ["npm install"]
     },
     "build": {
       "commands": ["npm run build"]
