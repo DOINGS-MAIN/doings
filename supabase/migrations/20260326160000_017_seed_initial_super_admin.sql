@@ -1,0 +1,11 @@
+-- Migration 017: Seed Initial Super Admin
+-- ================================================
+-- Fill this manually after creating the auth user.
+-- Example:
+--
+-- INSERT INTO public.admin_roles (user_id, role, status)
+-- VALUES (
+--   '<AUTH_USER_UUID_HERE>',
+--   'super_admin',
+--   'active'
+-- );

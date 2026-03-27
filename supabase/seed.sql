@@ -1,0 +1,2 @@
+-- Seed placeholder.
+-- Add local seed data when needed.
