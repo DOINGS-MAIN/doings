@@ -1,5 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
-import { hmacHex } from "../_shared/crypto.ts";
+import { sha512Hex } from "../_shared/crypto.ts";
 import { getServiceClient } from "../_shared/db.ts";
 import { isSamePersonName } from "../_shared/name-match.ts";
 import { insertWebhookLog, markWebhookProcessed } from "../_shared/webhook.ts";
@@ -32,14 +32,14 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return withCors({ error: "Method not allowed" }, { status: 405 });
 
-  const secret = Deno.env.get("MONNIFY_WEBHOOK_SECRET") ?? "";
-  if (!secret) return withCors({ error: "MONNIFY_WEBHOOK_SECRET not configured" }, { status: 500 });
+  const clientSecret = Deno.env.get("MONNIFY_SECRET_KEY") ?? "";
+  if (!clientSecret) return withCors({ error: "MONNIFY_SECRET_KEY not configured" }, { status: 500 });
 
-  const signature = req.headers.get("x-monnify-signature");
-  if (!signature) return withCors({ error: "Missing x-monnify-signature header" }, { status: 400 });
+  const signature = req.headers.get("monnify-signature");
+  if (!signature) return withCors({ error: "Missing monnify-signature header" }, { status: 400 });
 
   const raw = await req.text();
-  const expected = await hmacHex("SHA-512", secret, raw);
+  const expected = await sha512Hex(clientSecret + raw);
   const signatureValid = signature.toLowerCase() === expected.toLowerCase();
 
   let payload: Record<string, unknown>;
