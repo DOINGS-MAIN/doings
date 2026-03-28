@@ -12,8 +12,13 @@ export const supabase = createClient(
 );
 
 async function authHeaders(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  let { data: { session } } = await supabase.auth.getSession();
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (session?.refresh_token && session.expires_at != null && session.expires_at <= nowSec + 120) {
+    const { data, error } = await supabase.auth.refreshSession();
+    if (!error && data.session) session = data.session;
+  }
+  const token = session?.access_token;
   return token
     ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
     : { "Content-Type": "application/json" };
@@ -41,8 +46,20 @@ async function invoke<T = unknown>(fnName: string, options?: {
     body: options?.body ? JSON.stringify(options.body) : undefined,
   });
 
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? `Request failed: ${res.status}`);
+  let data: Record<string, unknown>;
+  try {
+    data = (await res.json()) as Record<string, unknown>;
+  } catch {
+    throw new Error(`Request failed: ${res.status}`);
+  }
+  if (!res.ok) {
+    const msg =
+      (typeof data.error === "string" && data.error) ||
+      (typeof data.message === "string" && data.message) ||
+      (typeof data.msg === "string" && data.msg) ||
+      `Request failed: ${res.status}`;
+    throw new Error(msg);
+  }
   return data as T;
 }
 
@@ -95,8 +112,16 @@ export const events = {
   list: () => invoke("events", { method: "GET" }),
   getById: (id: string) => invoke("events", { method: "GET", path: id }),
   getByCode: (code: string) => invoke("events", { method: "GET", path: `code/${code}` }),
-  create: (data: { title: string; type: string; scheduled_start?: string; scheduled_end?: string; max_participants?: number; is_public?: boolean }) =>
-    invoke("events", { body: data }),
+  create: (data: {
+    title: string;
+    type: string;
+    description?: string;
+    location?: string;
+    scheduled_start?: string;
+    scheduled_end?: string;
+    max_participants?: number;
+    is_public?: boolean;
+  }) => invoke("events", { body: data }),
   update: (id: string, data: Record<string, unknown>) =>
     invoke("events", { method: "PUT", path: id, body: data }),
   goLive: (id: string) => invoke("events", { method: "POST", path: `${id}/go-live` }),

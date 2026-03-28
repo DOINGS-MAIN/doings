@@ -27,19 +27,36 @@ Deno.serve(async (req) => {
   if (method === "POST" && !path) {
     if (user.kyc_level < 1) return withCors({ error: "KYC level 1 required" }, { status: 403 });
 
-    const body = await req.json();
+    const body = (await req.json()) as Record<string, unknown>;
+    let event_date: string | null = (body.event_date as string) ?? null;
+    let event_time: string | null = (body.event_time as string) ?? null;
+    let scheduled_at: string | null = (body.scheduled_at as string) ?? null;
+    const scheduledStart = body.scheduled_start as string | undefined;
+    if (scheduledStart) {
+      const d = new Date(scheduledStart);
+      if (!Number.isNaN(d.getTime())) {
+        scheduled_at = d.toISOString();
+        const [datePart, timePart] = scheduledStart.split("T");
+        if (datePart) event_date = datePart;
+        if (timePart) event_time = timePart.split(".")[0].slice(0, 8);
+      }
+    }
+    const is_private =
+      typeof body.is_public === "boolean" ? !body.is_public : Boolean(body.is_private);
+
     const { data: event, error } = await supabase
       .from("events")
       .insert({
         host_id: user.id,
-        title: body.title,
-        type: body.type,
-        description: body.description ?? null,
-        location: body.location ?? null,
-        event_date: body.event_date ?? null,
-        event_time: body.event_time ?? null,
-        is_private: body.is_private ?? false,
-        max_participants: body.max_participants ?? null,
+        title: body.title as string,
+        type: body.type as string,
+        description: (body.description as string) ?? null,
+        location: (body.location as string) ?? null,
+        event_date,
+        event_time,
+        scheduled_at,
+        is_private,
+        max_participants: (body.max_participants as number) ?? null,
       })
       .select()
       .single();

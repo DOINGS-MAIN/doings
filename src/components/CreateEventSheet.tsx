@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Calendar, Clock, MapPin, Users, Lock, Globe, ChevronRight, Sparkles } from "lucide-react";
+import { X, Calendar, Clock, MapPin, Users, Lock, Globe, ChevronRight, Sparkles, Loader2 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,6 +26,7 @@ const eventTypes = [
 
 export const CreateEventSheet = ({ isOpen, onClose, onCreateEvent }: CreateEventSheetProps) => {
   const [step, setStep] = useState(1);
+  const [creating, setCreating] = useState(false);
   const [formData, setFormData] = useState({
     title: "",
     type: "party" as EventData["type"],
@@ -57,33 +58,42 @@ export const CreateEventSheet = ({ isOpen, onClose, onCreateEvent }: CreateEvent
   };
 
   const handleCreate = async () => {
-    const event = await onCreateEvent({
-      ...formData,
-      hostId: "current-user",
-      hostName: "You",
-      status: "draft",
-    });
-    
-    toast.success(
-      <div className="flex flex-col gap-1">
-        <span className="font-bold">Event Created! 🎉</span>
-        <span className="text-sm">Event code: <span className="font-mono font-bold">{event.eventCode}</span></span>
-      </div>
-    );
-    
-    // Reset form
-    setFormData({
-      title: "",
-      type: "party",
-      description: "",
-      location: "",
-      date: "",
-      time: "",
-      isPrivate: false,
-      maxParticipants: undefined,
-    });
-    setStep(1);
-    onClose();
+    setCreating(true);
+    try {
+      const event = await onCreateEvent({
+        ...formData,
+        hostId: "current-user",
+        hostName: "You",
+        status: "draft",
+      });
+
+      toast.success(
+        <div className="flex flex-col gap-1">
+          <span className="font-bold">Event Created! 🎉</span>
+          <span className="text-sm">
+            Event code: <span className="font-mono font-bold">{event.eventCode}</span>
+          </span>
+        </div>
+      );
+
+      setFormData({
+        title: "",
+        type: "party",
+        description: "",
+        location: "",
+        date: "",
+        time: "",
+        isPrivate: false,
+        maxParticipants: undefined,
+      });
+      setStep(1);
+      onClose();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : "Could not create event";
+      toast.error(message, { duration: 6000 });
+    } finally {
+      setCreating(false);
+    }
   };
 
   const renderStep = () => {
@@ -118,11 +128,10 @@ export const CreateEventSheet = ({ isOpen, onClose, onCreateEvent }: CreateEvent
                   <motion.button
                     key={type.id}
                     onClick={() => setFormData({ ...formData, type: type.id as EventData["type"] })}
-                    className={`flex flex-col items-center gap-1 p-3 rounded-xl border transition-all ${
-                      formData.type === type.id
+                    className={`flex flex-col items-center gap-1 p-3 rounded-xl border transition-all ${formData.type === type.id
                         ? "bg-primary/20 border-primary"
                         : "bg-white/5 border-white/10 hover:bg-white/10"
-                    }`}
+                      }`}
                     whileTap={{ scale: 0.95 }}
                   >
                     <span className="text-2xl">{type.emoji}</span>
@@ -291,9 +300,8 @@ export const CreateEventSheet = ({ isOpen, onClose, onCreateEvent }: CreateEvent
               {[1, 2, 3].map((s) => (
                 <div
                   key={s}
-                  className={`w-8 h-1 rounded-full transition-colors ${
-                    s <= step ? "bg-primary" : "bg-white/20"
-                  }`}
+                  className={`w-8 h-1 rounded-full transition-colors ${s <= step ? "bg-primary" : "bg-white/20"
+                    }`}
                 />
               ))}
             </div>
@@ -326,15 +334,23 @@ export const CreateEventSheet = ({ isOpen, onClose, onCreateEvent }: CreateEvent
             )}
             <motion.button
               onClick={step === 3 ? handleCreate : handleNext}
-              className="flex-1 py-3 rounded-xl font-bold bg-gradient-to-r from-primary to-accent text-primary-foreground flex items-center justify-center gap-2"
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
+              disabled={creating}
+              className="flex-1 py-3 rounded-xl font-bold bg-gradient-to-r from-primary to-accent text-primary-foreground flex items-center justify-center gap-2 disabled:opacity-60 disabled:pointer-events-none"
+              whileHover={{ scale: creating ? 1 : 1.02 }}
+              whileTap={{ scale: creating ? 1 : 0.98 }}
             >
               {step === 3 ? (
-                <>
-                  <Sparkles className="w-5 h-5" />
-                  Create Event
-                </>
+                creating ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    Creating…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-5 h-5" />
+                    Create Event
+                  </>
+                )
               ) : (
                 <>
                   Continue
