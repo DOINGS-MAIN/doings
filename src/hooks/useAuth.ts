@@ -27,35 +27,63 @@ export const useAuth = () => {
     initialized: false,
   });
 
-  const fetchProfile = useCallback(async (userId: string) => {
-    const { data } = await supabase
+  const fetchProfile = useCallback(async (authUserId: string) => {
+    const { data, error } = await supabase
       .from("users")
       .select("id, phone, full_name, kyc_level, status")
-      .eq("id", userId)
-      .single();
+      .eq("auth_id", authUserId)
+      .maybeSingle();
+    if (error) {
+      console.warn("useAuth: profile fetch failed", error.message);
+      return null;
+    }
     return data as UserProfile | null;
   }, []);
 
   useEffect(() => {
-    auth.getSession().then(async ({ data: { session } }) => {
-      let profile: UserProfile | null = null;
-      if (session?.user) {
-        profile = await fetchProfile(session.user.id);
-      }
-      setState({
-        session,
-        user: session?.user ?? null,
-        profile,
+    let cancelled = false;
+
+    const finishInit = (patch: Partial<AuthState>) => {
+      if (cancelled) return;
+      setState((prev) => ({
+        ...prev,
+        ...patch,
         loading: false,
         initialized: true,
+      }));
+    };
+
+    auth
+      .getSession()
+      .then(async ({ data: { session } }) => {
+        let profile: UserProfile | null = null;
+        try {
+          if (session?.user) {
+            profile = await fetchProfile(session.user.id);
+          }
+        } catch (e) {
+          console.warn("useAuth: getSession profile load error", e);
+        }
+        finishInit({
+          session,
+          user: session?.user ?? null,
+          profile,
+        });
+      })
+      .catch((e) => {
+        console.warn("useAuth: getSession failed", e);
+        finishInit({ session: null, user: null, profile: null });
       });
-    });
 
     const { data: { subscription } } = auth.onAuthStateChange(
       async (_event, session) => {
         let profile: UserProfile | null = null;
-        if (session?.user) {
-          profile = await fetchProfile(session.user.id);
+        try {
+          if (session?.user) {
+            profile = await fetchProfile(session.user.id);
+          }
+        } catch (e) {
+          console.warn("useAuth: onAuthStateChange profile load error", e);
         }
         setState((prev) => ({
           ...prev,
@@ -63,11 +91,15 @@ export const useAuth = () => {
           user: session?.user ?? null,
           profile,
           loading: false,
+          initialized: true,
         }));
       }
     );
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
   }, [fetchProfile]);
 
   const sendOtp = useCallback(async (phone: string) => {
@@ -100,6 +132,16 @@ export const useAuth = () => {
     setState((prev) => ({ ...prev, profile }));
   }, [state.user, fetchProfile]);
 
+  const updateProfile = useCallback(async (updates: { full_name?: string }) => {
+    if (!state.user) return;
+    const { error } = await supabase
+      .from("users")
+      .update(updates)
+      .eq("auth_id", state.user.id);
+    if (error) throw error;
+    await refreshProfile();
+  }, [state.user, refreshProfile]);
+
   return {
     session: state.session,
     user: state.user,
@@ -111,5 +153,6 @@ export const useAuth = () => {
     verifyOtp,
     signOut,
     refreshProfile,
+    updateProfile,
   };
 };

@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Home, Wallet, Gift, Bell, Sparkles, Trophy } from "lucide-react";
+import { Home, Wallet, Gift, User, Sparkles, Trophy } from "lucide-react";
 import { useState } from "react";
 
 const navItems = [
@@ -7,7 +7,7 @@ const navItems = [
   { icon: Sparkles, label: "Events", id: "events" },
   { icon: Trophy, label: "Gifters", id: "leaderboard" },
   { icon: Gift, label: "Gifts", id: "gifts" },
-  { icon: Bell, label: "Alerts", id: "notifications" },
+  { icon: User, label: "Profile", id: "profile" },
 ];
 
 interface BottomNavProps {

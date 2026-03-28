@@ -27,6 +27,7 @@ import { GiveawayDetailsSheet } from "@/components/GiveawayDetailsSheet";
 import { RedeemGiveawaySheet } from "@/components/RedeemGiveawaySheet";
 import { EventScreenDisplay } from "@/components/EventScreenDisplay";
 import { NotificationsScreen } from "@/components/NotificationsScreen";
+import { ProfileScreen } from "@/components/ProfileScreen";
 import { useAuth } from "@/hooks/useAuth";
 import { spray as sprayApi } from "@/lib/supabase";
 import { useMultiWallet } from "@/hooks/useMultiWallet";
@@ -34,11 +35,11 @@ import { useKYC } from "@/hooks/useKYC";
 import { useEvents, EventData } from "@/hooks/useEvents";
 import { useGiveaways, Giveaway } from "@/hooks/useGiveaways";
 import { toast } from "sonner";
-import { Plus, ChevronRight, Loader2 } from "lucide-react";
+import { Plus, ChevronRight, Loader2, Bell } from "lucide-react";
 import { Currency } from "@/types/finance";
 
 const Index = () => {
-  const { isAuthenticated, loading: authLoading, initialized, profile, sendOtp, verifyOtp } = useAuth();
+  const { isAuthenticated, loading: authLoading, initialized, profile, sendOtp, verifyOtp, signOut, updateProfile } = useAuth();
   const [activeTab, setActiveTab] = useState("home");
   const [showFundSheet, setShowFundSheet] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -81,6 +82,7 @@ const Index = () => {
   // Event Screen Display state
   const [showEventScreen, setShowEventScreen] = useState(false);
   const [eventScreenEvent, setEventScreenEvent] = useState<EventData | null>(null);
+  const [showNotifications, setShowNotifications] = useState(false);
 
   // Finance hooks
   const {
@@ -278,8 +280,29 @@ const Index = () => {
       case "leaderboard":
         return <LeaderboardScreen />;
 
-      case "notifications":
-        return <NotificationsScreen />;
+      case "profile":
+        return (
+          <ProfileScreen
+            avatarData={avatarData}
+            kycLevel={kycLevel}
+            ngnBalance={ngnBalance}
+            usdtBalance={usdtBalance}
+            userName={profile?.full_name || ""}
+            userPhone={profile?.phone || ""}
+            userId={profile?.id || ""}
+            onOpenAvatar={() => setShowAvatarCustomization(true)}
+            onOpenKYC={() => setShowKYC(true)}
+            onOpenBankAccounts={() => setShowBankAccounts(true)}
+            onOpenNotifications={() => setShowNotifications(true)}
+            onLogout={async () => {
+              await signOut();
+              toast.success("Logged out successfully");
+            }}
+            onUpdateName={async (name) => {
+              await updateProfile({ full_name: name });
+            }}
+          />
+        );
       
       case "home":
       default:
@@ -296,18 +319,29 @@ const Index = () => {
                 <p className="text-muted-foreground text-sm">Welcome back,</p>
                 <h1 className="text-2xl font-bold text-foreground">{profile?.full_name?.split(" ")[0] || "Champ"} 👋</h1>
               </div>
-              <motion.button
-                onClick={() => setShowAvatarCustomization(true)}
-                className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-xl font-bold text-primary-foreground overflow-hidden"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                {avatarData.photoUrl ? (
-                  <img src={avatarData.photoUrl} alt="Avatar" className="w-full h-full object-cover" />
-                ) : (
-                  "C"
-                )}
-              </motion.button>
+              <div className="flex items-center gap-2">
+                <motion.button
+                  onClick={() => setShowNotifications(true)}
+                  className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  title="Notifications"
+                >
+                  <Bell className="w-4 h-4 text-muted-foreground" />
+                </motion.button>
+                <motion.button
+                  onClick={() => setActiveTab("profile")}
+                  className="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center text-xl font-bold text-primary-foreground overflow-hidden"
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                >
+                  {avatarData.photoUrl ? (
+                    <img src={avatarData.photoUrl} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    (profile?.full_name?.[0] || "U").toUpperCase()
+                  )}
+                </motion.button>
+              </div>
             </motion.header>
 
             {/* KYC Banner */}
@@ -480,7 +514,7 @@ const Index = () => {
 
             <HeroSection />
             <FeatureCards />
-            <AuthFlow onComplete={handleAuthComplete} sendOtp={sendOtp} verifyOtp={verifyOtp} />
+            <AuthFlow onComplete={handleAuthComplete} sendOtp={sendOtp} verifyOtp={verifyOtp} updateProfile={updateProfile} existingName={profile?.full_name} />
           </motion.div>
         )}
 
@@ -683,6 +717,30 @@ const Index = () => {
         }}
         giveaways={getMyGiveaways()}
       />
+
+      {/* Notifications Overlay */}
+      <AnimatePresence>
+        {showNotifications && (
+          <motion.div
+            className="fixed inset-0 z-[60] bg-background"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+          >
+            <div className="flex items-center justify-between px-6 pt-12 pb-4">
+              <h1 className="text-2xl font-bold text-foreground">Notifications</h1>
+              <motion.button
+                onClick={() => setShowNotifications(false)}
+                className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-sm font-medium text-muted-foreground"
+                whileTap={{ scale: 0.95 }}
+              >
+                ✕
+              </motion.button>
+            </div>
+            <NotificationsScreen />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

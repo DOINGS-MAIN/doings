@@ -9,11 +9,14 @@ interface AuthFlowProps {
   onComplete?: () => void;
   sendOtp: (phone: string) => Promise<void>;
   verifyOtp: (phone: string, token: string) => Promise<unknown>;
+  updateProfile?: (updates: { full_name?: string }) => Promise<void>;
+  existingName?: string | null;
 }
 
-export const AuthFlow = ({ onComplete, sendOtp, verifyOtp }: AuthFlowProps) => {
-  const [step, setStep] = useState<"phone" | "otp" | "success">("phone");
+export const AuthFlow = ({ onComplete, sendOtp, verifyOtp, updateProfile, existingName }: AuthFlowProps) => {
+  const [step, setStep] = useState<"phone" | "otp" | "name" | "success">("phone");
   const [phone, setPhone] = useState("");
+  const [fullName, setFullName] = useState("");
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -71,20 +74,11 @@ export const AuthFlow = ({ onComplete, sendOtp, verifyOtp }: AuthFlowProps) => {
     setError("");
     try {
       await verifyOtp(phone, code);
-      setStep("success");
-
-      if (containerRef.current) {
-        gsap.to(containerRef.current, {
-          scale: 1.02,
-          duration: 0.2,
-          yoyo: true,
-          repeat: 1,
-        });
+      if (existingName) {
+        finishAuth();
+      } else {
+        setStep("name");
       }
-
-      setTimeout(() => {
-        onComplete?.();
-      }, 2000);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Invalid OTP");
       setOtp(["", "", "", "", "", ""]);
@@ -92,6 +86,36 @@ export const AuthFlow = ({ onComplete, sendOtp, verifyOtp }: AuthFlowProps) => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleNameSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fullName.trim()) return;
+    setLoading(true);
+    setError("");
+    try {
+      await updateProfile?.({ full_name: fullName.trim() });
+      finishAuth();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save name");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const finishAuth = () => {
+    setStep("success");
+    if (containerRef.current) {
+      gsap.to(containerRef.current, {
+        scale: 1.02,
+        duration: 0.2,
+        yoyo: true,
+        repeat: 1,
+      });
+    }
+    setTimeout(() => {
+      onComplete?.();
+    }, 2000);
   };
 
   const slideVariants = {
@@ -225,6 +249,59 @@ export const AuthFlow = ({ onComplete, sendOtp, verifyOtp }: AuthFlowProps) => {
             >
               Change phone number
             </button>
+          </motion.div>
+        )}
+
+        {step === "name" && (
+          <motion.div
+            key="name"
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.3 }}
+          >
+            <div className="flex items-center gap-3 mb-6">
+              <div className="bg-accent/20 p-3 rounded-2xl">
+                <span className="text-2xl">👤</span>
+              </div>
+              <div>
+                <h2 className="font-bold text-xl text-foreground">What's your name?</h2>
+                <p className="text-sm text-muted-foreground">So people know who's spraying</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleNameSubmit} className="space-y-4">
+              <Input
+                type="text"
+                placeholder="Full name"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                className="text-lg"
+                autoFocus
+              />
+
+              <Button
+                type="submit"
+                variant="hero"
+                size="lg"
+                className="w-full"
+                disabled={!fullName.trim() || loading}
+              >
+                {loading ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <>
+                    Let's Go!
+                    <ArrowRight className="w-5 h-5" />
+                  </>
+                )}
+              </Button>
+            </form>
+
+            {error && (
+              <p className="text-xs text-destructive text-center mt-3">{error}</p>
+            )}
           </motion.div>
         )}
 
