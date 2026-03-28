@@ -1,6 +1,21 @@
 import { useState, useEffect, useCallback } from "react";
-import { Session, User } from "@supabase/supabase-js";
-import { supabase, auth } from "@/lib/supabase";
+import type { Session, User } from "@supabase/supabase-js";
+import { supabase, auth, isSupabaseConfigured } from "@/lib/supabase";
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    promise
+      .then((v) => {
+        clearTimeout(t);
+        resolve(v);
+      })
+      .catch((e) => {
+        clearTimeout(t);
+        reject(e);
+      });
+  });
+}
 
 export interface UserProfile {
   id: string;
@@ -23,8 +38,8 @@ export const useAuth = () => {
     session: null,
     user: null,
     profile: null,
-    loading: true,
-    initialized: false,
+    loading: isSupabaseConfigured,
+    initialized: !isSupabaseConfigured,
   });
 
   const fetchProfile = useCallback(async (authUserId: string) => {
@@ -41,63 +56,60 @@ export const useAuth = () => {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
-    const finishInit = (patch: Partial<AuthState>) => {
-      if (cancelled) return;
-      setState((prev) => ({
-        ...prev,
-        ...patch,
+    if (!isSupabaseConfigured) {
+      setState({
+        session: null,
+        user: null,
+        profile: null,
         loading: false,
         initialized: true,
-      }));
-    };
-
-    auth
-      .getSession()
-      .then(async ({ data: { session } }) => {
-        let profile: UserProfile | null = null;
-        try {
-          if (session?.user) {
-            profile = await fetchProfile(session.user.id);
-          }
-        } catch (e) {
-          console.warn("useAuth: getSession profile load error", e);
-        }
-        finishInit({
-          session,
-          user: session?.user ?? null,
-          profile,
-        });
-      })
-      .catch((e) => {
-        console.warn("useAuth: getSession failed", e);
-        finishInit({ session: null, user: null, profile: null });
       });
+      return;
+    }
 
-    const { data: { subscription } } = auth.onAuthStateChange(
-      async (_event, session) => {
-        let profile: UserProfile | null = null;
-        try {
-          if (session?.user) {
-            profile = await fetchProfile(session.user.id);
-          }
-        } catch (e) {
-          console.warn("useAuth: onAuthStateChange profile load error", e);
-        }
-        setState((prev) => ({
-          ...prev,
-          session,
-          user: session?.user ?? null,
-          profile,
-          loading: false,
-          initialized: true,
-        }));
-      }
-    );
+    const PROFILE_TIMEOUT_MS = 12_000;
+
+    /**
+     * Never `await` network/PostgREST inside `onAuthStateChange` — it can block the GoTrue client
+     * so `getSession` never settles while a session exists in localStorage (infinite app loader).
+     * See: https://github.com/supabase/supabase-js/issues (auth callback must return quickly)
+     */
+    const { data: { subscription } } = auth.onAuthStateChange((_event, session) => {
+      const user = session?.user ?? null;
+
+      setState((prev) => ({
+        ...prev,
+        session,
+        user,
+        loading: false,
+        initialized: true,
+        profile: !user ? null : prev.user?.id === user.id ? prev.profile : null,
+      }));
+
+      if (!user) return;
+
+      void withTimeout(fetchProfile(user.id), PROFILE_TIMEOUT_MS, "fetchProfile")
+        .then((profile) => {
+          setState((prev) => {
+            if (prev.user?.id !== user.id) return prev;
+            return { ...prev, profile };
+          });
+        })
+        .catch((e) => {
+          console.warn("useAuth: profile load error", e);
+          setState((prev) => (prev.user?.id === user.id ? { ...prev, profile: null } : prev));
+        });
+    });
+
+    // Safety: if nothing is emitted (older clients), unblock the UI
+    const safety = window.setTimeout(() => {
+      setState((prev) =>
+        prev.initialized ? prev : { ...prev, loading: false, initialized: true }
+      );
+    }, PROFILE_TIMEOUT_MS + 2000);
 
     return () => {
-      cancelled = true;
+      window.clearTimeout(safety);
       subscription.unsubscribe();
     };
   }, [fetchProfile]);

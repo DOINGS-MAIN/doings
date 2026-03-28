@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useBankAccounts, NIGERIAN_BANKS, BankAccount } from "@/hooks/useBankAccounts";
+import { transfers } from "@/lib/supabase";
 import { toast } from "sonner";
 
 interface BankAccountsSheetProps {
@@ -30,27 +31,31 @@ export const BankAccountsSheet = ({ open, onOpenChange }: BankAccountsSheetProps
     if (!selectedBank || accountNumber.length !== 10) return;
 
     setIsVerifying(true);
-    // Simulate account verification
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    
-    // Generate a realistic name
-    const names = ["ADEBAYO JOHN OLUWASEUN", "CHIDINMA GRACE OKONKWO", "FATIMA MOHAMMED IBRAHIM", "EMMANUEL CHUKWUEMEKA OKAFOR"];
-    setAccountName(names[Math.floor(Math.random() * names.length)]);
-    setIsVerifying(false);
+    try {
+      const res = (await transfers.verifyBankAccount(selectedBank.code, accountNumber)) as {
+        account_name?: string;
+      };
+      if (res.account_name) setAccountName(res.account_name);
+      else toast.error("Could not resolve account name");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Verification failed");
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
-  const handleAddAccount = () => {
+  const handleAddAccount = async () => {
     if (!selectedBank || !accountNumber || !accountName) {
       toast.error("Please complete all fields");
       return;
     }
 
     try {
-      addBankAccount(selectedBank.code, accountNumber, accountName);
+      await addBankAccount(selectedBank.code, accountNumber, accountName);
       toast.success("Bank account added successfully!");
       resetForm();
     } catch (error) {
-      toast.error("Failed to add bank account");
+      toast.error(error instanceof Error ? error.message : "Failed to add bank account");
     }
   };
 
@@ -62,9 +67,13 @@ export const BankAccountsSheet = ({ open, onOpenChange }: BankAccountsSheetProps
     setBankSearch("");
   };
 
-  const handleDelete = (account: BankAccount) => {
-    removeBankAccount(account.id);
-    toast.success("Bank account removed");
+  const handleDelete = async (account: BankAccount) => {
+    try {
+      await removeBankAccount(account.id);
+      toast.success("Bank account removed");
+    } catch {
+      toast.error("Could not remove account");
+    }
   };
 
   return (
@@ -143,7 +152,14 @@ export const BankAccountsSheet = ({ open, onOpenChange }: BankAccountsSheetProps
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => setDefaultAccount(account.id)}
+                                onClick={async () => {
+                                  try {
+                                    await setDefaultAccount(account.id);
+                                    toast.success("Default account updated");
+                                  } catch {
+                                    toast.error("Could not update default");
+                                  }
+                                }}
                               >
                                 <Star className="w-4 h-4" />
                               </Button>

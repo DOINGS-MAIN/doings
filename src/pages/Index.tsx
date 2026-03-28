@@ -29,7 +29,7 @@ import { EventScreenDisplay } from "@/components/EventScreenDisplay";
 import { NotificationsScreen } from "@/components/NotificationsScreen";
 import { ProfileScreen } from "@/components/ProfileScreen";
 import { useAuth } from "@/hooks/useAuth";
-import { spray as sprayApi } from "@/lib/supabase";
+import { spray as sprayApi, isSupabaseConfigured } from "@/lib/supabase";
 import { useMultiWallet } from "@/hooks/useMultiWallet";
 import { useKYC } from "@/hooks/useKYC";
 import { useEvents, EventData } from "@/hooks/useEvents";
@@ -487,6 +487,11 @@ const Index = () => {
 
   return (
     <div className="min-h-screen relative overflow-x-hidden">
+      {!isSupabaseConfigured && (
+        <div className="relative z-[100] bg-destructive/20 text-destructive text-sm text-center px-4 py-3 border-b border-destructive/30">
+          This build has no Supabase URL/key. In Railway, set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY as variables and trigger a new deploy so they are present during the build step (Vite reads them at build time, not only at runtime).
+        </div>
+      )}
       {/* Floating money background */}
       <FloatingMoney count={15} />
 
