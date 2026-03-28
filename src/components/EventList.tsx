@@ -17,41 +17,8 @@ interface EventListProps {
   onJoinEvent?: (event: Event) => void;
 }
 
-const defaultEvents: Event[] = [
-  {
-    id: "demo-1",
-    title: "Ade & Bimpe Wedding",
-    type: "Wedding",
-    location: "Lagos, Nigeria",
-    participants: 234,
-    timeLeft: "Live Now",
-    emoji: "💒",
-    gradient: "from-pink-500 to-rose-600",
-  },
-  {
-    id: "demo-2",
-    title: "Tech Summit Afterparty",
-    type: "Party",
-    location: "Victoria Island",
-    participants: 89,
-    timeLeft: "2h left",
-    emoji: "🎉",
-    gradient: "from-violet-500 to-purple-600",
-  },
-  {
-    id: "demo-3",
-    title: "Chief's Birthday Bash",
-    type: "Birthday",
-    location: "Abuja",
-    participants: 156,
-    timeLeft: "Live Now",
-    emoji: "🎂",
-    gradient: "from-amber-500 to-orange-600",
-  },
-];
-
-export const EventList = ({ events, onJoinEvent }: EventListProps) => {
-  const displayEvents = events && events.length > 0 ? events : defaultEvents;
+export const EventList = ({ events = [], onJoinEvent }: EventListProps) => {
+  const displayEvents = events;
 
   return (
     <section className="px-6 py-4">
@@ -64,6 +31,11 @@ export const EventList = ({ events, onJoinEvent }: EventListProps) => {
       </div>
 
       <div className="space-y-3">
+        {displayEvents.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-8 rounded-2xl border border-dashed border-border">
+            No live events right now. Create one or join with an event code.
+          </p>
+        ) : null}
         {displayEvents.map((event, index) => (
           <motion.div
             key={event.id}
@@ -107,7 +79,7 @@ export const EventList = ({ events, onJoinEvent }: EventListProps) => {
 
               <ChevronRight className="w-5 h-5 text-muted-foreground shrink-0" />
             </div>
-            
+
             {event.timeLeft === "Live Now" && (
               <motion.div
                 className="mt-3 flex justify-end"

@@ -109,22 +109,27 @@ export const useEvents = () => {
 
   const createEvent = useCallback(
     async (eventData: Omit<EventData, "id" | "eventCode" | "participants" | "totalSprayed" | "createdAt" | "updatedAt" | "emoji" | "gradient">) => {
-      const result = await eventsApi.create({
+      const result = (await eventsApi.create({
         title: eventData.title,
         type: eventData.type,
+        description: eventData.description,
+        location: eventData.location,
         scheduled_start: eventData.date && eventData.time ? `${eventData.date}T${eventData.time}:00` : undefined,
         is_public: !eventData.isPrivate,
         max_participants: eventData.maxParticipants,
-      });
+      })) as { ok?: boolean; event?: Record<string, unknown> };
+
+      const ev = result.event;
+      if (!ev?.id) throw new Error("Server did not return an event. Try again.");
+
       await fetchEvents();
       await fetchMyEvents();
 
-      const r = result as Record<string, unknown>;
       const config = EVENT_TYPES_CONFIG[eventData.type] ?? EVENT_TYPES_CONFIG.other;
       return {
         ...eventData,
-        id: (r.id as string) ?? "",
-        eventCode: (r.event_code as string) ?? "",
+        id: ev.id as string,
+        eventCode: (ev.event_code as string) ?? "",
         participants: 0,
         totalSprayed: 0,
         emoji: config.emoji,
