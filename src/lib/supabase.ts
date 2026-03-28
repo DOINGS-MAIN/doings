@@ -14,14 +14,21 @@ export const supabase = createClient(
 async function authHeaders(): Promise<Record<string, string>> {
   let { data: { session } } = await supabase.auth.getSession();
   const nowSec = Math.floor(Date.now() / 1000);
-  if (session?.refresh_token && session.expires_at != null && session.expires_at <= nowSec + 120) {
-    const { data, error } = await supabase.auth.refreshSession();
-    if (!error && data.session) session = data.session;
+  if (session?.refresh_token) {
+    const exp = session.expires_at ?? 0;
+    if (exp <= nowSec + 600) {
+      const { data, error } = await supabase.auth.refreshSession();
+      if (!error && data.session) session = data.session;
+    }
   }
   const token = session?.access_token;
-  return token
-    ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
-    : { "Content-Type": "application/json" };
+  // Gateway requires project anon key on every Functions request; without it you often get "Invalid JWT".
+  const headers: Record<string, string> = {
+    apikey: supabaseAnonKey,
+    "Content-Type": "application/json",
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
 }
 
 async function invoke<T = unknown>(fnName: string, options?: {
