@@ -7,13 +7,16 @@ import { ArrowRight, Smartphone, ShieldCheck, Loader2 } from "lucide-react";
 
 interface AuthFlowProps {
   onComplete?: () => void;
+  sendOtp: (phone: string) => Promise<void>;
+  verifyOtp: (phone: string, token: string) => Promise<unknown>;
 }
 
-export const AuthFlow = ({ onComplete }: AuthFlowProps) => {
+export const AuthFlow = ({ onComplete, sendOtp, verifyOtp }: AuthFlowProps) => {
   const [step, setStep] = useState<"phone" | "otp" | "success">("phone");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
@@ -28,10 +31,15 @@ export const AuthFlow = ({ onComplete }: AuthFlowProps) => {
     if (phone.length < 10) return;
     
     setLoading(true);
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    setLoading(false);
-    setStep("otp");
+    setError("");
+    try {
+      await sendOtp(phone);
+      setStep("otp");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to send OTP");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleOtpChange = (index: number, value: string) => {
@@ -60,24 +68,30 @@ export const AuthFlow = ({ onComplete }: AuthFlowProps) => {
 
   const handleOtpSubmit = async (code: string) => {
     setLoading(true);
-    // Simulate verification
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    setLoading(false);
-    setStep("success");
-    
-    // Celebration animation
-    if (containerRef.current) {
-      gsap.to(containerRef.current, {
-        scale: 1.02,
-        duration: 0.2,
-        yoyo: true,
-        repeat: 1,
-      });
-    }
+    setError("");
+    try {
+      await verifyOtp(phone, code);
+      setStep("success");
 
-    setTimeout(() => {
-      onComplete?.();
-    }, 2000);
+      if (containerRef.current) {
+        gsap.to(containerRef.current, {
+          scale: 1.02,
+          duration: 0.2,
+          yoyo: true,
+          repeat: 1,
+        });
+      }
+
+      setTimeout(() => {
+        onComplete?.();
+      }, 2000);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Invalid OTP");
+      setOtp(["", "", "", "", "", ""]);
+      otpRefs.current[0]?.focus();
+    } finally {
+      setLoading(false);
+    }
   };
 
   const slideVariants = {
@@ -147,6 +161,9 @@ export const AuthFlow = ({ onComplete }: AuthFlowProps) => {
               </Button>
             </form>
 
+            {error && (
+              <p className="text-xs text-destructive text-center mt-3">{error}</p>
+            )}
             <p className="text-xs text-muted-foreground text-center mt-4">
               We'll send you a verification code via SMS
             </p>
@@ -196,6 +213,10 @@ export const AuthFlow = ({ onComplete }: AuthFlowProps) => {
                 <Loader2 className="w-5 h-5 animate-spin" />
                 <span>Verifying...</span>
               </div>
+            )}
+
+            {error && (
+              <p className="text-xs text-destructive text-center mt-3">{error}</p>
             )}
 
             <button

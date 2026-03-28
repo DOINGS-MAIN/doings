@@ -19,7 +19,7 @@ interface CreateGiveawaySheetProps {
     eventName?: string;
     isPrivate: boolean;
     showOnEventScreen: boolean;
-  }) => { code: string; id: string };
+  }) => { code: string; id: string } | Promise<{ code: string; id: string }>;
   balance: number;
   liveEvents: EventData[];
 }
@@ -48,8 +48,8 @@ export const CreateGiveawaySheet = ({
 
   const selectedEvent = liveEvents.find(e => e.id === selectedEventId);
 
-  const handleCreate = () => {
-    const result = onCreateGiveaway({
+  const handleCreate = async () => {
+    const result = await onCreateGiveaway({
       title,
       totalAmount: numericTotal,
       perPersonAmount: numericPerPerson,

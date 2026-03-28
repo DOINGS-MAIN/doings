@@ -26,18 +26,19 @@ import { CreateGiveawaySheet } from "@/components/CreateGiveawaySheet";
 import { GiveawayDetailsSheet } from "@/components/GiveawayDetailsSheet";
 import { RedeemGiveawaySheet } from "@/components/RedeemGiveawaySheet";
 import { EventScreenDisplay } from "@/components/EventScreenDisplay";
+import { NotificationsScreen } from "@/components/NotificationsScreen";
+import { useAuth } from "@/hooks/useAuth";
+import { spray as sprayApi } from "@/lib/supabase";
 import { useMultiWallet } from "@/hooks/useMultiWallet";
 import { useKYC } from "@/hooks/useKYC";
 import { useEvents, EventData } from "@/hooks/useEvents";
 import { useGiveaways, Giveaway } from "@/hooks/useGiveaways";
 import { toast } from "sonner";
-import { Plus, ChevronRight, Sparkles } from "lucide-react";
+import { Plus, ChevronRight, Loader2 } from "lucide-react";
 import { Currency } from "@/types/finance";
 
-type AppState = "onboarding" | "dashboard";
-
 const Index = () => {
-  const [appState, setAppState] = useState<AppState>("onboarding");
+  const { isAuthenticated, loading: authLoading, initialized, profile, sendOtp, verifyOtp } = useAuth();
   const [activeTab, setActiveTab] = useState("home");
   const [showFundSheet, setShowFundSheet] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -125,8 +126,10 @@ const Index = () => {
     findGiveawayByCode,
   } = useGiveaways();
 
+  const appState = isAuthenticated ? "dashboard" : "onboarding";
+
   const handleAuthComplete = () => {
-    setAppState("dashboard");
+    // Auth state change is handled by useAuth — nothing to do here
   };
 
   const handleJoinEvent = (event: EventData) => {
@@ -146,29 +149,27 @@ const Index = () => {
     setIsSprayActive(true);
   };
 
-  const handleSprayComplete = (sprayedAmount: number) => {
+  const handleSprayComplete = async (sprayedAmount: number) => {
     try {
-      debitWallet("NGN", sprayedAmount, `Sprayed at ${selectedEvent?.title || "Event"}`, "spray");
       if (selectedEvent) {
-        addSprayAmount(selectedEvent.id, sprayedAmount);
+        await sprayApi.send(selectedEvent.id, Math.round(sprayedAmount * 100), sprayDenomination as 200 | 500 | 1000);
       }
       toast.success(`Successfully sprayed ₦${sprayedAmount.toLocaleString()}! 🎉`);
-    } catch (error) {
+    } catch {
       toast.error("Failed to complete spray");
     }
     setIsSprayActive(false);
     setSelectedEvent(null);
   };
 
-  const handleSprayCancel = (sprayedAmount: number) => {
+  const handleSprayCancel = async (sprayedAmount: number) => {
     if (sprayedAmount > 0) {
       try {
-        debitWallet("NGN", sprayedAmount, `Sprayed at ${selectedEvent?.title || "Event"} (cancelled)`, "spray");
         if (selectedEvent) {
-          addSprayAmount(selectedEvent.id, sprayedAmount);
+          await sprayApi.send(selectedEvent.id, Math.round(sprayedAmount * 100), sprayDenomination as 200 | 500 | 1000);
         }
         toast.info(`Spray stopped. ₦${sprayedAmount.toLocaleString()} was sprayed.`);
-      } catch (error) {
+      } catch {
         toast.error("Failed to record spray");
       }
     } else {
@@ -198,25 +199,20 @@ const Index = () => {
   };
 
   // Giveaway handlers
-  const handleCreateGiveaway = (data: Parameters<typeof createGiveaway>[0]) => {
-    const giveaway = createGiveaway(data);
-    debitWallet("NGN", data.totalAmount, `Created giveaway: ${data.title}`, "giveaway");
+  const handleCreateGiveaway = async (data: Parameters<typeof createGiveaway>[0]) => {
+    const giveaway = await createGiveaway(data);
     toast.success("Giveaway created! 🎁");
     return { code: giveaway.code, id: giveaway.id };
   };
 
-  const handleRedeemGiveaway = (code: string) => {
-    const result = redeemGiveaway(code);
-    if (result.success && result.amount) {
-      creditWallet("NGN", result.amount, `Redeemed giveaway`, "internal", "receive");
-    }
+  const handleRedeemGiveaway = async (code: string) => {
+    const result = await redeemGiveaway(code);
     return result;
   };
 
-  const handleStopGiveaway = (giveawayId: string) => {
-    const refund = stopGiveaway(giveawayId);
+  const handleStopGiveaway = async (giveawayId: string) => {
+    const refund = await stopGiveaway(giveawayId);
     if (refund > 0) {
-      creditWallet("NGN", refund, `Giveaway refund`, "internal", "deposit");
       toast.success(`₦${refund.toLocaleString()} refunded to your wallet`);
     } else {
       toast.info("Giveaway stopped");
@@ -228,20 +224,19 @@ const Index = () => {
     setShowGiveawayDetails(true);
   };
 
-  // Fund wallet handlers
-  const handleFundNGN = (amount: number, method: "bank" | "card", description: string) => {
-    const fee = method === "card" ? Math.round(amount * 0.015) : 0;
-    creditWallet("NGN", amount, description, "monnify", "deposit", fee);
+  // Fund wallet handlers — deposits are confirmed via webhooks, not client-side
+  const handleFundNGN = (_amount: number, _method: "bank" | "card", _description: string) => {
+    toast.info("Transfer to your reserved account. Balance updates automatically.");
     setShowFundSheet(false);
   };
 
-  const handleFundUSDT = (amount: number, provider: "blockradar", description: string) => {
-    creditWallet("USDT", amount, description, provider, "deposit");
+  const handleFundUSDT = (_amount: number, _provider: "blockradar", _description: string) => {
+    toast.info("Send USDT to your deposit address. Balance updates automatically.");
     setShowFundSheet(false);
   };
 
   const handleCreateMonnifyAccount = async () => {
-    return createMonnifyAccount("12345678901", "Demo User", "user@doings.app");
+    return createMonnifyAccount();
   };
 
   // Convert EventData to the format expected by EventList
@@ -282,6 +277,9 @@ const Index = () => {
       
       case "leaderboard":
         return <LeaderboardScreen />;
+
+      case "notifications":
+        return <NotificationsScreen />;
       
       case "home":
       default:
@@ -296,7 +294,7 @@ const Index = () => {
             >
               <div>
                 <p className="text-muted-foreground text-sm">Welcome back,</p>
-                <h1 className="text-2xl font-bold text-foreground">Champion 👋</h1>
+                <h1 className="text-2xl font-bold text-foreground">{profile?.full_name?.split(" ")[0] || "Champ"} 👋</h1>
               </div>
               <motion.button
                 onClick={() => setShowAvatarCustomization(true)}
@@ -445,6 +443,14 @@ const Index = () => {
     }
   };
 
+  if (!initialized || authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen relative overflow-x-hidden">
       {/* Floating money background */}
@@ -474,7 +480,7 @@ const Index = () => {
 
             <HeroSection />
             <FeatureCards />
-            <AuthFlow onComplete={handleAuthComplete} />
+            <AuthFlow onComplete={handleAuthComplete} sendOtp={sendOtp} verifyOtp={verifyOtp} />
           </motion.div>
         )}
 
