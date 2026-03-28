@@ -1,9 +1,15 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? "";
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL ?? "").trim();
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? "").trim();
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+/** False if VITE_* were empty when `npm run build` ran (Vite inlines at build time — set these on Railway for the build step). */
+export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+
+export const supabase = createClient(
+  isSupabaseConfigured ? supabaseUrl : "https://invalid.invalid",
+  isSupabaseConfigured ? supabaseAnonKey : "invalid"
+);
 
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();

@@ -1,4 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase, transfers } from "@/lib/supabase";
+import { useAuth } from "@/hooks/useAuth";
 
 export interface BankAccount {
   id: string;
@@ -11,16 +14,9 @@ export interface BankAccount {
   createdAt: Date;
 }
 
-interface BankAccountsState {
-  accounts: BankAccount[];
-  kycStatus: "none" | "pending" | "verified" | "rejected";
-  kycSubmittedAt?: Date;
-  kycVerifiedAt?: Date;
-}
+const QUERY_KEY = ["bank-accounts"] as const;
 
-const BANK_ACCOUNTS_STORAGE_KEY = "doings_bank_accounts";
-
-// Nigerian banks list
+// Nigerian banks list (picker UI)
 export const NIGERIAN_BANKS = [
   { code: "044", name: "Access Bank" },
   { code: "023", name: "Citibank Nigeria" },
@@ -52,109 +48,177 @@ export const NIGERIAN_BANKS = [
   { code: "996", name: "Moniepoint" },
 ];
 
-const getInitialState = (): BankAccountsState => {
-  if (typeof window === "undefined") {
-    return { accounts: [], kycStatus: "none" };
-  }
+function mapRow(row: {
+  id: string;
+  bank_code: string;
+  bank_name: string;
+  account_number: string;
+  account_name: string;
+  is_default: boolean | null;
+  is_verified: boolean | null;
+  created_at: string;
+}): BankAccount {
+  return {
+    id: row.id,
+    bankName: row.bank_name,
+    bankCode: row.bank_code,
+    accountNumber: row.account_number,
+    accountName: row.account_name,
+    isDefault: Boolean(row.is_default),
+    isVerified: Boolean(row.is_verified),
+    createdAt: new Date(row.created_at),
+  };
+}
 
-  const stored = localStorage.getItem(BANK_ACCOUNTS_STORAGE_KEY);
-  if (stored) {
-    const parsed = JSON.parse(stored);
-    return {
-      ...parsed,
-      accounts: parsed.accounts.map((a: BankAccount) => ({
-        ...a,
-        createdAt: new Date(a.createdAt),
-      })),
-      kycSubmittedAt: parsed.kycSubmittedAt ? new Date(parsed.kycSubmittedAt) : undefined,
-      kycVerifiedAt: parsed.kycVerifiedAt ? new Date(parsed.kycVerifiedAt) : undefined,
-    };
-  }
+async function fetchBankAccounts(): Promise<BankAccount[]> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return [];
 
-  return { accounts: [], kycStatus: "none" };
-};
+  const { data, error } = await supabase
+    .from("bank_accounts")
+    .select("id, bank_code, bank_name, account_number, account_name, is_default, is_verified, created_at")
+    .order("created_at", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []).map((r) => mapRow(r as Parameters<typeof mapRow>[0]));
+}
+
+async function getPublicUserId(): Promise<string> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Sign in required");
+  const { data, error } = await supabase.from("users").select("id").eq("auth_id", user.id).maybeSingle();
+  if (error || !data) throw new Error("Profile not ready");
+  return data.id;
+}
 
 export const useBankAccounts = () => {
-  const [state, setState] = useState<BankAccountsState>(getInitialState);
+  const queryClient = useQueryClient();
+  const { isAuthenticated } = useAuth();
 
-  useEffect(() => {
-    localStorage.setItem(BANK_ACCOUNTS_STORAGE_KEY, JSON.stringify(state));
-  }, [state]);
+  const { data: rawAccounts = [], isLoading } = useQuery({
+    queryKey: QUERY_KEY,
+    queryFn: fetchBankAccounts,
+    enabled: isAuthenticated,
+  });
+  const accounts = isAuthenticated ? rawAccounts : [];
 
-  const addBankAccount = useCallback((
-    bankCode: string,
-    accountNumber: string,
-    accountName: string
-  ) => {
-    const bank = NIGERIAN_BANKS.find((b) => b.code === bankCode);
-    if (!bank) throw new Error("Invalid bank selected");
-
-    const newAccount: BankAccount = {
-      id: `bank-${Date.now()}`,
-      bankName: bank.name,
+  const addMutation = useMutation({
+    mutationFn: async ({
       bankCode,
       accountNumber,
       accountName,
-      isDefault: state.accounts.length === 0,
-      isVerified: true, // Simulated verification
-      createdAt: new Date(),
-    };
+      bankName,
+    }: {
+      bankCode: string;
+      accountNumber: string;
+      accountName: string;
+      bankName: string;
+    }) => {
+      const verify = (await transfers.verifyBankAccount(bankCode, accountNumber)) as {
+        account_name?: string;
+      };
+      const resolvedName = verify.account_name ?? accountName;
+      const userId = await getPublicUserId();
 
-    setState((prev) => ({
-      ...prev,
-      accounts: [...prev.accounts, newAccount],
-    }));
+      const { count, error: countErr } = await supabase
+        .from("bank_accounts")
+        .select("*", { count: "exact", head: true });
+      if (countErr) throw countErr;
+      const isDefault = (count ?? 0) === 0;
 
-    return newAccount;
-  }, [state.accounts.length]);
+      const { data, error } = await supabase
+        .from("bank_accounts")
+        .insert({
+          user_id: userId,
+          bank_code: bankCode,
+          bank_name: bankName,
+          account_number: accountNumber,
+          account_name: resolvedName,
+          is_default: isDefault,
+          is_verified: true,
+          verified_at: new Date().toISOString(),
+        })
+        .select("id, bank_code, bank_name, account_number, account_name, is_default, is_verified, created_at")
+        .single();
 
-  const removeBankAccount = useCallback((accountId: string) => {
-    setState((prev) => {
-      const filtered = prev.accounts.filter((a) => a.id !== accountId);
-      // If we removed the default, make the first one default
-      if (filtered.length > 0 && !filtered.some((a) => a.isDefault)) {
-        filtered[0].isDefault = true;
+      if (error) throw error;
+      return mapRow(data as Parameters<typeof mapRow>[0]);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: async (accountId: string) => {
+      const { data: meta } = await supabase
+        .from("bank_accounts")
+        .select("user_id, is_default")
+        .eq("id", accountId)
+        .maybeSingle();
+      const { error } = await supabase.from("bank_accounts").delete().eq("id", accountId);
+      if (error) throw error;
+      if (meta?.is_default && meta.user_id) {
+        const { data: first } = await supabase
+          .from("bank_accounts")
+          .select("id")
+          .eq("user_id", meta.user_id)
+          .limit(1)
+          .maybeSingle();
+        if (first) {
+          await supabase.from("bank_accounts").update({ is_default: true }).eq("id", first.id);
+        }
       }
-      return { ...prev, accounts: filtered };
-    });
-  }, []);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+  });
 
-  const setDefaultAccount = useCallback((accountId: string) => {
-    setState((prev) => ({
-      ...prev,
-      accounts: prev.accounts.map((a) => ({
-        ...a,
-        isDefault: a.id === accountId,
-      })),
-    }));
-  }, []);
+  const defaultMutation = useMutation({
+    mutationFn: async (accountId: string) => {
+      const { error } = await supabase.from("bank_accounts").update({ is_default: true }).eq("id", accountId);
+      if (error) throw error;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+  });
 
-  const submitKYC = useCallback(() => {
-    setState((prev) => ({
-      ...prev,
-      kycStatus: "pending",
-      kycSubmittedAt: new Date(),
-    }));
+  const addBankAccount = useCallback(
+    async (bankCode: string, accountNumber: string, accountName: string) => {
+      const bank = NIGERIAN_BANKS.find((b) => b.code === bankCode);
+      if (!bank) throw new Error("Invalid bank selected");
+      return addMutation.mutateAsync({
+        bankCode,
+        accountNumber,
+        accountName,
+        bankName: bank.name,
+      });
+    },
+    [addMutation]
+  );
 
-    // Simulate KYC verification after 3 seconds
-    setTimeout(() => {
-      setState((prev) => ({
-        ...prev,
-        kycStatus: "verified",
-        kycVerifiedAt: new Date(),
-      }));
-    }, 3000);
-  }, []);
+  const removeBankAccount = useCallback(
+    async (accountId: string) => {
+      await removeMutation.mutateAsync(accountId);
+    },
+    [removeMutation]
+  );
+
+  const setDefaultAccount = useCallback(
+    async (accountId: string) => {
+      await defaultMutation.mutateAsync(accountId);
+    },
+    [defaultMutation]
+  );
 
   const getDefaultAccount = useCallback(() => {
-    return state.accounts.find((a) => a.isDefault);
-  }, [state.accounts]);
+    return accounts.find((a) => a.isDefault);
+  }, [accounts]);
+
+  const submitKYC = useCallback(() => Promise.resolve(), []);
 
   return {
-    accounts: state.accounts,
-    kycStatus: state.kycStatus,
-    kycSubmittedAt: state.kycSubmittedAt,
-    kycVerifiedAt: state.kycVerifiedAt,
+    accounts,
+    loading: isLoading || addMutation.isPending || removeMutation.isPending || defaultMutation.isPending,
+    kycStatus: "none" as const,
+    kycSubmittedAt: undefined as Date | undefined,
+    kycVerifiedAt: undefined as Date | undefined,
     addBankAccount,
     removeBankAccount,
     setDefaultAccount,
