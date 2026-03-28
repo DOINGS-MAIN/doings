@@ -11,7 +11,7 @@ import { EventData, EVENT_TYPES_CONFIG } from "@/hooks/useEvents";
 interface CreateEventSheetProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreateEvent: (eventData: Omit<EventData, "id" | "eventCode" | "participants" | "totalSprayed" | "createdAt" | "updatedAt" | "emoji" | "gradient">) => EventData;
+  onCreateEvent: (eventData: Omit<EventData, "id" | "eventCode" | "participants" | "totalSprayed" | "createdAt" | "updatedAt" | "emoji" | "gradient">) => EventData | Promise<EventData>;
 }
 
 const eventTypes = [
@@ -56,8 +56,8 @@ export const CreateEventSheet = ({ isOpen, onClose, onCreateEvent }: CreateEvent
     setStep((prev) => Math.max(prev - 1, 1));
   };
 
-  const handleCreate = () => {
-    const event = onCreateEvent({
+  const handleCreate = async () => {
+    const event = await onCreateEvent({
       ...formData,
       hostId: "current-user",
       hostName: "You",

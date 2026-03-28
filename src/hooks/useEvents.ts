@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { supabase, events as eventsApi } from "@/lib/supabase";
 
 export interface EventData {
   id: string;
@@ -22,12 +23,7 @@ export interface EventData {
   updatedAt: string;
 }
 
-interface EventsState {
-  events: EventData[];
-  myEvents: EventData[];
-}
-
-const EVENT_TYPES_CONFIG = {
+const EVENT_TYPES_CONFIG: Record<string, { emoji: string; gradient: string }> = {
   wedding: { emoji: "💒", gradient: "from-pink-500 to-rose-600" },
   birthday: { emoji: "🎂", gradient: "from-amber-500 to-orange-600" },
   party: { emoji: "🎉", gradient: "from-violet-500 to-purple-600" },
@@ -37,212 +33,155 @@ const EVENT_TYPES_CONFIG = {
   other: { emoji: "✨", gradient: "from-primary to-accent" },
 };
 
-const generateEventCode = (): string => {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let code = "";
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-};
-
-const getInitialState = (): EventsState => {
-  try {
-    const saved = localStorage.getItem("doings_events");
-    if (saved) {
-      return JSON.parse(saved);
-    }
-  } catch (error) {
-    console.error("Failed to load events from localStorage:", error);
-  }
-
-  // Demo events
+function mapDbEvent(e: Record<string, unknown>): EventData {
+  const typeStr = (e.type as string) ?? "other";
+  const config = EVENT_TYPES_CONFIG[typeStr] ?? EVENT_TYPES_CONFIG.other;
   return {
-    events: [
-      {
-        id: "demo-1",
-        title: "Ade & Bimpe Wedding",
-        type: "wedding",
-        description: "Join us to celebrate our special day!",
-        location: "Lagos, Nigeria",
-        date: new Date().toISOString().split("T")[0],
-        time: "14:00",
-        hostId: "host-1",
-        hostName: "Ade & Bimpe",
-        status: "live",
-        participants: 234,
-        totalSprayed: 1500000,
-        eventCode: "ADEBIM",
-        isPrivate: false,
-        emoji: "💒",
-        gradient: "from-pink-500 to-rose-600",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      {
-        id: "demo-2",
-        title: "Tech Summit Afterparty",
-        type: "party",
-        description: "Celebrating innovation!",
-        location: "Victoria Island",
-        date: new Date().toISOString().split("T")[0],
-        time: "20:00",
-        hostId: "host-2",
-        hostName: "TechNG",
-        status: "scheduled",
-        participants: 89,
-        totalSprayed: 0,
-        eventCode: "TECHVIP",
-        isPrivate: false,
-        emoji: "🎉",
-        gradient: "from-violet-500 to-purple-600",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      {
-        id: "demo-3",
-        title: "Chief's Birthday Bash",
-        type: "birthday",
-        description: "Chief Okonkwo turns 60!",
-        location: "Abuja",
-        date: new Date().toISOString().split("T")[0],
-        time: "16:00",
-        hostId: "host-3",
-        hostName: "Chief Okonkwo Family",
-        status: "live",
-        participants: 156,
-        totalSprayed: 2300000,
-        eventCode: "CHIEF60",
-        isPrivate: false,
-        emoji: "🎂",
-        gradient: "from-amber-500 to-orange-600",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-    ],
-    myEvents: [],
+    id: e.id as string,
+    title: (e.title as string) ?? "",
+    type: typeStr as EventData["type"],
+    description: (e.description as string) ?? "",
+    location: (e.location as string) ?? "",
+    date: e.scheduled_start ? (e.scheduled_start as string).split("T")[0] : "",
+    time: e.scheduled_start ? (e.scheduled_start as string).split("T")[1]?.slice(0, 5) ?? "" : "",
+    hostId: (e.host_id as string) ?? "",
+    hostName: (e.host_name as string) ?? "",
+    status: (e.status as EventData["status"]) ?? "draft",
+    participants: (e.participant_count as number) ?? 0,
+    totalSprayed: ((e.total_sprayed as number) ?? 0) / 100,
+    eventCode: (e.event_code as string) ?? "",
+    isPrivate: !(e.is_public as boolean),
+    maxParticipants: (e.max_participants as number) ?? undefined,
+    emoji: config.emoji,
+    gradient: config.gradient,
+    createdAt: (e.created_at as string) ?? "",
+    updatedAt: (e.updated_at as string) ?? "",
   };
-};
+}
 
 export const useEvents = () => {
-  const [state, setState] = useState<EventsState>(getInitialState);
+  const [allEvents, setAllEvents] = useState<EventData[]>([]);
+  const [myEvents, setMyEvents] = useState<EventData[]>([]);
+
+  const fetchEvents = useCallback(async () => {
+    try {
+      const data = await eventsApi.list() as Record<string, unknown>[];
+      const mapped = (data ?? []).map(mapDbEvent);
+      setAllEvents(mapped);
+    } catch {
+      // If the function isn't returning a list, try direct query
+      const { data } = await supabase
+        .from("events")
+        .select("*, event_participants(count)")
+        .order("created_at", { ascending: false })
+        .limit(50);
+      if (data) setAllEvents(data.map(mapDbEvent));
+    }
+  }, []);
+
+  const fetchMyEvents = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    const { data } = await supabase
+      .from("events")
+      .select("*")
+      .eq("host_id", session.user.id)
+      .order("created_at", { ascending: false });
+
+    if (data) setMyEvents(data.map(mapDbEvent));
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem("doings_events", JSON.stringify(state));
-  }, [state]);
+    fetchEvents();
+    fetchMyEvents();
 
-  const createEvent = (
-    eventData: Omit<EventData, "id" | "eventCode" | "participants" | "totalSprayed" | "createdAt" | "updatedAt" | "emoji" | "gradient">
-  ): EventData => {
-    const typeConfig = EVENT_TYPES_CONFIG[eventData.type];
-    const newEvent: EventData = {
-      ...eventData,
-      id: `event-${Date.now()}`,
-      eventCode: generateEventCode(),
-      participants: 0,
-      totalSprayed: 0,
-      emoji: typeConfig.emoji,
-      gradient: typeConfig.gradient,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
+    const channel = supabase
+      .channel("event-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "events" }, () => {
+        fetchEvents();
+        fetchMyEvents();
+      })
+      .subscribe();
 
-    setState((prev) => ({
-      ...prev,
-      events: [newEvent, ...prev.events],
-      myEvents: [newEvent, ...prev.myEvents],
-    }));
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchEvents, fetchMyEvents]);
 
-    return newEvent;
-  };
+  const createEvent = useCallback(
+    async (eventData: Omit<EventData, "id" | "eventCode" | "participants" | "totalSprayed" | "createdAt" | "updatedAt" | "emoji" | "gradient">) => {
+      const result = await eventsApi.create({
+        title: eventData.title,
+        type: eventData.type,
+        scheduled_start: eventData.date && eventData.time ? `${eventData.date}T${eventData.time}:00` : undefined,
+        is_public: !eventData.isPrivate,
+        max_participants: eventData.maxParticipants,
+      });
+      await fetchEvents();
+      await fetchMyEvents();
 
-  const updateEvent = (eventId: string, updates: Partial<EventData>): EventData | null => {
-    let updatedEvent: EventData | null = null;
-
-    setState((prev) => {
-      const updateEventInList = (events: EventData[]) =>
-        events.map((event) => {
-          if (event.id === eventId) {
-            updatedEvent = {
-              ...event,
-              ...updates,
-              updatedAt: new Date().toISOString(),
-            };
-            return updatedEvent;
-          }
-          return event;
-        });
-
+      const r = result as Record<string, unknown>;
+      const config = EVENT_TYPES_CONFIG[eventData.type] ?? EVENT_TYPES_CONFIG.other;
       return {
-        events: updateEventInList(prev.events),
-        myEvents: updateEventInList(prev.myEvents),
-      };
-    });
+        ...eventData,
+        id: (r.id as string) ?? "",
+        eventCode: (r.event_code as string) ?? "",
+        participants: 0,
+        totalSprayed: 0,
+        emoji: config.emoji,
+        gradient: config.gradient,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as EventData;
+    },
+    [fetchEvents, fetchMyEvents]
+  );
 
-    return updatedEvent;
-  };
+  const goLive = useCallback(async (eventId: string) => {
+    await eventsApi.goLive(eventId);
+    await fetchEvents();
+    await fetchMyEvents();
+    return allEvents.find((e) => e.id === eventId) ?? null;
+  }, [allEvents, fetchEvents, fetchMyEvents]);
 
-  const deleteEvent = (eventId: string): void => {
-    setState((prev) => ({
-      events: prev.events.filter((e) => e.id !== eventId),
-      myEvents: prev.myEvents.filter((e) => e.id !== eventId),
-    }));
-  };
+  const endEvent = useCallback(async (eventId: string) => {
+    await eventsApi.end(eventId);
+    await fetchEvents();
+    await fetchMyEvents();
+    return allEvents.find((e) => e.id === eventId) ?? null;
+  }, [allEvents, fetchEvents, fetchMyEvents]);
 
-  const goLive = (eventId: string): EventData | null => {
-    return updateEvent(eventId, { status: "live" });
-  };
+  const deleteEvent = useCallback(async (eventId: string) => {
+    await eventsApi.delete(eventId);
+    await fetchEvents();
+    await fetchMyEvents();
+  }, [fetchEvents, fetchMyEvents]);
 
-  const endEvent = (eventId: string): EventData | null => {
-    return updateEvent(eventId, { status: "ended" });
-  };
+  const joinEvent = useCallback(async (eventId: string) => {
+    await eventsApi.join(eventId);
+    await fetchEvents();
+  }, [fetchEvents]);
 
-  const joinEvent = (eventId: string): void => {
-    setState((prev) => ({
-      ...prev,
-      events: prev.events.map((event) =>
-        event.id === eventId
-          ? { ...event, participants: event.participants + 1 }
-          : event
-      ),
-    }));
-  };
+  const addSprayAmount = useCallback((_eventId: string, _amount: number) => {
+    // Spray amounts are updated via the spray edge function + realtime
+  }, []);
 
-  const addSprayAmount = (eventId: string, amount: number): void => {
-    setState((prev) => ({
-      ...prev,
-      events: prev.events.map((event) =>
-        event.id === eventId
-          ? { ...event, totalSprayed: event.totalSprayed + amount }
-          : event
-      ),
-      myEvents: prev.myEvents.map((event) =>
-        event.id === eventId
-          ? { ...event, totalSprayed: event.totalSprayed + amount }
-          : event
-      ),
-    }));
-  };
+  const findEventByCode = useCallback((code: string): EventData | undefined => {
+    return allEvents.find((e) => e.eventCode.toUpperCase() === code.toUpperCase());
+  }, [allEvents]);
 
-  const findEventByCode = (code: string): EventData | undefined => {
-    return state.events.find(
-      (event) => event.eventCode.toUpperCase() === code.toUpperCase()
-    );
-  };
+  const getLiveEvents = useCallback((): EventData[] => {
+    return allEvents.filter((e) => e.status === "live");
+  }, [allEvents]);
 
-  const getLiveEvents = (): EventData[] => {
-    return state.events.filter((event) => event.status === "live");
-  };
-
-  const getScheduledEvents = (): EventData[] => {
-    return state.events.filter((event) => event.status === "scheduled");
-  };
+  const getScheduledEvents = useCallback((): EventData[] => {
+    return allEvents.filter((e) => e.status === "scheduled");
+  }, [allEvents]);
 
   return {
-    events: state.events,
-    myEvents: state.myEvents,
+    events: allEvents,
+    myEvents,
     createEvent,
-    updateEvent,
+    updateEvent: async () => null,
     deleteEvent,
     goLive,
     endEvent,

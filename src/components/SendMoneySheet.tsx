@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useMultiWallet } from "@/hooks/useMultiWallet";
+import { transfers } from "@/lib/supabase";
 import { toast } from "sonner";
 
 interface SendMoneySheetProps {
@@ -79,13 +80,11 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
     setStep("processing");
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-      
-      debitWallet("NGN", numericAmount, `Sent to ${selectedRecipient?.name}`, "send");
-      
+      const recipientPhone = selectedRecipient?.phone ?? selectedRecipient?.username?.replace("@", "") ?? "";
+      await transfers.send(recipientPhone, Math.round(numericAmount * 100), "NGN", note || undefined);
       setStep("success");
     } catch (error) {
-      toast.error("Transfer failed. Please try again.");
+      toast.error(error instanceof Error ? error.message : "Transfer failed. Please try again.");
       setStep("amount");
     }
   };

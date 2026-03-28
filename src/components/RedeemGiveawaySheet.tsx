@@ -9,7 +9,7 @@ import { Giveaway } from "@/hooks/useGiveaways";
 interface RedeemGiveawaySheetProps {
   isOpen: boolean;
   onClose: () => void;
-  onRedeem: (code: string) => { success: boolean; message: string; amount?: number };
+  onRedeem: (code: string) => { success: boolean; message: string; amount?: number } | Promise<{ success: boolean; message: string; amount?: number }>;
   findGiveawayByCode: (code: string) => Giveaway | undefined;
 }
 
@@ -36,8 +36,8 @@ export const RedeemGiveawaySheet = ({
     }
   };
 
-  const handleRedeem = () => {
-    const redeemResult = onRedeem(code);
+  const handleRedeem = async () => {
+    const redeemResult = await onRedeem(code);
     setResult(redeemResult);
     setMode('result');
   };
