@@ -78,10 +78,13 @@ export const BankAccountsSheet = ({ open, onOpenChange }: BankAccountsSheetProps
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="h-[90vh] rounded-t-3xl bg-background">
-        <SheetHeader className="text-left pb-4">
-          <SheetTitle className="text-2xl font-bold flex items-center gap-2">
-            <Building2 className="w-6 h-6 text-primary" />
+      <SheetContent
+        side="bottom"
+        className="flex h-[90dvh] max-h-[90dvh] flex-col overflow-hidden rounded-t-3xl bg-background"
+      >
+        <SheetHeader className="shrink-0 text-left pb-4">
+          <SheetTitle className="flex items-center gap-2 text-2xl font-bold">
+            <Building2 className="h-6 w-6 text-primary" />
             Bank Accounts
           </SheetTitle>
           <SheetDescription>
@@ -89,8 +92,8 @@ export const BankAccountsSheet = ({ open, onOpenChange }: BankAccountsSheetProps
           </SheetDescription>
         </SheetHeader>
 
-        <div className="space-y-4 overflow-y-auto max-h-[70vh] pb-6">
-          <AnimatePresence mode="wait">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-y-contain pb-6 [-webkit-overflow-scrolling:touch]">
+          <AnimatePresence mode="sync">
             {!showAddForm ? (
               <motion.div
                 key="accounts-list"
@@ -204,7 +207,7 @@ export const BankAccountsSheet = ({ open, onOpenChange }: BankAccountsSheetProps
                         className="pl-10"
                       />
                     </div>
-                    <div className="grid grid-cols-2 gap-2 max-h-[40vh] overflow-y-auto">
+                    <div className="grid max-h-[40dvh] grid-cols-2 gap-2 overflow-y-auto overscroll-y-contain">
                       {filteredBanks.map((bank) => (
                         <Button
                           key={bank.code}

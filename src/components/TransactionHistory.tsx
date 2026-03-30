@@ -75,9 +75,9 @@ export const TransactionHistory = ({ transactions, isOpen, onClose }: Transactio
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="fixed inset-0 z-50 bg-background"
+      className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-background"
     >
-      <div className="sticky top-0 bg-background border-b border-border px-6 py-4">
+      <div className="shrink-0 border-b border-border bg-background px-6 py-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-xl font-bold text-foreground">Transactions</h2>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
@@ -100,7 +100,7 @@ export const TransactionHistory = ({ transactions, isOpen, onClose }: Transactio
         </div>
       </div>
 
-      <div className="p-6 pb-32 overflow-y-auto max-h-[calc(100vh-120px)]">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-6 pb-32 [-webkit-overflow-scrolling:touch]">
         {filtered.length === 0 ? (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center py-12">
             <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-muted flex items-center justify-center text-4xl">📭</div>

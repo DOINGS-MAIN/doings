@@ -59,13 +59,17 @@ export const RedeemGiveawaySheet = ({
 
   return (
     <Sheet open={isOpen} onOpenChange={handleClose}>
-      <SheetContent side="bottom" className="h-[70vh] rounded-t-3xl bg-background">
+      <SheetContent
+        side="bottom"
+        className="flex h-[70dvh] max-h-[70dvh] flex-col overflow-hidden rounded-t-3xl bg-background"
+      >
         <SheetHeader className="sr-only">
           <SheetTitle>Redeem Giveaway</SheetTitle>
         </SheetHeader>
-        <div className="h-1 w-12 bg-muted rounded-full mx-auto mb-6" />
+        <div className="mx-auto mb-4 h-1 w-12 shrink-0 rounded-full bg-muted" />
 
-        <AnimatePresence mode="wait">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]">
+        <AnimatePresence mode="sync">
           {mode === 'input' && (
             <motion.div
               key="input"
@@ -235,6 +239,7 @@ export const RedeemGiveawaySheet = ({
             </motion.div>
           )}
         </AnimatePresence>
+        </div>
       </SheetContent>
     </Sheet>
   );

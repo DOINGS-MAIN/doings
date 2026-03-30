@@ -78,7 +78,7 @@ export const LeaderboardScreen = () => {
       )}
 
       {/* Top 3 Podium */}
-      <AnimatePresence mode="wait">
+      <AnimatePresence mode="sync">
         {!isLoading && topThree.length >= 3 && (
           <motion.div key={period + '-podium'}>
             <TopGiftersPodium topThree={topThree} />
@@ -93,7 +93,7 @@ export const LeaderboardScreen = () => {
           <span className="text-sm font-medium text-muted-foreground">{periodLabels[period]} Rankings</span>
         </div>
 
-        <AnimatePresence mode="wait">
+        <AnimatePresence mode="sync">
           {isLoading ? (
             <motion.div
               key="loading"

@@ -195,7 +195,7 @@ export const AvatarCustomization = ({ isOpen, onClose, onSave, currentAvatar }: 
 
         {/* Tab Content */}
         <div className="px-6 flex-1 overflow-auto pb-20">
-          <AnimatePresence mode="wait">
+          <AnimatePresence mode="sync">
             {/* Photo Tab */}
             {activeTab === "photo" && (
               <motion.div

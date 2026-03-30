@@ -101,10 +101,13 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="h-[90vh] rounded-t-3xl bg-background">
-        <SheetHeader className="text-left pb-4">
-          <SheetTitle className="text-2xl font-bold flex items-center gap-2">
-            <Send className="w-6 h-6 text-primary" />
+      <SheetContent
+        side="bottom"
+        className="flex h-[90dvh] max-h-[90dvh] flex-col overflow-hidden rounded-t-3xl bg-background"
+      >
+        <SheetHeader className="shrink-0 text-left pb-4">
+          <SheetTitle className="flex items-center gap-2 text-2xl font-bold">
+            <Send className="h-6 w-6 text-primary" />
             Send Money
           </SheetTitle>
           <SheetDescription>
@@ -112,8 +115,8 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
           </SheetDescription>
         </SheetHeader>
 
-        <div className="overflow-y-auto max-h-[70vh] pb-6">
-          <AnimatePresence mode="wait">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain pb-6 [-webkit-overflow-scrolling:touch]">
+          <AnimatePresence mode="sync">
             {/* Recipient Step */}
             {step === "recipient" && (
               <motion.div

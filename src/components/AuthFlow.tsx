@@ -132,7 +132,7 @@ export const AuthFlow = ({ onComplete, sendOtp, verifyOtp, updateProfile, existi
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, delay: 0.7 }}
     >
-      <AnimatePresence mode="wait">
+      <AnimatePresence mode="sync">
         {step === "phone" && (
           <motion.div
             key="phone"

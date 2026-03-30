@@ -96,9 +96,12 @@ export const EventScreenDisplay = ({ event, isOpen, onClose, giveaways }: EventS
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
-      <SheetContent side="bottom" className="h-[95vh] bg-gradient-to-br from-background via-background to-primary/10 p-0">
+      <SheetContent
+        side="bottom"
+        className="flex h-[95dvh] max-h-[95dvh] flex-col overflow-hidden bg-gradient-to-br from-background via-background to-primary/10 p-0"
+      >
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border">
+        <div className="flex shrink-0 items-center justify-between border-b border-border p-4">
           <div className="flex items-center gap-3">
             <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${event.gradient} flex items-center justify-center text-2xl`}>
               {event.emoji}
@@ -136,7 +139,7 @@ export const EventScreenDisplay = ({ event, isOpen, onClose, giveaways }: EventS
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 h-[calc(100%-5rem)] overflow-y-auto">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto overscroll-y-contain p-4 [-webkit-overflow-scrolling:touch] md:grid-cols-3">
           {/* Live Activity Feed */}
           <div className="md:col-span-2 space-y-4">
             <div className="flex items-center gap-2 mb-2">

@@ -50,25 +50,40 @@ function NotificationItem({ notification, onRead }: { notification: Notification
   );
 }
 
-export const NotificationsScreen = () => {
+interface NotificationsScreenProps {
+  /** When true, omit outer title (parent already shows a header) — avoids duplicate headings and fixes mobile scroll nesting. */
+  embedded?: boolean;
+}
+
+export const NotificationsScreen = ({ embedded = false }: NotificationsScreenProps) => {
   const { notifications, unreadCount, loading, markRead, markAllRead } = useNotifications();
 
   return (
-    <div className="px-6 pt-12 pb-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Notifications</h1>
+    <div className={embedded ? "pb-2" : "px-6 pt-12 pb-6"}>
+      {!embedded && (
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Notifications</h1>
+            {unreadCount > 0 && (
+              <p className="text-sm text-muted-foreground">{unreadCount} unread</p>
+            )}
+          </div>
           {unreadCount > 0 && (
-            <p className="text-sm text-muted-foreground">{unreadCount} unread</p>
+            <Button variant="ghost" size="sm" onClick={markAllRead} className="text-primary">
+              <CheckCheck className="mr-1 h-4 w-4" />
+              Mark all read
+            </Button>
           )}
         </div>
-        {unreadCount > 0 && (
+      )}
+      {embedded && unreadCount > 0 && (
+        <div className="mb-4 flex justify-end">
           <Button variant="ghost" size="sm" onClick={markAllRead} className="text-primary">
-            <CheckCheck className="w-4 h-4 mr-1" />
+            <CheckCheck className="mr-1 h-4 w-4" />
             Mark all read
           </Button>
-        )}
-      </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-20">

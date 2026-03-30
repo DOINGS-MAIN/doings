@@ -94,7 +94,9 @@
   body {
     @apply bg-background text-foreground;
     background: var(--gradient-hero);
+    /* 100vh jumps on mobile when the URL bar shows/hides; dvh tracks the visible viewport. */
     min-height: 100vh;
+    min-height: 100dvh;
   }
 }
 
