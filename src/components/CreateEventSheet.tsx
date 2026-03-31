@@ -290,7 +290,10 @@ export const CreateEventSheet = ({ isOpen, onClose, onCreateEvent }: CreateEvent
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
-      <SheetContent side="bottom" className="h-[85vh] bg-background rounded-t-3xl">
+      <SheetContent
+        side="bottom"
+        className="relative flex h-[85dvh] max-h-[85dvh] flex-col overflow-hidden rounded-t-3xl bg-background"
+      >
         <SheetHeader className="pb-4">
           <div className="flex items-center justify-between">
             <SheetTitle className="text-xl font-bold text-foreground">
@@ -313,10 +316,8 @@ export const CreateEventSheet = ({ isOpen, onClose, onCreateEvent }: CreateEvent
           </p>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto pb-24">
-          <AnimatePresence mode="wait">
-            {renderStep()}
-          </AnimatePresence>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain pb-24 [-webkit-overflow-scrolling:touch]">
+          <AnimatePresence mode="sync">{renderStep()}</AnimatePresence>
         </div>
 
         {/* Footer */}

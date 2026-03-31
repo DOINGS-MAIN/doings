@@ -74,8 +74,8 @@ export const WithdrawSheet = ({
   if (kycLevel < KYC_GATES.WITHDRAW_NGN) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="h-[50vh] rounded-t-3xl bg-background">
-          <div className="flex flex-col items-center justify-center h-full text-center px-6">
+        <SheetContent side="bottom" className="h-[50dvh] max-h-[50dvh] rounded-t-3xl bg-background">
+          <div className="flex h-full flex-col items-center justify-center px-6 text-center">
             <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-4">
               <Shield className="w-10 h-10 text-primary" />
             </div>
@@ -99,8 +99,8 @@ export const WithdrawSheet = ({
   if (currency === "NGN" && accounts.length === 0 && step === "amount") {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="h-[50vh] rounded-t-3xl bg-background">
-          <div className="flex flex-col items-center justify-center h-full text-center px-6">
+        <SheetContent side="bottom" className="h-[50dvh] max-h-[50dvh] rounded-t-3xl bg-background">
+          <div className="flex h-full flex-col items-center justify-center px-6 text-center">
             <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-4">
               <Building2 className="w-10 h-10 text-primary" />
             </div>
@@ -176,10 +176,13 @@ export const WithdrawSheet = ({
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="bottom" className="h-[90vh] rounded-t-3xl bg-background">
-        <SheetHeader className="text-left pb-4">
-          <SheetTitle className="text-2xl font-bold flex items-center gap-2">
-            <Wallet className="w-6 h-6 text-primary" />
+      <SheetContent
+        side="bottom"
+        className="flex h-[90dvh] max-h-[90dvh] flex-col overflow-hidden rounded-t-3xl bg-background"
+      >
+        <SheetHeader className="shrink-0 text-left pb-4">
+          <SheetTitle className="flex items-center gap-2 text-2xl font-bold">
+            <Wallet className="h-6 w-6 text-primary" />
             Withdraw {currency}
           </SheetTitle>
           <SheetDescription>
@@ -188,7 +191,7 @@ export const WithdrawSheet = ({
         </SheetHeader>
 
         {/* Currency Toggle */}
-        <div className="flex gap-2 mb-4">
+        <div className="mb-4 flex shrink-0 gap-2">
           <button
             onClick={() => setCurrency("NGN")}
             className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
@@ -207,8 +210,8 @@ export const WithdrawSheet = ({
           </button>
         </div>
 
-        <div className="overflow-y-auto max-h-[70vh] pb-6">
-          <AnimatePresence mode="wait">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain pb-6 [-webkit-overflow-scrolling:touch]">
+          <AnimatePresence mode="sync">
             {/* Amount */}
             {step === "amount" && (
               <motion.div key="amount" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">

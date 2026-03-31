@@ -404,14 +404,17 @@ export const CreateGiveawaySheet = ({
 
   return (
     <Sheet open={isOpen} onOpenChange={handleClose}>
-      <SheetContent side="bottom" className="h-[85vh] rounded-t-3xl bg-background">
+      <SheetContent
+        side="bottom"
+        className="flex h-[85dvh] max-h-[85dvh] flex-col overflow-hidden rounded-t-3xl bg-background"
+      >
         <SheetHeader className="sr-only">
           <SheetTitle>Create Giveaway</SheetTitle>
         </SheetHeader>
-        <div className="h-1 w-12 bg-muted rounded-full mx-auto mb-6" />
-        <AnimatePresence mode="wait">
-          {renderStep()}
-        </AnimatePresence>
+        <div className="mx-auto mb-4 h-1 w-12 shrink-0 rounded-full bg-muted" />
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]">
+          <AnimatePresence mode="sync">{renderStep()}</AnimatePresence>
+        </div>
       </SheetContent>
     </Sheet>
   );

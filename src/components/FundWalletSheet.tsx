@@ -199,17 +199,17 @@ export const FundWalletSheet = ({
             onClick={handleReset}
           />
           <motion.div
-            className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t border-border rounded-t-3xl max-h-[85vh] overflow-hidden"
+            className="fixed bottom-0 left-0 right-0 z-50 flex max-h-[85dvh] flex-col overflow-hidden rounded-t-3xl border-t border-border bg-card"
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
           >
-            <div className="flex justify-center pt-3 pb-2">
-              <div className="w-12 h-1.5 bg-muted rounded-full" />
+            <div className="flex shrink-0 justify-center pt-3 pb-2">
+              <div className="h-1.5 w-12 rounded-full bg-muted" />
             </div>
 
-            <div className="flex items-center justify-between px-6 pb-4 border-b border-border">
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-6 pb-4">
               <div className="flex items-center gap-3">
                 {step !== "currency" && step !== "method" && (
                   <button onClick={handleBack} className="p-2 hover:bg-muted rounded-full transition-colors">
@@ -231,8 +231,8 @@ export const FundWalletSheet = ({
               </button>
             </div>
 
-            <div className="p-6 overflow-y-auto max-h-[60vh]">
-              <AnimatePresence mode="wait">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-6 [-webkit-overflow-scrolling:touch]">
+              <AnimatePresence mode="sync">
                 {/* Currency Selection (shown when entering from multi-currency) */}
                 {step === "currency" && (
                   <motion.div key="currency" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">

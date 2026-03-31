@@ -89,19 +89,19 @@ export const SpraySetupSheet = ({
 
           {/* Sheet */}
           <motion.div
-            className="fixed bottom-0 left-0 right-0 z-50 bg-card border-t border-border rounded-t-3xl max-h-[85vh] overflow-hidden"
+            className="fixed bottom-0 left-0 right-0 z-50 flex max-h-[85dvh] flex-col overflow-hidden rounded-t-3xl border-t border-border bg-card"
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
           >
             {/* Handle */}
-            <div className="flex justify-center pt-3 pb-2">
-              <div className="w-12 h-1.5 bg-muted rounded-full" />
+            <div className="flex shrink-0 justify-center pt-3 pb-2">
+              <div className="h-1.5 w-12 rounded-full bg-muted" />
             </div>
 
             {/* Header */}
-            <div className="flex items-center justify-between px-6 pb-4 border-b border-border">
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-6 pb-4">
               <div className="flex items-center gap-3">
                 {step !== "amount" && (
                   <button
@@ -127,9 +127,9 @@ export const SpraySetupSheet = ({
               </button>
             </div>
 
-            {/* Content */}
-            <div className="p-6 overflow-y-auto max-h-[60vh]">
-              <AnimatePresence mode="wait">
+            {/* Content — flex-1 + min-h-0 so nested scroll works on iOS; sync avoids layout collapse from mode="wait". */}
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-6 [-webkit-overflow-scrolling:touch]">
+              <AnimatePresence mode="sync">
                 {/* Step 1: Select Amount */}
                 {step === "amount" && (
                   <motion.div

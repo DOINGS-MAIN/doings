@@ -80,12 +80,15 @@ export const EventDetailsSheet = ({
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
-      <SheetContent side="bottom" className="h-[90vh] bg-background rounded-t-3xl">
-        <SheetHeader className="pb-4">
+      <SheetContent
+        side="bottom"
+        className="flex h-[90dvh] max-h-[90dvh] flex-col overflow-hidden rounded-t-3xl bg-background"
+      >
+        <SheetHeader className="shrink-0 pb-4">
           <SheetTitle className="sr-only">Event Details</SheetTitle>
         </SheetHeader>
 
-        <div className="overflow-y-auto pb-32">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain pb-32 [-webkit-overflow-scrolling:touch]">
           {/* Event Header */}
           <div className="flex items-start gap-4 mb-6">
             <div className={`w-20 h-20 rounded-2xl bg-gradient-to-br ${event.gradient} flex items-center justify-center text-4xl shrink-0`}>

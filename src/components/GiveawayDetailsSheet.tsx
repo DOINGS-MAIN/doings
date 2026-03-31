@@ -85,13 +85,16 @@ export const GiveawayDetailsSheet = ({
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
-      <SheetContent side="bottom" className="h-[90vh] rounded-t-3xl bg-background overflow-y-auto">
+      <SheetContent
+        side="bottom"
+        className="flex h-[90dvh] max-h-[90dvh] flex-col overflow-hidden rounded-t-3xl bg-background"
+      >
         <SheetHeader className="sr-only">
           <SheetTitle>Giveaway Details</SheetTitle>
         </SheetHeader>
-        <div className="h-1 w-12 bg-muted rounded-full mx-auto mb-6" />
+        <div className="mx-auto mb-4 h-1 w-12 shrink-0 rounded-full bg-muted" />
 
-        <div className="space-y-6">
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-y-contain pb-8 [-webkit-overflow-scrolling:touch]">
           {/* Header */}
           <div className="text-center">
             <motion.div

@@ -479,14 +479,14 @@ const Index = () => {
 
   if (!initialized || authLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-dvh flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen relative overflow-x-hidden">
+    <div className="min-h-dvh relative overflow-x-hidden">
       {!isSupabaseConfigured && (
         <div className="relative z-[100] bg-destructive/20 text-destructive text-sm text-center px-4 py-3 border-b border-destructive/30">
           This build has no Supabase URL/key. In Railway, set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY as variables and trigger a new deploy so they are present during the build step (Vite reads them at build time, not only at runtime).
@@ -531,17 +531,15 @@ const Index = () => {
             transition={{ duration: 0.5 }}
             className="relative z-10 pb-32"
           >
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={activeTab}
-                initial={{ opacity: 0, x: activeTab === "events" ? 20 : -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: activeTab === "events" ? -20 : 20 }}
-                transition={{ duration: 0.2 }}
-              >
-                {renderDashboardContent()}
-              </motion.div>
-            </AnimatePresence>
+            {/* No AnimatePresence here: mode="wait" + exit slides collapse layout on mobile and snap scroll. */}
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.2 }}
+            >
+              {renderDashboardContent()}
+            </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -727,22 +725,25 @@ const Index = () => {
       <AnimatePresence>
         {showNotifications && (
           <motion.div
-            className="fixed inset-0 z-[60] bg-background"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
+            className="fixed inset-0 z-[60] flex flex-col overflow-hidden bg-background"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
           >
-            <div className="flex items-center justify-between px-6 pt-12 pb-4">
+            <div className="flex shrink-0 items-center justify-between px-6 pb-4 pt-12">
               <h1 className="text-2xl font-bold text-foreground">Notifications</h1>
               <motion.button
                 onClick={() => setShowNotifications(false)}
-                className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-sm font-medium text-muted-foreground"
+                className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5 text-sm font-medium text-muted-foreground"
                 whileTap={{ scale: 0.95 }}
               >
                 ✕
               </motion.button>
             </div>
-            <NotificationsScreen />
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-6 pb-28 [-webkit-overflow-scrolling:touch]">
+              <NotificationsScreen embedded />
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

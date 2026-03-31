@@ -66,15 +66,18 @@ export const JoinEventSheet = ({
       setEventCode("");
       setSearchedEvent(null);
     }}>
-      <SheetContent side="bottom" className="h-[85vh] bg-background rounded-t-3xl">
-        <SheetHeader className="pb-4">
+      <SheetContent
+        side="bottom"
+        className="flex h-[85dvh] max-h-[85dvh] flex-col overflow-hidden rounded-t-3xl bg-background"
+      >
+        <SheetHeader className="shrink-0 pb-4">
           <SheetTitle className="text-xl font-bold text-foreground">Join Event</SheetTitle>
           <p className="text-sm text-muted-foreground">
             Enter an event code or browse live events
           </p>
         </SheetHeader>
 
-        <div className="overflow-y-auto pb-8">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain pb-8 [-webkit-overflow-scrolling:touch]">
           {/* Search by Code */}
           <div className="mb-8">
             <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide mb-3">
