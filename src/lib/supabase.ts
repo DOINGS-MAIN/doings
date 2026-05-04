@@ -72,9 +72,38 @@ async function invoke<T = unknown>(fnName: string, options?: {
 
 // ── Auth ──
 export const auth = {
-  signInWithOtp: (phone: string) => supabase.auth.signInWithOtp({ phone }),
-  verifyOtp: (phone: string, token: string) =>
-    supabase.auth.verifyOtp({ phone, token, type: "sms" }),
+  signInWithPassword: (email: string, password: string) =>
+    supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    }),
+  signUpWithPassword: (
+    email: string,
+    password: string,
+    firstName: string,
+    lastName: string,
+    username: string
+  ) => {
+    const fn = firstName.trim();
+    const ln = lastName.trim();
+    return supabase.auth.signUp({
+      email: email.trim().toLowerCase(),
+      password,
+      options: {
+        data: {
+          first_name: fn,
+          last_name: ln,
+          username: username.trim().toLowerCase(),
+          full_name: `${fn} ${ln}`.trim(),
+        },
+      },
+    });
+  },
+  signInWithGoogle: (redirectTo: string) =>
+    supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo },
+    }),
   signOut: () => supabase.auth.signOut(),
   getUser: () => supabase.auth.getUser(),
   getSession: () => supabase.auth.getSession(),

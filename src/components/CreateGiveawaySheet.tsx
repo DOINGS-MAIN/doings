@@ -403,7 +403,12 @@ export const CreateGiveawaySheet = ({
   };
 
   return (
-    <Sheet open={isOpen} onOpenChange={handleClose}>
+    <Sheet
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) handleClose();
+      }}
+    >
       <SheetContent
         side="bottom"
         className="flex h-[85dvh] max-h-[85dvh] flex-col overflow-hidden rounded-t-3xl bg-background"

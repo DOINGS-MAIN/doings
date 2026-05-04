@@ -1,6 +1,6 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { sha256Hex } from "../_shared/crypto.ts";
-import { getAuthedClient, getServiceClient } from "../_shared/db.ts";
+import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 
 type VerifyBody = {
   level: 2 | 3;
@@ -27,15 +27,14 @@ Deno.serve(async (req) => {
     return withCors({ error: "Dojah credentials not configured" }, { status: 500 });
   }
 
-  const authedClient = getAuthedClient(authHeader);
-  const { data: authData, error: authError } = await authedClient.auth.getUser();
-  if (authError || !authData.user) return withCors({ error: "Unauthorized" }, { status: 401 });
+  const authUserId = await getAuthUserIdFromRequest(authHeader);
+  if (!authUserId) return withCors({ error: "Unauthorized" }, { status: 401 });
 
   const supabase = getServiceClient();
   const { data: userRow, error: userErr } = await supabase
     .from("users")
     .select("id, kyc_level")
-    .eq("auth_id", authData.user.id)
+    .eq("auth_id", authUserId)
     .single();
 
   if (userErr || !userRow) return withCors({ error: "User profile not found" }, { status: 404 });

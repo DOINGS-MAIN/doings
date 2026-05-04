@@ -57,9 +57,15 @@ export const ProfileScreen = ({
   const displayId = userId ? `USR-${userId.slice(0, 6).toUpperCase()}` : "USR-000000";
   const kycInfo = kycLabels[kycLevel] || kycLabels[0];
 
-  const maskedPhone = userPhone
-    ? userPhone.replace(/(\+\d{3})\d+(\d{4})/, "$1 •••• •• $2")
-    : "+234 •••• •• ••••";
+  const maskedContact = (() => {
+    if (!userPhone) return "—";
+    if (userPhone.includes("@")) {
+      const [u, d] = userPhone.split("@");
+      const safeUser = u.length <= 2 ? "••" : `${u.slice(0, 2)}•••`;
+      return `${safeUser}@${d}`;
+    }
+    return userPhone.replace(/(\+\d{3})\d+(\d{4})/, "$1 •••• •• $2");
+  })();
 
   const handleCopyId = () => {
     navigator.clipboard.writeText(displayId);
@@ -184,7 +190,7 @@ export const ProfileScreen = ({
                 <h2 className="text-lg font-bold text-foreground">{userName || "Tap to set name"}</h2>
               </button>
             )}
-            <p className="text-sm text-muted-foreground">{maskedPhone}</p>
+            <p className="text-sm text-muted-foreground">{maskedContact}</p>
             <div className="flex items-center gap-2 mt-1">
               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${kycInfo.badge}`}>
                 {kycInfo.label}

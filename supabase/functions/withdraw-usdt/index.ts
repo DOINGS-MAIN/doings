@@ -1,5 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
-import { getAuthedClient, getServiceClient } from "../_shared/db.ts";
+import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { checkWithdrawalLimit } from "../_shared/limits.ts";
 import { sendUsdt } from "../_shared/blockradar.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
@@ -17,15 +17,14 @@ Deno.serve(async (req) => {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) return withCors({ error: "Missing authorization" }, { status: 401 });
 
-  const authedClient = getAuthedClient(authHeader);
-  const { data: authData, error: authError } = await authedClient.auth.getUser();
-  if (authError || !authData.user) return withCors({ error: "Unauthorized" }, { status: 401 });
+  const authUserId = await getAuthUserIdFromRequest(authHeader);
+  if (!authUserId) return withCors({ error: "Unauthorized" }, { status: 401 });
 
   const supabase = getServiceClient();
   const { data: user, error: userErr } = await supabase
     .from("users")
     .select("id, kyc_level")
-    .eq("auth_id", authData.user.id)
+    .eq("auth_id", authUserId)
     .single();
 
   if (userErr || !user) return withCors({ error: "User not found" }, { status: 404 });

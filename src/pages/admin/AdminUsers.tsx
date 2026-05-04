@@ -68,7 +68,7 @@ export const AdminUsers = () => {
   const filteredUsers = users.filter((user) => {
     const matchesSearch = 
       user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.phone.includes(searchQuery) ||
+      (user.phone ?? "").includes(searchQuery) ||
       user.email?.toLowerCase().includes(searchQuery.toLowerCase());
     
     const matchesStatus = statusFilter === "all" || user.status === statusFilter;
@@ -186,7 +186,7 @@ export const AdminUsers = () => {
                 <TableCell>
                   <div>
                     <p className="font-medium text-foreground">{user.name}</p>
-                    <p className="text-sm text-muted-foreground">{user.phone}</p>
+                    <p className="text-sm text-muted-foreground">{user.phone || user.email || "—"}</p>
                   </div>
                 </TableCell>
                 <TableCell>{getStatusBadge(user.status)}</TableCell>

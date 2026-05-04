@@ -58,7 +58,12 @@ export const RedeemGiveawaySheet = ({
   };
 
   return (
-    <Sheet open={isOpen} onOpenChange={handleClose}>
+    <Sheet
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) handleClose();
+      }}
+    >
       <SheetContent
         side="bottom"
         className="flex h-[70dvh] max-h-[70dvh] flex-col overflow-hidden rounded-t-3xl bg-background"

@@ -238,8 +238,8 @@ otp_expiry = 3600
 enable_signup = true
 # If enabled, users need to confirm their phone number before signing in.
 enable_confirmations = true
-# Template for sending OTP to users
-template = "Your code is {{ .Code }}"
+# Template for sending OTP to users (longer body for Nigerian routes e.g. N-Alert min-length rules)
+template = "Doings: Your verification code is {{ .Code }}. Do not share this code with anyone. If you did not request this, please ignore this message."
 # Controls the minimum amount of time that must pass before sending another sms otp.
 max_frequency = "5s"
 
@@ -287,7 +287,7 @@ verify_enabled = false
 enroll_enabled = false
 verify_enabled = false
 otp_length = 6
-template = "Your code is {{ .Code }}"
+template = "Doings: Your verification code is {{ .Code }}. Do not share this code with anyone. If you did not request this, please ignore this message."
 max_frequency = "5s"
 
 # Configure MFA via WebAuthn

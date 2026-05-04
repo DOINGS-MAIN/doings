@@ -49,8 +49,12 @@ export const GifterRankingItem = ({ entry, index }: GifterRankingItemProps) => {
       </div>
 
       {/* Avatar */}
-      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center text-2xl">
-        {entry.avatar}
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-primary/20 to-accent/20 text-2xl font-bold text-foreground">
+        {entry.avatarUrl ? (
+          <img src={entry.avatarUrl} alt="" className="h-full w-full object-cover" />
+        ) : (
+          <span>{entry.avatar || "👤"}</span>
+        )}
       </div>
 
       {/* Info */}

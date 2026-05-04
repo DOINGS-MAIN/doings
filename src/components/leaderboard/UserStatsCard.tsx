@@ -2,7 +2,8 @@ import { motion } from "framer-motion";
 import { Sparkles, Gift, Trophy } from "lucide-react";
 
 interface UserStatsCardProps {
-  rank: number;
+  /** Rank on server leaderboard, or null if you have not qualified for this period */
+  rank: number | null;
   totalGifted: number;
   sprayAmount: number;
   giveawayAmount: number;
@@ -21,7 +22,7 @@ export const UserStatsCard = ({ rank, totalGifted, sprayAmount, giveawayAmount }
           <span className="font-bold text-foreground">Your Stats</span>
         </div>
         <div className="px-3 py-1 rounded-full bg-primary/20 text-primary text-sm font-bold">
-          Rank #{rank}
+          {rank != null && rank > 0 ? `Rank #${rank}` : "Unranked"}
         </div>
       </div>
       
