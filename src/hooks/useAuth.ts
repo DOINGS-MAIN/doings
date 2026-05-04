@@ -19,7 +19,9 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 export interface UserProfile {
   id: string;
-  phone: string;
+  phone: string | null;
+  email: string | null;
+  username: string | null;
   full_name: string | null;
   kyc_level: number;
   status: string;
@@ -45,7 +47,7 @@ export const useAuth = () => {
   const fetchProfile = useCallback(async (authUserId: string) => {
     const { data, error } = await supabase
       .from("users")
-      .select("id, phone, full_name, kyc_level, status")
+      .select("id, phone, email, username, full_name, kyc_level, status")
       .eq("auth_id", authUserId)
       .maybeSingle();
     if (error) {
@@ -114,15 +116,24 @@ export const useAuth = () => {
     };
   }, [fetchProfile]);
 
-  const sendOtp = useCallback(async (phone: string) => {
-    const fullPhone = phone.startsWith("+") ? phone : `+234${phone}`;
-    const { error } = await auth.signInWithOtp(fullPhone);
+  const signInWithPassword = useCallback(async (email: string, password: string) => {
+    const { data, error } = await auth.signInWithPassword(email, password);
     if (error) throw error;
+    return data.user;
   }, []);
 
-  const verifyOtp = useCallback(async (phone: string, token: string) => {
-    const fullPhone = phone.startsWith("+") ? phone : `+234${phone}`;
-    const { data, error } = await auth.verifyOtp(fullPhone, token);
+  const signUpWithPassword = useCallback(
+    async (email: string, password: string, firstName: string, lastName: string, username: string) => {
+      const { data, error } = await auth.signUpWithPassword(email, password, firstName, lastName, username);
+      if (error) throw error;
+      return data.user;
+    },
+    []
+  );
+
+  const signInWithGoogle = useCallback(async () => {
+    const redirectTo = `${window.location.origin}/`;
+    const { data, error } = await auth.signInWithGoogle(redirectTo);
     if (error) throw error;
     return data;
   }, []);
@@ -161,8 +172,9 @@ export const useAuth = () => {
     loading: state.loading,
     initialized: state.initialized,
     isAuthenticated: !!state.session,
-    sendOtp,
-    verifyOtp,
+    signInWithPassword,
+    signUpWithPassword,
+    signInWithGoogle,
     signOut,
     refreshProfile,
     updateProfile,

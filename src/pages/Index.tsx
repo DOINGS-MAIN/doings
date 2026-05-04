@@ -39,7 +39,18 @@ import { Plus, ChevronRight, Loader2, Bell } from "lucide-react";
 import { Currency } from "@/types/finance";
 
 const Index = () => {
-  const { isAuthenticated, loading: authLoading, initialized, profile, sendOtp, verifyOtp, signOut, updateProfile } = useAuth();
+  const {
+    isAuthenticated,
+    loading: authLoading,
+    initialized,
+    user,
+    profile,
+    signInWithPassword,
+    signUpWithPassword,
+    signInWithGoogle,
+    signOut,
+    updateProfile,
+  } = useAuth();
   const [activeTab, setActiveTab] = useState("home");
   const [showFundSheet, setShowFundSheet] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -288,7 +299,7 @@ const Index = () => {
             ngnBalance={ngnBalance}
             usdtBalance={usdtBalance}
             userName={profile?.full_name || ""}
-            userPhone={profile?.phone || ""}
+            userPhone={profile?.phone || profile?.email || user?.email || ""}
             userId={profile?.id || ""}
             onOpenAvatar={() => setShowAvatarCustomization(true)}
             onOpenKYC={() => setShowKYC(true)}
@@ -519,7 +530,13 @@ const Index = () => {
 
             <HeroSection />
             <FeatureCards />
-            <AuthFlow onComplete={handleAuthComplete} sendOtp={sendOtp} verifyOtp={verifyOtp} updateProfile={updateProfile} existingName={profile?.full_name} />
+            <AuthFlow
+              onComplete={handleAuthComplete}
+              signInWithPassword={signInWithPassword}
+              signUpWithPassword={signUpWithPassword}
+              signInWithGoogle={signInWithGoogle}
+              updateProfile={updateProfile}
+            />
           </motion.div>
         )}
 

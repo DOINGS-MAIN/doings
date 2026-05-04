@@ -15,7 +15,7 @@ export interface AdminUser {
 export interface PlatformUser {
   id: string;
   name: string;
-  phone: string;
+  phone: string | null;
   email?: string;
   avatar?: string;
   walletBalance: number;

@@ -17,8 +17,8 @@ export const useKYC = () => {
 
     const { data: user } = await supabase
       .from("users")
-      .select("kyc_level, full_name, phone")
-      .eq("id", session.user.id)
+      .select("kyc_level, full_name, phone, email")
+      .eq("auth_id", session.user.id)
       .single();
 
     const { data: verifications } = await supabase
@@ -50,7 +50,7 @@ export const useKYC = () => {
       personalInfo: user ? {
         fullName: user.full_name ?? "",
         phone: user.phone ?? "",
-        email: "",
+        email: user.email ?? "",
         dateOfBirth: "",
         address: "",
       } : undefined,
@@ -62,7 +62,7 @@ export const useKYC = () => {
   }, [fetchKYCState]);
 
   const verifyLevel1 = useCallback(async (phone: string, email: string, fullName: string) => {
-    // Level 1 is auto-set on signup via Supabase Auth (phone OTP).
+    // Level 1 is auto-set on signup via Supabase Auth (email OTP).
     // If user is authenticated, they already have level 1.
     await fetchKYCState();
     return true;

@@ -49,7 +49,10 @@ export const useAdminData = () => {
         users: (users as Record<string, unknown>[]).map((u) => ({
           id: u.id as string,
           name: (u.full_name as string) ?? (u.name as string) ?? "",
-          phone: (u.phone as string) ?? "",
+          phone: (() => {
+            const p = u.phone as string | null | undefined;
+            return p && String(p).trim() ? String(p) : null;
+          })(),
           email: (u.email as string) ?? "",
           walletBalance: (u.wallet_balance as number) ?? 0,
           totalSprayed: (u.total_sprayed as number) ?? 0,
