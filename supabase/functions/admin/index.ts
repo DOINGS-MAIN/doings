@@ -1,5 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
-import { getAuthedClient, getServiceClient } from "../_shared/db.ts";
+import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 
 type RouteAction =
   | { resource: "stats" }
@@ -32,21 +32,20 @@ async function requireAdmin(req: Request) {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) throw { status: 401, message: "Missing authorization" };
 
-  const authedClient = getAuthedClient(authHeader);
-  const { data: authData, error } = await authedClient.auth.getUser();
-  if (error || !authData.user) throw { status: 401, message: "Unauthorized" };
+  const authUserId = await getAuthUserIdFromRequest(authHeader);
+  if (!authUserId) throw { status: 401, message: "Unauthorized" };
 
   const supabase = getServiceClient();
   const { data: adminRole } = await supabase
     .from("admin_roles")
     .select("role, status")
-    .eq("user_id", authData.user.id)
+    .eq("user_id", authUserId)
     .eq("status", "active")
     .maybeSingle();
 
   if (!adminRole) throw { status: 403, message: "Not an admin" };
 
-  return { authId: authData.user.id, role: adminRole.role as string, supabase };
+  return { authId: authUserId, role: adminRole.role as string, supabase };
 }
 
 Deno.serve(async (req) => {

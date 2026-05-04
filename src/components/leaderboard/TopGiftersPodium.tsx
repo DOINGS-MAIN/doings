@@ -6,6 +6,13 @@ interface TopGiftersPodiumProps {
   topThree: LeaderboardEntry[];
 }
 
+function PodiumAvatar({ avatarUrl, fallback }: { avatarUrl: string | null | undefined; fallback: string }) {
+  if (avatarUrl) {
+    return <img src={avatarUrl} alt="" className="h-full w-full object-cover" />;
+  }
+  return <span className="select-none">{fallback || "👤"}</span>;
+}
+
 const getPodiumHeight = (rank: number) => {
   switch (rank) {
     case 1: return 'h-28';
@@ -42,8 +49,8 @@ export const TopGiftersPodium = ({ topThree }: TopGiftersPodiumProps) => {
           transition={{ delay: 0.2 }}
           className="relative mb-2"
         >
-          <div className="w-16 h-16 rounded-full bg-gradient-to-br from-gray-200 to-gray-400 flex items-center justify-center text-3xl border-4 border-gray-300 shadow-lg">
-            {topThree[1]?.avatar}
+          <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full border-4 border-gray-300 bg-gradient-to-br from-gray-200 to-gray-400 text-3xl shadow-lg">
+            <PodiumAvatar avatarUrl={topThree[1]?.avatarUrl} fallback={topThree[1]?.avatar} />
           </div>
           <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-gray-300 flex items-center justify-center shadow-md">
             <span className="text-xs font-black text-gray-700">2</span>
@@ -68,8 +75,8 @@ export const TopGiftersPodium = ({ topThree }: TopGiftersPodiumProps) => {
           className="relative mb-2"
         >
           <Sparkles className="absolute -top-2 -right-2 w-6 h-6 text-yellow-400 animate-pulse" />
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-yellow-300 to-amber-500 flex items-center justify-center text-4xl border-4 border-yellow-400 shadow-xl shadow-yellow-500/30">
-            {topThree[0]?.avatar}
+          <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border-4 border-yellow-400 bg-gradient-to-br from-yellow-300 to-amber-500 text-4xl shadow-xl shadow-yellow-500/30">
+            <PodiumAvatar avatarUrl={topThree[0]?.avatarUrl} fallback={topThree[0]?.avatar} />
           </div>
           <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-yellow-400 flex items-center justify-center shadow-md">
             <Crown className="w-4 h-4 text-yellow-800" />
@@ -93,8 +100,8 @@ export const TopGiftersPodium = ({ topThree }: TopGiftersPodiumProps) => {
           transition={{ delay: 0.3 }}
           className="relative mb-2"
         >
-          <div className="w-14 h-14 rounded-full bg-gradient-to-br from-amber-500 to-amber-700 flex items-center justify-center text-2xl border-4 border-amber-600 shadow-lg">
-            {topThree[2]?.avatar}
+          <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full border-4 border-amber-600 bg-gradient-to-br from-amber-500 to-amber-700 text-2xl shadow-lg">
+            <PodiumAvatar avatarUrl={topThree[2]?.avatarUrl} fallback={topThree[2]?.avatar} />
           </div>
           <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-amber-600 flex items-center justify-center shadow-md">
             <span className="text-xs font-black text-amber-100">3</span>

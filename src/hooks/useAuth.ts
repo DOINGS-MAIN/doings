@@ -132,7 +132,7 @@ export const useAuth = () => {
   );
 
   const signInWithGoogle = useCallback(async () => {
-    const redirectTo = `${window.location.origin}/`;
+    const redirectTo = `${window.location.origin}/home`;
     const { data, error } = await auth.signInWithGoogle(redirectTo);
     if (error) throw error;
     return data;

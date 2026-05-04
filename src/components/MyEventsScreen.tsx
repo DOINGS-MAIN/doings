@@ -1,10 +1,24 @@
 import { motion } from "framer-motion";
-import { Plus, Calendar, MapPin, Users, Clock, Play, Square, Share2, Settings, TrendingUp, ChevronRight } from "lucide-react";
+import {
+  Plus,
+  Calendar,
+  MapPin,
+  Users,
+  Clock,
+  Play,
+  Square,
+  Share2,
+  Settings,
+  TrendingUp,
+  Loader2,
+} from "lucide-react";
 import { EventData } from "@/hooks/useEvents";
 import { toast } from "sonner";
 
 interface MyEventsScreenProps {
   events: EventData[];
+  /** First fetch of hosted events in progress */
+  isLoading?: boolean;
   onCreateEvent: () => void;
   onGoLive: (eventId: string) => void;
   onEndEvent: (eventId: string) => void;
@@ -18,12 +32,13 @@ const statusConfig = {
   ended: { label: "Ended", color: "bg-muted", textColor: "text-muted-foreground" },
 };
 
-export const MyEventsScreen = ({ 
-  events, 
-  onCreateEvent, 
-  onGoLive, 
+export const MyEventsScreen = ({
+  events,
+  isLoading = false,
+  onCreateEvent,
+  onGoLive,
   onEndEvent,
-  onManageEvent 
+  onManageEvent,
 }: MyEventsScreenProps) => {
   const handleShare = (event: EventData) => {
     const shareText = `Join my event "${event.title}" on Doings! 🎉\nEvent Code: ${event.eventCode}`;
@@ -48,6 +63,15 @@ export const MyEventsScreen = ({
       year: "numeric"
     });
   };
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-[65dvh] flex-col items-center justify-center gap-3 px-6 py-16">
+        <Loader2 className="h-10 w-10 animate-spin text-primary" aria-hidden />
+        <p className="text-sm text-muted-foreground">Loading your events…</p>
+      </div>
+    );
+  }
 
   return (
     <motion.div

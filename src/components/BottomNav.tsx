@@ -1,63 +1,57 @@
 import { motion } from "framer-motion";
-import { Home, Wallet, Gift, User, Sparkles, Trophy } from "lucide-react";
-import { useState } from "react";
+import { NavLink } from "react-router-dom";
+import { Home, Gift, User, Sparkles, Trophy } from "lucide-react";
 
 const navItems = [
-  { icon: Home, label: "Home", id: "home" },
-  { icon: Sparkles, label: "Events", id: "events" },
-  { icon: Trophy, label: "Gifters", id: "leaderboard" },
-  { icon: Gift, label: "Gifts", id: "gifts" },
-  { icon: User, label: "Profile", id: "profile" },
-];
+  { icon: Home, label: "Home", to: "/home" },
+  { icon: Sparkles, label: "Events", to: "/events" },
+  { icon: Trophy, label: "Gifters", to: "/leaderboard" },
+  { icon: Gift, label: "Gifts", to: "/gifts" },
+  { icon: User, label: "Profile", to: "/profile" },
+] as const;
 
-interface BottomNavProps {
-  activeTab?: string;
-  onTabChange?: (tab: string) => void;
-}
-
-export const BottomNav = ({ activeTab = "home", onTabChange }: BottomNavProps) => {
-  const [active, setActive] = useState(activeTab);
-
-  const handleTabClick = (id: string) => {
-    setActive(id);
-    onTabChange?.(id);
-  };
-
+export const BottomNav = () => {
   return (
     <motion.nav
-      className="fixed bottom-0 left-0 right-0 glass-strong border-t border-white/10 px-4 pb-6 pt-2 z-50"
+      className="fixed bottom-0 left-0 right-0 glass-strong border-t border-white/10 px-4 pb-6 pt-2 z-40"
       initial={{ y: 100 }}
       animate={{ y: 0 }}
       transition={{ type: "spring", stiffness: 100, damping: 20, delay: 0.8 }}
     >
       <div className="flex items-center justify-around max-w-md mx-auto">
         {navItems.map((item) => (
-          <motion.button
-            key={item.id}
-            onClick={() => handleTabClick(item.id)}
-            className={`nav-item relative ${active === item.id ? "active" : ""}`}
-            whileTap={{ scale: 0.9 }}
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.to === "/home"}
+            className={({ isActive }) =>
+              `nav-item relative flex flex-col items-center gap-1 py-1 px-2 rounded-2xl min-w-[3.5rem] ${isActive ? "active" : ""}`
+            }
           >
-            {active === item.id && (
-              <motion.div
-                layoutId="activeTab"
-                className="absolute inset-0 bg-primary/10 rounded-2xl"
-                transition={{ type: "spring", stiffness: 300, damping: 30 }}
-              />
+            {({ isActive }) => (
+              <>
+                {isActive && (
+                  <motion.div
+                    layoutId="bottomNavActive"
+                    className="absolute inset-0 bg-primary/10 rounded-2xl"
+                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                  />
+                )}
+                <item.icon
+                  className={`w-6 h-6 relative z-10 transition-colors duration-200 ${
+                    isActive ? "text-primary" : "text-muted-foreground"
+                  }`}
+                />
+                <span
+                  className={`text-xs font-medium relative z-10 transition-colors duration-200 ${
+                    isActive ? "text-primary" : "text-muted-foreground"
+                  }`}
+                >
+                  {item.label}
+                </span>
+              </>
             )}
-            <item.icon
-              className={`w-6 h-6 relative z-10 transition-colors duration-200 ${
-                active === item.id ? "text-primary" : "text-muted-foreground"
-              }`}
-            />
-            <span
-              className={`text-xs font-medium relative z-10 transition-colors duration-200 ${
-                active === item.id ? "text-primary" : "text-muted-foreground"
-              }`}
-            >
-              {item.label}
-            </span>
-          </motion.button>
+          </NavLink>
         ))}
       </div>
     </motion.nav>

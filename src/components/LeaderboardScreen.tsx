@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Trophy, Sparkles, Gift } from "lucide-react";
-import { useLeaderboard, LeaderboardEntry, TimePeriod } from "@/hooks/useLeaderboard";
+import { Trophy, Sparkles, Gift, RefreshCw } from "lucide-react";
+import { useLeaderboard, TimePeriod } from "@/hooks/useLeaderboard";
 import { TopGiftersPodium } from "@/components/leaderboard/TopGiftersPodium";
 import { GifterRankingItem } from "@/components/leaderboard/GifterRankingItem";
 import { UserStatsCard } from "@/components/leaderboard/UserStatsCard";
@@ -13,22 +13,21 @@ const periodLabels: Record<TimePeriod, string> = {
 };
 
 export const LeaderboardScreen = () => {
-  const [period, setPeriod] = useState<TimePeriod>('weekly');
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const { getLeaderboard, getTopThree, currentUserSprayTotal, currentUserGiveawayTotal, currentUserTotalGifted } = useLeaderboard();
+  const [period, setPeriod] = useState<TimePeriod>("weekly");
+  const {
+    leaderboard,
+    loading: isLoading,
+    error,
+    refetch,
+    topThree,
+    currentUserEntry,
+    currentUserSprayTotal,
+    currentUserGiveawayTotal,
+    currentUserTotalGifted,
+  } = useLeaderboard(period);
 
-  useEffect(() => {
-    setIsLoading(true);
-    const timer = setTimeout(() => {
-      setLeaderboard(getLeaderboard(period));
-      setIsLoading(false);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [period]);
-
-  const topThree = getTopThree(period);
-  const currentUserEntry = leaderboard.find(e => e.isCurrentUser);
+  const listStartIndex = topThree.length >= 3 ? 3 : 0;
+  const listEntries = leaderboard.slice(listStartIndex);
 
   return (
     <div className="space-y-6 pb-24 px-4">
@@ -67,20 +66,33 @@ export const LeaderboardScreen = () => {
         ))}
       </div>
 
-      {/* User Stats Card */}
-      {currentUserEntry && (
-        <UserStatsCard
-          rank={currentUserEntry.rank}
-          totalGifted={currentUserTotalGifted || currentUserEntry.totalGifted}
-          sprayAmount={currentUserSprayTotal || currentUserEntry.sprayAmount}
-          giveawayAmount={currentUserGiveawayTotal || currentUserEntry.giveawayAmount}
-        />
+      {error && (
+        <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <p className="font-medium">Could not load leaderboard</p>
+          <p className="mt-1 text-destructive/90">{error}</p>
+          <button
+            type="button"
+            onClick={() => void refetch()}
+            className="mt-3 inline-flex items-center gap-2 rounded-xl bg-destructive/20 px-3 py-2 font-semibold text-destructive"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Retry
+          </button>
+        </div>
       )}
+
+      {/* User Stats Card — wallet totals; rank from materialized view when present */}
+      <UserStatsCard
+        rank={currentUserEntry?.rank ?? null}
+        totalGifted={currentUserTotalGifted}
+        sprayAmount={currentUserSprayTotal}
+        giveawayAmount={currentUserGiveawayTotal}
+      />
 
       {/* Top 3 Podium */}
       <AnimatePresence mode="sync">
         {!isLoading && topThree.length >= 3 && (
-          <motion.div key={period + '-podium'}>
+          <motion.div key={period + "-podium"}>
             <TopGiftersPodium topThree={topThree} />
           </motion.div>
         )}
@@ -108,15 +120,23 @@ export const LeaderboardScreen = () => {
             </motion.div>
           ) : (
             <motion.div
-              key={period + '-list'}
+              key={period + "-list"}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               className="space-y-2"
             >
-              {leaderboard.slice(3).map((entry, index) => (
-                <GifterRankingItem key={entry.id} entry={entry} index={index} />
-              ))}
+              {listEntries.length === 0 ? (
+                <p className="rounded-2xl border border-white/10 bg-card/40 px-4 py-8 text-center text-sm text-muted-foreground">
+                  {leaderboard.length === 0
+                    ? "No gifters for this period yet. Spray or run a giveaway to appear here once leaderboards refresh."
+                    : "Top gifters are shown above."}
+                </p>
+              ) : (
+                listEntries.map((entry, index) => (
+                  <GifterRankingItem key={entry.id} entry={entry} index={index} />
+                ))
+              )}
             </motion.div>
           )}
         </AnimatePresence>

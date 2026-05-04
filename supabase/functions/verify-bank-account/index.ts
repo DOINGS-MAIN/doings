@@ -1,5 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
-import { getAuthedClient } from "../_shared/db.ts";
+import { getAuthUserIdFromRequest } from "../_shared/db.ts";
 import { verifyBankAccount } from "../_shared/monnify.ts";
 
 Deno.serve(async (req) => {
@@ -9,9 +9,8 @@ Deno.serve(async (req) => {
   const authHeader = req.headers.get("Authorization");
   if (!authHeader) return withCors({ error: "Missing authorization" }, { status: 401 });
 
-  const authedClient = getAuthedClient(authHeader);
-  const { data: authData, error: authError } = await authedClient.auth.getUser();
-  if (authError || !authData.user) return withCors({ error: "Unauthorized" }, { status: 401 });
+  const authUserId = await getAuthUserIdFromRequest(authHeader);
+  if (!authUserId) return withCors({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
   const bankCode = body.bank_code as string;

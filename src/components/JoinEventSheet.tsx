@@ -10,7 +10,7 @@ interface JoinEventSheetProps {
   isOpen: boolean;
   onClose: () => void;
   onJoinEvent: (event: EventData) => void;
-  findEventByCode: (code: string) => EventData | undefined;
+  findEventByCode: (code: string) => Promise<EventData | undefined>;
   liveEvents: EventData[];
 }
 
@@ -25,28 +25,27 @@ export const JoinEventSheet = ({
   const [searchedEvent, setSearchedEvent] = useState<EventData | null>(null);
   const [isSearching, setIsSearching] = useState(false);
 
-  const handleSearchByCode = () => {
+  const handleSearchByCode = async () => {
     if (eventCode.length < 4) {
       toast.error("Please enter a valid event code");
       return;
     }
 
     setIsSearching(true);
-    
-    // Simulate search delay
-    setTimeout(() => {
-      const event = findEventByCode(eventCode);
+    try {
+      const event = await findEventByCode(eventCode);
       if (event) {
         setSearchedEvent(event);
-        if (event.status !== 'live') {
+        if (event.status !== "live") {
           toast.info("This event is not live yet");
         }
       } else {
         toast.error("Event not found. Check the code and try again.");
         setSearchedEvent(null);
       }
+    } finally {
       setIsSearching(false);
-    }, 500);
+    }
   };
 
   const handleJoin = (event: EventData) => {
@@ -61,11 +60,16 @@ export const JoinEventSheet = ({
   };
 
   return (
-    <Sheet open={isOpen} onOpenChange={() => {
-      onClose();
-      setEventCode("");
-      setSearchedEvent(null);
-    }}>
+    <Sheet
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose();
+          setEventCode("");
+          setSearchedEvent(null);
+        }
+      }}
+    >
       <SheetContent
         side="bottom"
         className="flex h-[85dvh] max-h-[85dvh] flex-col overflow-hidden rounded-t-3xl bg-background"

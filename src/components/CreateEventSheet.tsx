@@ -289,12 +289,17 @@ export const CreateEventSheet = ({ isOpen, onClose, onCreateEvent }: CreateEvent
   };
 
   return (
-    <Sheet open={isOpen} onOpenChange={onClose}>
+    <Sheet
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
       <SheetContent
         side="bottom"
-        className="relative flex h-[85dvh] max-h-[85dvh] flex-col overflow-hidden rounded-t-3xl bg-background"
+        className="flex h-[85dvh] max-h-[85dvh] flex-col overflow-hidden rounded-t-3xl bg-background p-0"
       >
-        <SheetHeader className="pb-4">
+        <SheetHeader className="shrink-0 px-6 pb-4 pt-10 pr-14">
           <div className="flex items-center justify-between">
             <SheetTitle className="text-xl font-bold text-foreground">
               Create Event
@@ -316,12 +321,11 @@ export const CreateEventSheet = ({ isOpen, onClose, onCreateEvent }: CreateEvent
           </p>
         </SheetHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain pb-24 [-webkit-overflow-scrolling:touch]">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain px-6 pb-4 [-webkit-overflow-scrolling:touch]">
           <AnimatePresence mode="sync">{renderStep()}</AnimatePresence>
         </div>
 
-        {/* Footer */}
-        <div className="absolute bottom-0 left-0 right-0 p-6 bg-background border-t border-white/10">
+        <div className="shrink-0 border-t border-white/10 bg-background p-6">
           <div className="flex gap-3">
             {step > 1 && (
               <motion.button
