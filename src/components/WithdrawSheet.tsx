@@ -81,10 +81,10 @@ export const WithdrawSheet = ({
             </div>
             <h2 className="text-xl font-bold mb-2">Complete Full Verification</h2>
             <p className="text-muted-foreground mb-2">
-              Level 3 KYC (NIN + Selfie) is required to withdraw funds.
+              Complete BVN + NIN verification (Level 2) to withdraw funds.
             </p>
             <p className="text-sm text-muted-foreground mb-6">
-              Current level: {kycLevel}/3
+              Current level: {kycLevel}/2
             </p>
             <Button onClick={() => { onOpenChange(false); onOpenKYC(); }}>
               Complete Verification

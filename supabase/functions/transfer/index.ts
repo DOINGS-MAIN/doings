@@ -28,7 +28,7 @@ Deno.serve(async (req) => {
     .single();
 
   if (senderErr || !sender) return withCors({ error: "User not found" }, { status: 404 });
-  if (sender.kyc_level < 1) return withCors({ error: "KYC level 1 required for transfers" }, { status: 403 });
+  if (sender.kyc_level < 2) return withCors({ error: "Complete BVN and NIN verification to send money" }, { status: 403 });
 
   const rl = await checkRateLimit(RATE_LIMITS.transfer(sender.id));
   if (!rl.allowed) return withCors({ error: "Too many transfer requests. Try again shortly." }, { status: 429 });
@@ -56,12 +56,16 @@ Deno.serve(async (req) => {
 
   const { data: recipient, error: recipientErr } = await supabase
     .from("users")
-    .select("id")
+    .select("id, kyc_level")
     .eq("phone", normalizedPhone)
     .single();
 
   if (recipientErr || !recipient) {
     return withCors({ error: "Recipient not found. They must have a Doings account." }, { status: 404 });
+  }
+
+  if (recipient.kyc_level < 1) {
+    return withCors({ error: "Recipient must verify their email before they can receive transfers." }, { status: 403 });
   }
 
   if (recipient.id === sender.id) {

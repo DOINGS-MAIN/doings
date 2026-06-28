@@ -4,8 +4,10 @@ import gsap from "gsap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 import { ArrowRight, Mail, Loader2 } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
+import type { SignUpResult } from "@/types/auth";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD = 8;
@@ -37,7 +39,9 @@ interface AuthFlowProps {
     firstName: string,
     lastName: string,
     username: string
-  ) => Promise<User | null>;
+  ) => Promise<SignUpResult>;
+  resetPasswordForEmail: (email: string) => Promise<void>;
+  resendSignupEmail: (email: string) => Promise<void>;
   signInWithGoogle: () => Promise<unknown>;
   updateProfile?: (updates: { full_name?: string }) => Promise<void>;
 }
@@ -46,11 +50,13 @@ export const AuthFlow = ({
   onComplete,
   signInWithPassword,
   signUpWithPassword,
+  resetPasswordForEmail,
+  resendSignupEmail,
   signInWithGoogle,
   updateProfile,
 }: AuthFlowProps) => {
   const [mode, setMode] = useState<"login" | "signup">("login");
-  const [step, setStep] = useState<"form" | "name" | "success">("form");
+  const [step, setStep] = useState<"form" | "name" | "success" | "verify-email" | "forgot" | "forgot-sent">("form");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -59,6 +65,7 @@ export const AuthFlow = ({
   const [username, setUsername] = useState("");
   const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
   const [error, setError] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -73,6 +80,7 @@ export const AuthFlow = ({
 
   const switchMode = (next: "login" | "signup") => {
     setMode(next);
+    setStep("form");
     resetFormFields();
   };
 
@@ -124,14 +132,25 @@ export const AuthFlow = ({
         }
       } else {
         const u = normalizeUsernameInput(username);
-        await signUpWithPassword(
+        const result = await signUpWithPassword(
           trimmedEmail,
           password,
           firstName.trim(),
           lastName.trim(),
           u
         );
-        finishAuth();
+        if (result.needsEmailConfirmation) {
+          setStep("verify-email");
+          return;
+        }
+        const user = result.user;
+        if (user && metaFullName(user)) {
+          finishAuth();
+        } else if (user) {
+          setStep("name");
+        } else {
+          setError("Could not create account. Try again.");
+        }
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -148,6 +167,37 @@ export const AuthFlow = ({
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Google sign-in failed");
       setLoading(false);
+    }
+  };
+
+  const handleForgotSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!EMAIL_RE.test(trimmedEmail)) return;
+    setLoading(true);
+    setError("");
+    try {
+      await resetPasswordForEmail(trimmedEmail);
+      setStep("forgot-sent");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not send reset email");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendSignup = async () => {
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!EMAIL_RE.test(trimmedEmail)) return;
+    setResendLoading(true);
+    setError("");
+    try {
+      await resendSignupEmail(trimmedEmail);
+      toast.success("If that email is pending signup, we sent another confirmation link.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not resend email");
+    } finally {
+      setResendLoading(false);
     }
   };
 
@@ -315,6 +365,20 @@ export const AuthFlow = ({
                   autoComplete={mode === "login" ? "current-password" : "new-password"}
                   className="text-base"
                 />
+                {mode === "login" ? (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      className="text-xs font-medium text-primary hover:underline"
+                      onClick={() => {
+                        setError("");
+                        setStep("forgot");
+                      }}
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                ) : null}
               </div>
 
               {mode === "signup" ? (
@@ -389,6 +453,110 @@ export const AuthFlow = ({
             </Button>
 
             {error ? <p className="text-xs text-destructive text-center mt-3">{error}</p> : null}
+          </motion.div>
+        )}
+
+        {step === "forgot" && (
+          <motion.div
+            key="forgot"
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.3 }}
+          >
+            <div className="mb-5 flex items-center gap-3">
+              <div className="rounded-2xl bg-primary/20 p-3">
+                <Mail className="h-6 w-6 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-foreground">Reset password</h2>
+                <p className="text-sm text-muted-foreground">We&apos;ll email you a secure link</p>
+              </div>
+            </div>
+            <form onSubmit={(e) => void handleForgotSubmit(e)} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="forgot-email">Email</Label>
+                <Input
+                  id="forgot-email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="text-base"
+                />
+              </div>
+              <Button type="submit" variant="hero" size="lg" className="w-full" disabled={loading || !EMAIL_RE.test(email.trim())}>
+                {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Send reset link"}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                onClick={() => {
+                  setError("");
+                  setStep("form");
+                }}
+              >
+                Back to log in
+              </Button>
+            </form>
+            {error ? <p className="mt-3 text-center text-xs text-destructive">{error}</p> : null}
+          </motion.div>
+        )}
+
+        {step === "forgot-sent" && (
+          <motion.div
+            key="forgot-sent"
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.3 }}
+            className="space-y-4 py-2 text-center"
+          >
+            <div className="text-4xl">✉️</div>
+            <h2 className="text-xl font-bold text-foreground">Check your email</h2>
+            <p className="text-sm text-muted-foreground">
+              If an account exists for <span className="font-medium text-foreground">{email.trim()}</span>, you will
+              receive a link to choose a new password. The link expires after a while.
+            </p>
+            <Button type="button" variant="hero" className="w-full" size="lg" onClick={() => switchMode("login")}>
+              Back to log in
+            </Button>
+          </motion.div>
+        )}
+
+        {step === "verify-email" && (
+          <motion.div
+            key="verify-email"
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ duration: 0.3 }}
+            className="space-y-4 py-2 text-center"
+          >
+            <div className="text-4xl">✉️</div>
+            <h2 className="text-xl font-bold text-foreground">Confirm your email</h2>
+            <p className="text-sm text-muted-foreground">
+              We sent a confirmation link to <span className="font-medium text-foreground">{email.trim()}</span>.
+              Open it to activate your account, then log in here.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={resendLoading || !EMAIL_RE.test(email.trim())}
+              onClick={() => void handleResendSignup()}
+            >
+              {resendLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Resend confirmation email"}
+            </Button>
+            <Button type="button" variant="ghost" className="w-full" onClick={() => switchMode("login")}>
+              Back to log in
+            </Button>
+            {error ? <p className="text-xs text-destructive">{error}</p> : null}
           </motion.div>
         )}
 

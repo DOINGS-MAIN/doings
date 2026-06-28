@@ -34,10 +34,11 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const body = await req.json().catch(() => ({})) as { bvn?: string };
+    const body = await req.json().catch(() => ({})) as { bvn?: string; nin?: string };
     if (!body.bvn || body.bvn.replace(/\D/g, "").length !== 11) {
       return withCors({ error: "Valid 11-digit BVN is required" }, { status: 400 });
     }
+    const ninDigits = body.nin?.replace(/\D/g, "") ?? "";
 
     const { data: ngnWallet } = await supabase
       .from("wallets")
@@ -53,6 +54,7 @@ Deno.serve(async (req) => {
       userName: user.full_name || "Doings User",
       email: user.email || "",
       bvn: body.bvn.replace(/\D/g, ""),
+      ...(ninDigits.length === 11 ? { nin: ninDigits } : {}),
     });
 
     const { error: insertErr } = await supabase

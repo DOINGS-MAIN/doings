@@ -8,29 +8,47 @@ export const useKYC = () => {
     verifications: [],
     bvnVerified: false,
     ninVerified: false,
-    selfieVerified: false,
   });
 
   const fetchKYCState = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
 
-    const { data: user } = await supabase
+    let { data: user } = await supabase
       .from("users")
-      .select("kyc_level, full_name, phone, email")
+      .select("id, kyc_level, full_name, phone, email")
       .eq("auth_id", session.user.id)
-      .single();
+      .maybeSingle();
+
+    if (!user?.id) {
+      await supabase.rpc("ensure_auth_user_profile");
+      const again = await supabase
+        .from("users")
+        .select("id, kyc_level, full_name, phone, email")
+        .eq("auth_id", session.user.id)
+        .maybeSingle();
+      user = again.data;
+    }
+
+    if (!user?.id) {
+      setState({
+        currentLevel: 0,
+        verifications: [],
+        bvnVerified: false,
+        ninVerified: false,
+      });
+      return;
+    }
 
     const { data: verifications } = await supabase
       .from("kyc_verifications")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", user.id)
       .order("created_at", { ascending: true });
 
     const kycLevel = (user?.kyc_level ?? 0) as KYCLevel;
     const bvnVerified = kycLevel >= 2;
-    const ninVerified = kycLevel >= 3;
-    const selfieVerified = kycLevel >= 3;
+    const ninVerified = kycLevel >= 2;
 
     const mapped: KYCVerification[] = (verifications ?? []).map((v: Record<string, unknown>) => ({
       level: v.level as KYCLevel,
@@ -46,7 +64,6 @@ export const useKYC = () => {
       verifications: mapped,
       bvnVerified,
       ninVerified,
-      selfieVerified,
       personalInfo: user ? {
         fullName: user.full_name ?? "",
         phone: user.phone ?? "",
@@ -61,32 +78,30 @@ export const useKYC = () => {
     fetchKYCState();
   }, [fetchKYCState]);
 
-  const verifyLevel1 = useCallback(async (phone: string, email: string, fullName: string) => {
-    // Level 1 is auto-set on signup via Supabase Auth (email OTP).
-    // If user is authenticated, they already have level 1.
-    await fetchKYCState();
-    return true;
-  }, [fetchKYCState]);
-
-  const verifyLevel2 = useCallback(async (bvn: string, dateOfBirth: string) => {
-    try {
-      await kyc.verifyBvn(bvn, dateOfBirth);
-      await fetchKYCState();
-      return { success: true, message: "BVN verified successfully" };
-    } catch (err: unknown) {
-      return { success: false, message: err instanceof Error ? err.message : "BVN verification failed" };
+  const verifyLevel1 = useCallback(async (action: "resend" | "check") => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user?.email) {
+      return { success: false, message: "No email on file for this account." };
     }
+    if (action === "resend") {
+      const { error } = await supabase.auth.resend({ type: "signup", email: user.email });
+      if (error) return { success: false, message: error.message };
+      return { success: false, message: "We sent a confirmation link. Check your inbox." };
+    }
+    await supabase.auth.refreshSession();
+    await fetchKYCState();
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user?.email_confirmed_at) {
+      return { success: true, message: "Email verified — you can receive in-app transfers and giveaways." };
+    }
+    return { success: false, message: "Not confirmed yet. Open the link in your email, then tap again." };
   }, [fetchKYCState]);
 
-  const verifyLevel3 = useCallback(async (nin: string, selfieBase64: string) => {
+  const verifyLevel2 = useCallback(async (bvn: string, nin: string, dateOfBirth: string) => {
     try {
-      const result = await kyc.verifyNinSelfie(nin, selfieBase64);
+      await kyc.verifyBvnAndNin(bvn, nin, dateOfBirth || undefined);
       await fetchKYCState();
-      return {
-        success: true,
-        message: "Identity fully verified",
-        confidence: (result as Record<string, unknown>)?.confidence as number | undefined,
-      };
+      return { success: true, message: "BVN, NIN, and bank transfer account are ready." };
     } catch (err: unknown) {
       return { success: false, message: err instanceof Error ? err.message : "Verification failed" };
     }
@@ -106,7 +121,6 @@ export const useKYC = () => {
     ...state,
     verifyLevel1,
     verifyLevel2,
-    verifyLevel3,
     getVerificationForLevel,
     meetsKYCRequirement,
     refreshKYC: fetchKYCState,

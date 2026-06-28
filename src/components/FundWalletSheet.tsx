@@ -15,12 +15,20 @@ interface FundWalletSheetProps {
   kycLevel: KYCLevel;
   onOpenKYC: () => void;
   monnifyAccount?: MonnifyReservedAccount;
-  onCreateMonnifyAccount: () => Promise<MonnifyReservedAccount>;
+  onCreateMonnifyAccount: (bvn: string) => Promise<MonnifyReservedAccount>;
   blockradarAddresses: BlockradarAddress[];
   onCreateBlockradarAddress: (network: string) => Promise<BlockradarAddress>;
 }
 
-type Step = "currency" | "method" | "amount" | "bank" | "card" | "usdt-network" | "usdt-deposit";
+type Step =
+  | "currency"
+  | "method"
+  | "amount"
+  | "monnify-bvn"
+  | "bank"
+  | "card"
+  | "usdt-network"
+  | "usdt-deposit";
 
 const NGN_QUICK_AMOUNTS = [5000, 10000, 20000, 50000, 100000];
 const USDT_QUICK_AMOUNTS = [10, 25, 50, 100, 500];
@@ -52,6 +60,7 @@ export const FundWalletSheet = ({
   const [selectedNetwork, setSelectedNetwork] = useState<string>("");
   const [depositAddress, setDepositAddress] = useState<string>("");
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
+  const [monnifyBvn, setMonnifyBvn] = useState("");
 
   const bankDetails = monnifyAccount || {
     bankName: "Wema Bank",
@@ -106,13 +115,8 @@ export const FundWalletSheet = ({
     }
 
     if (method === "bank") {
-      // Check if monnify account exists
       if (!monnifyAccount) {
-        setIsCreatingAccount(true);
-        onCreateMonnifyAccount().then(() => {
-          setIsCreatingAccount(false);
-          setStep("bank");
-        });
+        setStep("monnify-bvn");
         return;
       }
       setStep("bank");
@@ -146,23 +150,37 @@ export const FundWalletSheet = ({
   };
 
   const handleBankConfirm = () => {
-    const numAmount = parseInt(amount);
-    setIsProcessing(true);
-    setTimeout(() => {
-      onFundNGN(numAmount, "bank", `Bank Transfer - ${bankDetails.bankName}`);
-      toast.success(`₦${numAmount.toLocaleString()} added to your wallet!`);
-      handleReset();
-    }, 2000);
+    const numAmount = parseInt(amount, 10);
+    onFundNGN(numAmount, "bank", `Bank Transfer - ${bankDetails.bankName}`);
+    toast.info(
+      "After you transfer, Monnify notifies us and your NGN balance updates automatically (usually within a few minutes)."
+    );
+    handleReset();
   };
 
   const handleCardPayment = () => {
-    const numAmount = parseInt(amount);
-    setIsProcessing(true);
-    setTimeout(() => {
-      onFundNGN(numAmount, "card", "Card Payment - **** 4242");
-      toast.success(`₦${numAmount.toLocaleString()} added to your wallet!`);
-      handleReset();
-    }, 2000);
+    const numAmount = parseInt(amount, 10);
+    onFundNGN(numAmount, "card", "Card Payment");
+    toast.info("Card funding is not wired to a live gateway yet. Use bank transfer to fund for now.");
+    handleReset();
+  };
+
+  const handleMonnifyBvnContinue = async () => {
+    const digits = monnifyBvn.replace(/\D/g, "");
+    if (digits.length !== 11) {
+      toast.error("Enter a valid 11-digit BVN (required by Monnify for virtual accounts).");
+      return;
+    }
+    setIsCreatingAccount(true);
+    try {
+      await onCreateMonnifyAccount(digits);
+      toast.success("Reserved account created. You can copy bank details on the next step.");
+      setStep("bank");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not create reserved account");
+    } finally {
+      setIsCreatingAccount(false);
+    }
   };
 
   const handleReset = () => {
@@ -171,6 +189,7 @@ export const FundWalletSheet = ({
     setAmount("");
     setIsProcessing(false);
     setIsCreatingAccount(false);
+    setMonnifyBvn("");
     setSelectedNetwork("");
     setDepositAddress("");
     setCurrency(activeCurrency);
@@ -180,6 +199,7 @@ export const FundWalletSheet = ({
   const handleBack = () => {
     if (step === "method" || step === "usdt-network") setStep("currency");
     else if (step === "amount") setStep("method");
+    else if (step === "monnify-bvn") setStep("amount");
     else if (step === "bank" || step === "card") setStep("amount");
     else if (step === "usdt-deposit") setStep("usdt-network");
   };
@@ -220,6 +240,7 @@ export const FundWalletSheet = ({
                   {step === "currency" && "Fund Wallet"}
                   {step === "method" && `Fund ${currency} Wallet`}
                   {step === "amount" && "Enter Amount"}
+                  {step === "monnify-bvn" && "Verify BVN"}
                   {step === "bank" && "Bank Transfer"}
                   {step === "card" && "Card Payment"}
                   {step === "usdt-network" && "Select Network"}
@@ -348,14 +369,56 @@ export const FundWalletSheet = ({
                         </span>
                       </div>
                     )}
-                    <Button variant="gold" size="lg" className="w-full" onClick={handleProceed} disabled={!amount || parseFloat(amount) < (currency === "NGN" ? 100 : 1)}>
+                    <Button
+                      variant="gold"
+                      size="lg"
+                      className="w-full"
+                      onClick={handleProceed}
+                      disabled={!amount || parseFloat(amount) < (currency === "NGN" ? 100 : 1)}
+                    >
+                      Continue
+                    </Button>
+                  </motion.div>
+                )}
+
+                {step === "monnify-bvn" && (
+                  <motion.div
+                    key="monnify-bvn"
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 20 }}
+                    className="space-y-6"
+                  >
+                    <p className="text-sm text-muted-foreground">
+                      Monnify needs your <span className="font-medium text-foreground">BVN</span> once to generate your personal transfer account. This is not stored in plain text on our
+                      servers after verification.
+                    </p>
+                    <div>
+                      <label className="text-sm font-medium text-foreground mb-2 block">11-digit BVN</label>
+                      <Input
+                        inputMode="numeric"
+                        autoComplete="off"
+                        placeholder="12345678901"
+                        value={monnifyBvn}
+                        onChange={(e) => setMonnifyBvn(e.target.value.replace(/\D/g, "").slice(0, 11))}
+                        className="text-center text-xl font-bold tracking-widest h-14"
+                        maxLength={11}
+                      />
+                    </div>
+                    <Button
+                      variant="gold"
+                      size="lg"
+                      className="w-full"
+                      onClick={() => void handleMonnifyBvnContinue()}
+                      disabled={isCreatingAccount || monnifyBvn.replace(/\D/g, "").length !== 11}
+                    >
                       {isCreatingAccount ? (
-                        <motion.div className="flex items-center gap-2" animate={{ opacity: [1, 0.5, 1] }} transition={{ duration: 1, repeat: Infinity }}>
-                          <div className="w-5 h-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                          Creating Account...
-                        </motion.div>
+                        <span className="flex items-center justify-center gap-2">
+                          <span className="h-5 w-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
+                          Creating account…
+                        </span>
                       ) : (
-                        "Continue"
+                        "Create transfer account"
                       )}
                     </Button>
                   </motion.div>

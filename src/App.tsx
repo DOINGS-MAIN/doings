@@ -14,6 +14,8 @@ import LeaderboardPage from "@/pages/dashboard/LeaderboardPage";
 import ProfilePage from "@/pages/dashboard/ProfilePage";
 import NotFound from "./pages/NotFound";
 import EventScreenPage from "./pages/EventScreenPage";
+import AuthCallbackPage from "./pages/AuthCallbackPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 import { AdminLayout } from "./components/admin/AdminLayout";
 import { AdminDashboard } from "./pages/admin/AdminDashboard";
@@ -36,6 +38,8 @@ const App = () => (
         <Routes>
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
 
           <Route element={<RequireAuth />}>
             <Route path="/events/:eventId/screen" element={<EventScreenPage />} />

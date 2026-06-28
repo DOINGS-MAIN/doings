@@ -7,9 +7,17 @@ interface UserStatsCardProps {
   totalGifted: number;
   sprayAmount: number;
   giveawayAmount: number;
+  /** Explains how totals relate to the selected leaderboard period */
+  statsScopeHint?: string;
 }
 
-export const UserStatsCard = ({ rank, totalGifted, sprayAmount, giveawayAmount }: UserStatsCardProps) => {
+export const UserStatsCard = ({
+  rank,
+  totalGifted,
+  sprayAmount,
+  giveawayAmount,
+  statsScopeHint,
+}: UserStatsCardProps) => {
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -25,7 +33,10 @@ export const UserStatsCard = ({ rank, totalGifted, sprayAmount, giveawayAmount }
           {rank != null && rank > 0 ? `Rank #${rank}` : "Unranked"}
         </div>
       </div>
-      
+      {statsScopeHint ? (
+        <p className="mb-3 text-xs text-muted-foreground leading-snug">{statsScopeHint}</p>
+      ) : null}
+
       <div className="grid grid-cols-3 gap-3">
         <div className="text-center p-2 rounded-xl bg-muted/50">
           <p className="text-lg font-bold text-foreground">₦{totalGifted.toLocaleString()}</p>

@@ -11,29 +11,25 @@ const WITHDRAWAL_LIMITS: Record<string, Record<number, number>> = {
   NGN: {
     0: 0,
     1: 0,
-    2: 20_000_000,    // ₦200,000
-    3: 200_000_000,   // ₦2,000,000
+    2: 200_000_000, // ₦2,000,000/day at full verification
   },
   USDT: {
     0: 0,
     1: 0,
-    2: 500_000_000,   // 500 USDT
-    3: 5_000_000_000, // 5,000 USDT
+    2: 5_000_000_000, // 5,000 USDT/day
   },
 };
 
 const TRANSFER_LIMITS: Record<string, Record<number, number>> = {
   NGN: {
     0: 0,
-    1: 5_000_000,     // ₦50,000
-    2: 50_000_000,    // ₦500,000
-    3: 500_000_000,   // ₦5,000,000
+    1: 0, // email-only tier: receive only, no outbound transfers
+    2: 500_000_000, // ₦5,000,000/day
   },
   USDT: {
     0: 0,
-    1: 100_000_000,   // 100 USDT
-    2: 1_000_000_000, // 1,000 USDT
-    3: 10_000_000_000,// 10,000 USDT
+    1: 0,
+    2: 10_000_000_000, // 10,000 USDT/day
   },
 };
 

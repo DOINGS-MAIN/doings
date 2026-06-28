@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Gift, QrCode, Keyboard, CheckCircle, XCircle, Sparkles } from "lucide-react";
-import { Giveaway } from "@/hooks/useGiveaways";
+import { Giveaway, mapGiveawayRow } from "@/hooks/useGiveaways";
+import { giveaways as giveawaysApi } from "@/lib/supabase";
 
 interface RedeemGiveawaySheetProps {
   isOpen: boolean;
@@ -25,16 +26,37 @@ export const RedeemGiveawaySheet = ({
   const [previewGiveaway, setPreviewGiveaway] = useState<Giveaway | null>(null);
 
   const handleCodeChange = (value: string) => {
-    const upperCode = value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+    const upperCode = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
     setCode(upperCode);
-    
-    if (upperCode.length === 6) {
-      const giveaway = findGiveawayByCode(upperCode);
-      setPreviewGiveaway(giveaway || null);
-    } else {
+    if (upperCode.length !== 6) {
       setPreviewGiveaway(null);
     }
   };
+
+  useEffect(() => {
+    if (code.length !== 6) {
+      setPreviewGiveaway(null);
+      return;
+    }
+    const local = findGiveawayByCode(code);
+    if (local) {
+      setPreviewGiveaway(local);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const row = (await giveawaysApi.getByCode(code)) as Record<string, unknown>;
+        if (cancelled) return;
+        setPreviewGiveaway(mapGiveawayRow({ ...row, giveaway_redemptions: [] }));
+      } catch {
+        if (!cancelled) setPreviewGiveaway(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [code, findGiveawayByCode]);
 
   const handleRedeem = async () => {
     const redeemResult = await onRedeem(code);

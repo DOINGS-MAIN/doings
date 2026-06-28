@@ -86,10 +86,12 @@ export const auth = {
   ) => {
     const fn = firstName.trim();
     const ln = lastName.trim();
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
     return supabase.auth.signUp({
       email: email.trim().toLowerCase(),
       password,
       options: {
+        emailRedirectTo: origin ? `${origin}/auth/callback` : undefined,
         data: {
           first_name: fn,
           last_name: ln,
@@ -99,6 +101,25 @@ export const auth = {
       },
     });
   },
+  resetPasswordForEmail: (email: string) => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    if (!origin) {
+      return Promise.resolve({ data: {}, error: new Error("Password reset is only available in the browser.") });
+    }
+    return supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+      redirectTo: `${origin}/auth/reset-password`,
+    });
+  },
+  resendSignupEmail: (email: string) =>
+    supabase.auth.resend({
+      type: "signup",
+      email: email.trim().toLowerCase(),
+      options: {
+        emailRedirectTo:
+          typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined,
+      },
+    }),
+  updatePassword: (newPassword: string) => supabase.auth.updateUser({ password: newPassword }),
   signInWithGoogle: (redirectTo: string) =>
     supabase.auth.signInWithOAuth({
       provider: "google",
@@ -112,15 +133,14 @@ export const auth = {
 
 // ── KYC ──
 export const kyc = {
-  verifyBvn: (bvn: string, dateOfBirth?: string) =>
-    invoke("kyc-dojah-verify", { body: { level: 2, bvn, dateOfBirth } }),
-  verifyNinSelfie: (nin: string, selfieBase64: string) =>
-    invoke("kyc-dojah-verify", { body: { level: 3, nin, selfieBase64 } }),
+  /** Dojah BVN + NIN (no selfie); on success server also provisions Monnify reserved account when missing. */
+  verifyBvnAndNin: (bvn: string, nin: string, dateOfBirth?: string) =>
+    invoke("kyc-dojah-verify", { body: { bvn, nin, dateOfBirth } }),
 };
 
 // ── Wallet ──
 export const wallet = {
-  createMonnifyAccount: () => invoke("create-monnify-account"),
+  createMonnifyAccount: (bvn: string) => invoke("create-monnify-account", { body: { bvn } }),
   createBlockradarAddress: (network?: string) =>
     invoke("create-blockradar-address", { body: { network } }),
   getWallets: () =>
@@ -177,8 +197,16 @@ export const giveaways = {
   list: () => invoke("giveaway", { method: "GET" }),
   getById: (id: string) => invoke("giveaway", { method: "GET", path: id }),
   getByCode: (code: string) => invoke("giveaway", { method: "GET", path: `code/${code}` }),
-  create: (data: { title: string; total_amount: number; per_person_amount: number; type: "live" | "scheduled"; event_id?: string; is_private?: boolean }) =>
-    invoke("giveaway", { body: data }),
+  create: (data: {
+    title: string;
+    /** Naira (major units); server converts to kobo */
+    total_amount: number;
+    per_person_amount: number;
+    type: "live" | "scheduled";
+    event_id?: string;
+    is_private?: boolean;
+    show_on_event_screen?: boolean;
+  }) => invoke("giveaway", { body: data }),
   redeem: (code: string) => invoke("giveaway", { method: "POST", path: "redeem", body: { code } }),
   stop: (giveawayId: string) => invoke("giveaway", { method: "POST", path: "stop", body: { giveaway_id: giveawayId } }),
 };

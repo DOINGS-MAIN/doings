@@ -28,9 +28,8 @@ interface ProfileScreenProps {
 
 const kycLabels: Record<number, { label: string; color: string; badge: string }> = {
   0: { label: "Unverified", color: "text-destructive", badge: "bg-destructive/20 text-destructive" },
-  1: { label: "Basic", color: "text-yellow-500", badge: "bg-yellow-500/20 text-yellow-500" },
-  2: { label: "Intermediate", color: "text-blue-500", badge: "bg-blue-500/20 text-blue-500" },
-  3: { label: "Fully Verified", color: "text-green-500", badge: "bg-green-500/20 text-green-500" },
+  1: { label: "Email verified", color: "text-yellow-500", badge: "bg-yellow-500/20 text-yellow-500" },
+  2: { label: "Fully verified", color: "text-green-500", badge: "bg-green-500/20 text-green-500" },
 };
 
 export const ProfileScreen = ({

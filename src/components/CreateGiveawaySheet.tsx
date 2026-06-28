@@ -44,13 +44,23 @@ export const CreateGiveawaySheet = ({
   const numericTotal = parseFloat(totalAmount) || 0;
   const numericPerPerson = parseFloat(perPersonAmount) || 0;
   const maxWinners = numericPerPerson > 0 ? Math.floor(numericTotal / numericPerPerson) : 0;
-  const canCreate = title && numericTotal >= 100 && numericPerPerson >= 10 && numericTotal <= balance && numericPerPerson <= numericTotal;
+  const totalKobo = Math.round(numericTotal * 100);
+  const perKobo = Math.round(numericPerPerson * 100);
+  const evenlyDivisible = perKobo > 0 && totalKobo % perKobo === 0;
+  const trimmedTitle = title.trim();
+  const canCreate =
+    trimmedTitle.length > 0 &&
+    numericTotal >= 100 &&
+    numericPerPerson >= 10 &&
+    numericTotal <= balance &&
+    numericPerPerson <= numericTotal &&
+    evenlyDivisible;
 
   const selectedEvent = liveEvents.find(e => e.id === selectedEventId);
 
   const handleCreate = async () => {
     const result = await onCreateGiveaway({
-      title,
+      title: title.trim(),
       totalAmount: numericTotal,
       perPersonAmount: numericPerPerson,
       type,
@@ -108,7 +118,10 @@ export const CreateGiveawaySheet = ({
                 <label className="text-sm font-medium text-foreground mb-2 block">Type</label>
                 <div className="grid grid-cols-2 gap-3">
                   <motion.button
-                    onClick={() => setType('scheduled')}
+                    onClick={() => {
+                      setType("scheduled");
+                      setSelectedEventId(null);
+                    }}
                     className={`p-4 rounded-2xl border-2 transition-all ${
                       type === 'scheduled' 
                         ? 'border-primary bg-primary/10' 
@@ -136,7 +149,7 @@ export const CreateGiveawaySheet = ({
                 </div>
               </div>
 
-              {type === 'live' && selectedEventId && (
+              {type === 'live' && (
                 <div>
                   <label className="text-sm font-medium text-foreground mb-2 block">Select Event</label>
                   {liveEvents.length > 0 ? (
@@ -171,7 +184,7 @@ export const CreateGiveawaySheet = ({
 
             <Button
               onClick={() => setStep(2)}
-              disabled={!title || (type === 'live' && !selectedEventId)}
+              disabled={!title.trim() || (type === 'live' && !selectedEventId)}
               className="w-full h-14 rounded-2xl bg-primary text-primary-foreground font-bold text-lg"
             >
               Continue
@@ -257,6 +270,19 @@ export const CreateGiveawaySheet = ({
               Continue
               <ChevronRight className="w-5 h-5 ml-2" />
             </Button>
+            {!canCreate &&
+              trimmedTitle.length > 0 &&
+              numericTotal >= 100 &&
+              numericPerPerson >= 10 &&
+              numericPerPerson <= numericTotal && (
+                <p className="text-center text-xs text-destructive">
+                  {numericTotal > balance
+                    ? `Total cannot exceed your balance (₦${balance.toLocaleString()}). Fund your wallet first.`
+                    : !evenlyDivisible
+                      ? "Total must divide evenly by amount per person (no leftover kobo — e.g. ₦500 / ₦100 = 5 winners)."
+                      : null}
+                </p>
+              )}
           </motion.div>
         );
 

@@ -12,12 +12,22 @@ const periodLabels: Record<TimePeriod, string> = {
   allTime: 'All Time',
 };
 
+const statsScopeHints: Record<TimePeriod, string> = {
+  weekly:
+    "Your totals: completed NGN sprays and giveaways in the last 7 days (same window as this board).",
+  monthly:
+    "Your totals: completed NGN sprays and giveaways in the last 30 days (same window as this board).",
+  allTime:
+    "Your totals: completed NGN sprays and giveaways from your loaded history (up to 50 transactions).",
+};
+
 export const LeaderboardScreen = () => {
   const [period, setPeriod] = useState<TimePeriod>("weekly");
   const {
     leaderboard,
     loading: isLoading,
     error,
+    isSupabaseConfigured,
     refetch,
     topThree,
     currentUserEntry,
@@ -66,6 +76,16 @@ export const LeaderboardScreen = () => {
         ))}
       </div>
 
+      {!isSupabaseConfigured && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
+          <p className="font-medium">Leaderboard unavailable in this build</p>
+          <p className="mt-1 opacity-90">
+            Set <span className="font-mono text-xs">VITE_SUPABASE_URL</span> and{" "}
+            <span className="font-mono text-xs">VITE_SUPABASE_ANON_KEY</span> at build time, then rebuild.
+          </p>
+        </div>
+      )}
+
       {error && (
         <div className="rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           <p className="font-medium">Could not load leaderboard</p>
@@ -87,6 +107,7 @@ export const LeaderboardScreen = () => {
         totalGifted={currentUserTotalGifted}
         sprayAmount={currentUserSprayTotal}
         giveawayAmount={currentUserGiveawayTotal}
+        statsScopeHint={statsScopeHints[period]}
       />
 
       {/* Top 3 Podium */}
@@ -104,6 +125,13 @@ export const LeaderboardScreen = () => {
           <Trophy className="w-4 h-4 text-muted-foreground" />
           <span className="text-sm font-medium text-muted-foreground">{periodLabels[period]} Rankings</span>
         </div>
+
+        {!isLoading && !error && isSupabaseConfigured && leaderboard.length === 0 && (
+          <p className="rounded-2xl border border-white/10 bg-card/40 px-4 py-6 text-center text-sm text-muted-foreground mb-2">
+            No gifters in this period yet. After people spray or run giveaways, rankings appear once the
+            leaderboard refresh job has run (usually on a short schedule in production).
+          </p>
+        )}
 
         <AnimatePresence mode="sync">
           {isLoading ? (
@@ -127,11 +155,11 @@ export const LeaderboardScreen = () => {
               className="space-y-2"
             >
               {listEntries.length === 0 ? (
-                <p className="rounded-2xl border border-white/10 bg-card/40 px-4 py-8 text-center text-sm text-muted-foreground">
-                  {leaderboard.length === 0
-                    ? "No gifters for this period yet. Spray or run a giveaway to appear here once leaderboards refresh."
-                    : "Top gifters are shown above."}
-                </p>
+                leaderboard.length > 0 ? (
+                  <p className="rounded-2xl border border-white/10 bg-card/40 px-4 py-8 text-center text-sm text-muted-foreground">
+                    Everyone in the top 3 is on the podium — there are no additional ranks to list.
+                  </p>
+                ) : null
               ) : (
                 listEntries.map((entry, index) => (
                   <GifterRankingItem key={entry.id} entry={entry} index={index} />

@@ -67,7 +67,9 @@ Deno.serve(async (req) => {
   if (req.method === "GET" && action === "get_by_code" && id) {
     const { data, error } = await supabase
       .from("giveaways")
-      .select("id, title, per_person_amount, remaining_amount, status, type, code, creator_id, event_id, is_private, created_at")
+      .select(
+        "id, title, total_amount, per_person_amount, remaining_amount, status, type, code, creator_id, event_id, is_private, show_on_event_screen, created_at",
+      )
       .eq("code", id.toUpperCase())
       .single();
     if (error || !data) return withCors({ error: "Giveaway not found" }, { status: 404 });
@@ -98,6 +100,9 @@ Deno.serve(async (req) => {
 
     if (gErr || !giveaway) return withCors({ error: "Giveaway not found" }, { status: 404 });
     if (giveaway.status !== "active") return withCors({ error: "Giveaway is no longer active" }, { status: 400 });
+    if (user.kyc_level < 1) {
+      return withCors({ error: "Verify your email to redeem giveaways" }, { status: 403 });
+    }
     if (giveaway.creator_id === user.id) return withCors({ error: "Cannot redeem your own giveaway" }, { status: 400 });
     if (giveaway.remaining_amount < giveaway.per_person_amount) {
       return withCors({ error: "Giveaway is exhausted" }, { status: 400 });

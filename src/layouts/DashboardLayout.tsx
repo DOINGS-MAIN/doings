@@ -80,7 +80,7 @@ export function DashboardLayout() {
     createBlockradarAddress,
   } = useMultiWallet();
 
-  const { currentLevel: kycLevel, verifyLevel1, verifyLevel2, verifyLevel3 } = useKYC();
+  const { currentLevel: kycLevel, verifyLevel1, verifyLevel2 } = useKYC();
 
   const {
     events,
@@ -97,8 +97,14 @@ export function DashboardLayout() {
     joinEvent,
   } = useEvents();
 
-  const { createGiveaway, redeemGiveaway, stopGiveaway, getMyGiveaways, findGiveawayByCode } =
-    useGiveaways();
+  const {
+    createGiveaway,
+    redeemGiveaway,
+    stopGiveaway,
+    loadGiveawayDetail,
+    getMyGiveaways,
+    findGiveawayByCode,
+  } = useGiveaways();
 
   const liveEventsForList = getLiveEvents().map((event) => ({
     id: event.id,
@@ -206,9 +212,16 @@ export function DashboardLayout() {
     }
   };
 
-  const handleViewGiveaway = (giveaway: Giveaway) => {
+  const handleViewGiveaway = async (giveaway: Giveaway) => {
+    const id = giveaway.id;
     setSelectedGiveaway(giveaway);
     setShowGiveawayDetails(true);
+    try {
+      const enriched = await loadGiveawayDetail(giveaway);
+      setSelectedGiveaway((cur) => (cur?.id === id ? enriched : cur));
+    } catch {
+      /* list snapshot is enough */
+    }
   };
 
   const handleFundNGN = (_amount: number, _method: "bank" | "card", _description: string) => {
@@ -221,7 +234,7 @@ export function DashboardLayout() {
     setShowFundSheet(false);
   };
 
-  const handleCreateMonnifyAccount = async () => createMonnifyAccount();
+  const handleCreateMonnifyAccount = async (bvn: string) => createMonnifyAccount(bvn);
 
   const shellValue: DashboardShellValue = {
     user,
@@ -242,7 +255,6 @@ export function DashboardLayout() {
     withdrawUSDT,
     verifyLevel1,
     verifyLevel2,
-    verifyLevel3,
     events,
     myEvents,
     myEventsInitialLoading,
@@ -398,7 +410,6 @@ export function DashboardLayout() {
           currentLevel={kycLevel}
           onVerifyLevel1={verifyLevel1}
           onVerifyLevel2={verifyLevel2}
-          onVerifyLevel3={verifyLevel3}
         />
 
         <WithdrawSheet

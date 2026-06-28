@@ -28,6 +28,7 @@ export async function createReservedAccount(params: {
   userName: string;
   email: string;
   bvn: string;
+  nin?: string;
 }): Promise<{
   accountNumber: string;
   accountName: string;
@@ -39,24 +40,28 @@ export async function createReservedAccount(params: {
   const token = await getMonnifyToken();
   const accountReference = `DOINGS-${params.userId}`;
 
+  const payload: Record<string, unknown> = {
+    accountReference,
+    accountName: `DOINGS/${params.userName}`,
+    currencyCode: "NGN",
+    contractCode: MONNIFY_CONTRACT_CODE,
+    customerEmail: params.email || `${params.userId}@doings.app`,
+    customerName: params.userName || "Doings User",
+    bvn: params.bvn,
+    getAllAvailableBanks: false,
+    preferredBanks: ["035"],
+    restrictPaymentSource: true,
+  };
+  const nin = params.nin?.replace(/\D/g, "");
+  if (nin && nin.length === 11) payload.nin = nin;
+
   const res = await fetch(`${MONNIFY_BASE_URL}/api/v2/bank-transfer/reserved-accounts`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      accountReference,
-      accountName: `DOINGS/${params.userName}`,
-      currencyCode: "NGN",
-      contractCode: MONNIFY_CONTRACT_CODE,
-      customerEmail: params.email || `${params.userId}@doings.app`,
-      customerName: params.userName || "Doings User",
-      bvn: params.bvn,
-      getAllAvailableBanks: false,
-      preferredBanks: ["035"],
-      restrictPaymentSource: true,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!res.ok) {

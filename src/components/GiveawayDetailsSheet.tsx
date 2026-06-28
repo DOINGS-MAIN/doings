@@ -22,9 +22,13 @@ export const GiveawayDetailsSheet = ({
   if (!giveaway) return null;
 
   const redeemLink = `https://doings.app/redeem/${giveaway.code}`;
-  const percentUsed = ((giveaway.totalAmount - giveaway.remainingAmount) / giveaway.totalAmount) * 100;
-  const winnersCount = giveaway.redemptions.length;
-  const maxWinners = Math.floor(giveaway.totalAmount / giveaway.perPersonAmount);
+  const percentUsed =
+    giveaway.totalAmount > 0
+      ? ((giveaway.totalAmount - giveaway.remainingAmount) / giveaway.totalAmount) * 100
+      : 0;
+  const winnersCount = giveaway.redemptionCount;
+  const maxWinners =
+    giveaway.perPersonAmount > 0 ? Math.floor(giveaway.totalAmount / giveaway.perPersonAmount) : 0;
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(giveaway.code);

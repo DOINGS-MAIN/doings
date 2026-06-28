@@ -46,7 +46,7 @@ export interface DashboardShellValue {
   transactions: FinanceTransaction[];
   monnifyAccount: MonnifyReservedAccount | undefined;
   blockradarAddresses: BlockradarAddress[];
-  createMonnifyAccount: () => Promise<unknown>;
+  createMonnifyAccount: (bvn: string) => Promise<unknown>;
   createBlockradarAddress: (network?: string) => Promise<unknown>;
   withdrawNGN: (amount: number, bankName: string, accountNumber: string, fee: number) => void;
   withdrawUSDT: (
@@ -56,9 +56,8 @@ export interface DashboardShellValue {
     provider: "blockradar" | "quidax",
     fee: number
   ) => void;
-  verifyLevel1: (phone: string, email: string, fullName: string) => Promise<boolean>;
-  verifyLevel2: (bvn: string, dateOfBirth: string) => Promise<{ success: boolean; message: string }>;
-  verifyLevel3: (nin: string, selfieBase64: string) => Promise<{ success: boolean; message: string }>;
+  verifyLevel1: (action: "resend" | "check") => Promise<{ success: boolean; message: string }>;
+  verifyLevel2: (bvn: string, nin: string, dateOfBirth: string) => Promise<{ success: boolean; message: string }>;
   events: EventData[];
   myEvents: EventData[];
   /** First load of hosted events; use for /events page loader. */
@@ -93,7 +92,7 @@ export interface DashboardShellValue {
   handleManageEvent: (event: EventData) => void;
   handleGoLive: (eventId: string) => void;
   handleEndEvent: (eventId: string) => void;
-  handleViewGiveaway: (giveaway: Giveaway) => void;
+  handleViewGiveaway: (giveaway: Giveaway) => void | Promise<void>;
   signOut: () => Promise<void>;
   updateProfile: (updates: { full_name?: string }) => Promise<void>;
 }

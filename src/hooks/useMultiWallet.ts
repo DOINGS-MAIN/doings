@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { getAppUserId } from "@/lib/appUser";
 import { supabase, wallet, withdrawals } from "@/lib/supabase";
 import {
   Currency,
@@ -22,14 +23,16 @@ export const useMultiWallet = () => {
   const [loading, setLoading] = useState(true);
 
   const fetchWallets = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    const appUserId = await getAppUserId();
+    if (!appUserId) return;
 
     const { data: wallets } = await supabase
       .from("wallets")
       .select("currency, balance, locked_balance")
-      .eq("user_id", session.user.id);
+      .eq("user_id", appUserId);
 
+    setNgnBalance(0);
+    setUsdtBalance(0);
     if (wallets) {
       for (const w of wallets) {
         if (w.currency === "NGN") setNgnBalance(toDisplay(w.balance, "NGN"));
@@ -39,13 +42,13 @@ export const useMultiWallet = () => {
   }, []);
 
   const fetchTransactions = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    const appUserId = await getAppUserId();
+    if (!appUserId) return;
 
     const { data: txns } = await supabase
       .from("transactions")
       .select("*")
-      .or(`sender_id.eq.${session.user.id},recipient_id.eq.${session.user.id}`)
+      .eq("user_id", appUserId)
       .order("created_at", { ascending: false })
       .limit(50);
 
@@ -72,15 +75,15 @@ export const useMultiWallet = () => {
   }, []);
 
   const fetchMonnifyAccount = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    const appUserId = await getAppUserId();
+    if (!appUserId) return;
 
     const { data } = await supabase
       .from("monnify_reserved_accounts")
       .select("*")
-      .eq("user_id", session.user.id)
+      .eq("user_id", appUserId)
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (data) {
       setMonnifyAccount({
@@ -92,17 +95,26 @@ export const useMultiWallet = () => {
         reservationReference: data.reservation_reference,
         status: data.status,
       });
+    } else {
+      setMonnifyAccount(undefined);
     }
   }, []);
 
   const fetchBlockradarAddresses = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    const appUserId = await getAppUserId();
+    if (!appUserId) return;
+
+    const { data: wallets } = await supabase.from("wallets").select("id").eq("user_id", appUserId);
+    const walletIds = wallets?.map((w) => w.id) ?? [];
+    if (walletIds.length === 0) {
+      setBlockradarAddresses([]);
+      return;
+    }
 
     const { data } = await supabase
       .from("wallet_addresses")
       .select("*")
-      .eq("user_id", session.user.id)
+      .in("wallet_id", walletIds)
       .eq("provider", "blockradar");
 
     if (data) {
@@ -114,6 +126,8 @@ export const useMultiWallet = () => {
           walletId: a.wallet_id as string,
         }))
       );
+    } else {
+      setBlockradarAddresses([]);
     }
   }, []);
 
@@ -141,11 +155,18 @@ export const useMultiWallet = () => {
     };
   }, [fetchWallets, fetchTransactions, fetchMonnifyAccount, fetchBlockradarAddresses]);
 
-  const createMonnifyAccount = useCallback(async () => {
-    const result = await wallet.createMonnifyAccount();
-    await fetchMonnifyAccount();
-    return result as unknown as MonnifyReservedAccount;
-  }, [fetchMonnifyAccount]);
+  const createMonnifyAccount = useCallback(
+    async (bvn: string) => {
+      const digits = bvn.replace(/\D/g, "");
+      if (digits.length !== 11) {
+        throw new Error("BVN must be 11 digits");
+      }
+      const result = await wallet.createMonnifyAccount(digits);
+      await fetchMonnifyAccount();
+      return result as unknown as MonnifyReservedAccount;
+    },
+    [fetchMonnifyAccount]
+  );
 
   const createBlockradarAddress = useCallback(async (network: string = "TRC20") => {
     const result = await wallet.createBlockradarAddress(network);
