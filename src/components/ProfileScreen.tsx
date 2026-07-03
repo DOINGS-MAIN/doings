@@ -3,12 +3,14 @@ import { motion } from "framer-motion";
 import {
   User, Shield, CreditCard, Bell, Moon, Sun, LogOut,
   ChevronRight, Camera, Copy, Check, HelpCircle, FileText,
-  Lock, Smartphone, Star, Award
+  Lock, Smartphone, Star, Award, AtSign
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { AvatarData } from "@/components/AvatarCustomization";
+import { formatUsername, normalizeUsernameInput, USERNAME_RE, usernameRpcError } from "@/lib/username";
 
 interface ProfileScreenProps {
   avatarData: AvatarData;
@@ -16,21 +18,23 @@ interface ProfileScreenProps {
   ngnBalance: number;
   usdtBalance: number;
   userName: string;
+  userUsername: string | null;
   userPhone: string;
   userId: string;
   onOpenAvatar: () => void;
   onOpenKYC: () => void;
   onOpenBankAccounts: () => void;
+  onOpenSecurity: () => void;
   onOpenNotifications: () => void;
   onLogout: () => void;
   onUpdateName?: (name: string) => Promise<void>;
+  onUpdateUsername?: (username: string) => Promise<void>;
 }
 
 const kycLabels: Record<number, { label: string; color: string; badge: string }> = {
   0: { label: "Unverified", color: "text-destructive", badge: "bg-destructive/20 text-destructive" },
-  1: { label: "Basic", color: "text-yellow-500", badge: "bg-yellow-500/20 text-yellow-500" },
-  2: { label: "Intermediate", color: "text-blue-500", badge: "bg-blue-500/20 text-blue-500" },
-  3: { label: "Fully Verified", color: "text-green-500", badge: "bg-green-500/20 text-green-500" },
+  1: { label: "Email verified", color: "text-yellow-500", badge: "bg-yellow-500/20 text-yellow-500" },
+  2: { label: "Fully verified", color: "text-green-500", badge: "bg-green-500/20 text-green-500" },
 };
 
 export const ProfileScreen = ({
@@ -39,20 +43,29 @@ export const ProfileScreen = ({
   ngnBalance,
   usdtBalance,
   userName,
+  userUsername,
   userPhone,
   userId,
   onOpenAvatar,
   onOpenKYC,
   onOpenBankAccounts,
+  onOpenSecurity,
   onOpenNotifications,
   onLogout,
   onUpdateName,
+  onUpdateUsername,
 }: ProfileScreenProps) => {
   const [darkMode, setDarkMode] = useState(true);
   const [notifications, setNotifications] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [copiedUsername, setCopiedUsername] = useState(false);
   const [editingName, setEditingName] = useState(false);
+  const [editingUsername, setEditingUsername] = useState(false);
   const [nameInput, setNameInput] = useState(userName);
+  const [usernameInput, setUsernameInput] = useState(userUsername ?? "");
+  const [savingUsername, setSavingUsername] = useState(false);
+
+  const displayUsername = userUsername ? formatUsername(userUsername) : "";
 
   const displayId = userId ? `USR-${userId.slice(0, 6).toUpperCase()}` : "USR-000000";
   const kycInfo = kycLabels[kycLevel] || kycLabels[0];
@@ -74,6 +87,34 @@ export const ProfileScreen = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleCopyUsername = () => {
+    if (!displayUsername) return;
+    navigator.clipboard.writeText(displayUsername);
+    setCopiedUsername(true);
+    toast.success("Username copied!");
+    setTimeout(() => setCopiedUsername(false), 2000);
+  };
+
+  const handleSaveUsername = async () => {
+    const normalized = normalizeUsernameInput(usernameInput);
+    if (!USERNAME_RE.test(normalized)) {
+      toast.error("Username must be 3–30 characters: letters, numbers, underscore only");
+      return;
+    }
+    if (!onUpdateUsername) return;
+
+    setSavingUsername(true);
+    try {
+      await onUpdateUsername(normalized);
+      setEditingUsername(false);
+      toast.success(userUsername ? "Username updated" : "Username set");
+    } catch (error) {
+      toast.error(usernameRpcError(error));
+    } finally {
+      setSavingUsername(false);
+    }
+  };
+
   const backgrounds = {
     "gold-gradient": "from-amber-500 via-yellow-400 to-amber-600",
     "purple-gradient": "from-purple-600 via-violet-500 to-purple-700",
@@ -91,7 +132,7 @@ export const ProfileScreen = ({
       items: [
         { icon: Shield, label: "KYC Verification", sublabel: kycInfo.label, action: onOpenKYC, badge: kycInfo.badge },
         { icon: CreditCard, label: "Bank Accounts", sublabel: "Manage linked accounts", action: onOpenBankAccounts },
-        { icon: Lock, label: "Security", sublabel: "PIN & password", action: () => toast.info("Coming soon") },
+        { icon: Lock, label: "Security", sublabel: "Transaction PIN", action: onOpenSecurity },
         { icon: Smartphone, label: "Linked Devices", sublabel: "1 device active", action: () => toast.info("Coming soon") },
       ],
     },
@@ -190,6 +231,67 @@ export const ProfileScreen = ({
                 <h2 className="text-lg font-bold text-foreground">{userName || "Tap to set name"}</h2>
               </button>
             )}
+
+            {editingUsername ? (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void handleSaveUsername();
+                }}
+                className="mt-2 flex items-center gap-2"
+              >
+                <div className="relative flex-1">
+                  <AtSign className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                  <Input
+                    value={usernameInput}
+                    onChange={(e) => setUsernameInput(normalizeUsernameInput(e.target.value))}
+                    placeholder="username"
+                    className="pl-7 h-9"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    maxLength={30}
+                    autoFocus
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="text-xs text-primary font-semibold shrink-0"
+                  disabled={savingUsername}
+                >
+                  {savingUsername ? "…" : "Save"}
+                </button>
+              </form>
+            ) : (
+              <div className="mt-1 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUsernameInput(userUsername ?? "");
+                    setEditingUsername(true);
+                  }}
+                  className="flex items-center gap-1.5 text-left min-w-0"
+                >
+                  <AtSign className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                  {displayUsername ? (
+                    <span className="text-sm font-medium text-primary truncate">{displayUsername}</span>
+                  ) : (
+                    <span className="text-sm text-amber-600 dark:text-amber-400">Set username to receive money</span>
+                  )}
+                </button>
+                {displayUsername ? (
+                  <button
+                    type="button"
+                    onClick={handleCopyUsername}
+                    className="text-muted-foreground hover:text-foreground shrink-0"
+                    aria-label="Copy username"
+                  >
+                    {copiedUsername ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                ) : null}
+              </div>
+            )}
+
             <p className="text-sm text-muted-foreground">{maskedContact}</p>
             <div className="flex items-center gap-2 mt-1">
               <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${kycInfo.badge}`}>

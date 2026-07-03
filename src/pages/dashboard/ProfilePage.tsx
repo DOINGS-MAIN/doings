@@ -12,11 +12,13 @@ export default function ProfilePage() {
       ngnBalance={d.ngnBalance}
       usdtBalance={d.usdtBalance}
       userName={d.profile?.full_name || ""}
+      userUsername={d.profile?.username ?? null}
       userPhone={d.profile?.phone || d.profile?.email || d.user?.email || ""}
       userId={d.profile?.id || ""}
       onOpenAvatar={() => d.setShowAvatarCustomization(true)}
       onOpenKYC={() => d.setShowKYC(true)}
       onOpenBankAccounts={() => d.setShowBankAccounts(true)}
+      onOpenSecurity={() => d.setShowTransactionPin(true)}
       onOpenNotifications={() => d.setShowNotifications(true)}
       onLogout={async () => {
         await d.signOut();
@@ -25,6 +27,7 @@ export default function ProfilePage() {
       onUpdateName={async (name) => {
         await d.updateProfile({ full_name: name });
       }}
+      onUpdateUsername={(username) => d.setUsername(username)}
     />
   );
 }

@@ -3,6 +3,7 @@ import { sha512Hex } from "../_shared/crypto.ts";
 import { getServiceClient } from "../_shared/db.ts";
 import { isSamePersonName } from "../_shared/name-match.ts";
 import { insertWebhookLog, markWebhookProcessed } from "../_shared/webhook.ts";
+import { applyWithdrawalStatus } from "../_shared/psp/withdrawalFinalize.ts";
 
 type PaymentSource = {
   accountName?: string;
@@ -81,16 +82,24 @@ Deno.serve(async (req) => {
         const supabase = getServiceClient();
         const { data: txn } = await supabase
           .from("transactions")
-          .select("id, status")
-          .eq("provider", "monnify")
-          .eq("provider_ref", ref)
-          .eq("status", "pending")
+          .select("id, provider, provider_ref, idempotency_key, status")
+          .eq("type", "withdrawal")
+          .in("status", ["pending", "processing"])
+          .or(`provider_ref.eq.${ref},idempotency_key.eq.${ref}`)
           .maybeSingle();
 
         if (txn?.id) {
-          const rpcName = eventType === "SUCCESSFUL_DISBURSEMENT" ? "complete_withdrawal" : "fail_withdrawal";
-          const { error: rpcErr } = await supabase.rpc(rpcName, { p_transaction_id: txn.id });
-          if (rpcErr) throw rpcErr;
+          const normalized = eventType === "SUCCESSFUL_DISBURSEMENT" ? "terminal_success" : "terminal_failure";
+          await applyWithdrawalStatus(
+            supabase,
+            txn,
+            {
+              normalized,
+              providerStatus: eventType,
+              providerRef: ref,
+            },
+            "webhook",
+          );
         }
       }
       await markWebhookProcessed(logId);
@@ -117,9 +126,10 @@ Deno.serve(async (req) => {
 
     const supabase = getServiceClient();
     const { data: monnifyAccount, error: monnifyErr } = await supabase
-      .from("monnify_reserved_accounts")
+      .from("reserved_accounts")
       .select("wallet_id, user_id")
       .eq("account_reference", accountReference)
+      .eq("provider_id", "monnify")
       .single();
 
     if (monnifyErr || !monnifyAccount) {

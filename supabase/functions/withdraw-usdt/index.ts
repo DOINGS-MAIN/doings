@@ -3,11 +3,13 @@ import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { checkWithdrawalLimit } from "../_shared/limits.ts";
 import { sendUsdt } from "../_shared/blockradar.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
+import { requireTransactionPin } from "../_shared/pin.ts";
 
 type WithdrawBody = {
   amount: number;
   address: string;
   network?: string;
+  pin: string;
 };
 
 Deno.serve(async (req) => {
@@ -30,10 +32,13 @@ Deno.serve(async (req) => {
   if (userErr || !user) return withCors({ error: "User not found" }, { status: 404 });
   if (user.kyc_level < 2) return withCors({ error: "KYC level 2 (BVN) required for withdrawals" }, { status: 403 });
 
+  const body = (await req.json()) as WithdrawBody;
+  const pinCheck = await requireTransactionPin(supabase, user.id, body.pin);
+  if (pinCheck) return pinCheck;
+
   const rl = await checkRateLimit(RATE_LIMITS.withdrawal(user.id));
   if (!rl.allowed) return withCors({ error: "Too many withdrawal requests. Try again shortly." }, { status: 429 });
 
-  const body = (await req.json()) as WithdrawBody;
   if (!body.amount || !body.address) {
     return withCors({ error: "amount and address are required" }, { status: 400 });
   }

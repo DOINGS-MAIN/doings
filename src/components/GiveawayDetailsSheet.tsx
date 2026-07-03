@@ -5,12 +5,16 @@ import { Gift, Users, Copy, Share2, StopCircle, Clock, CheckCircle, XCircle, QrC
 import { Giveaway } from "@/hooks/useGiveaways";
 import QRCode from "react-qr-code";
 import { toast } from "sonner";
+import { useState } from "react";
+import { PinInput } from "@/components/PinInput";
+import { isValidPin } from "@/lib/pin";
 
 interface GiveawayDetailsSheetProps {
   giveaway: Giveaway | null;
   isOpen: boolean;
   onClose: () => void;
-  onStop: (giveawayId: string) => void;
+  onStop: (giveawayId: string, pin: string) => void | Promise<void>;
+  onPinNotSet?: () => void;
 }
 
 export const GiveawayDetailsSheet = ({
@@ -18,13 +22,21 @@ export const GiveawayDetailsSheet = ({
   isOpen,
   onClose,
   onStop,
+  onPinNotSet,
 }: GiveawayDetailsSheetProps) => {
+  const [stopPin, setStopPin] = useState("");
+  const [showStopPin, setShowStopPin] = useState(false);
+
   if (!giveaway) return null;
 
   const redeemLink = `https://doings.app/redeem/${giveaway.code}`;
-  const percentUsed = ((giveaway.totalAmount - giveaway.remainingAmount) / giveaway.totalAmount) * 100;
-  const winnersCount = giveaway.redemptions.length;
-  const maxWinners = Math.floor(giveaway.totalAmount / giveaway.perPersonAmount);
+  const percentUsed =
+    giveaway.totalAmount > 0
+      ? ((giveaway.totalAmount - giveaway.remainingAmount) / giveaway.totalAmount) * 100
+      : 0;
+  const winnersCount = giveaway.redemptionCount;
+  const maxWinners =
+    giveaway.perPersonAmount > 0 ? Math.floor(giveaway.totalAmount / giveaway.perPersonAmount) : 0;
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(giveaway.code);
@@ -52,9 +64,19 @@ export const GiveawayDetailsSheet = ({
     }
   };
 
-  const handleStop = () => {
-    onStop(giveaway.id);
-    onClose();
+  const handleStop = async () => {
+    if (!isValidPin(stopPin)) {
+      toast.error("Enter your 4-digit transaction PIN");
+      return;
+    }
+    try {
+      await onStop(giveaway.id, stopPin);
+      onClose();
+    } catch (error) {
+      const code = (error as Error & { code?: string }).code;
+      if (code === "PIN_NOT_SET") onPinNotSet?.();
+      toast.error(error instanceof Error ? error.message : "Failed to stop giveaway");
+    }
   };
 
   const getStatusBadge = () => {
@@ -213,14 +235,33 @@ export const GiveawayDetailsSheet = ({
                 </Button>
               </div>
 
-              <Button
-                onClick={handleStop}
-                variant="destructive"
-                className="w-full h-14 rounded-2xl font-bold"
-              >
-                <StopCircle className="w-5 h-5 mr-2" />
-                Stop Giveaway
-              </Button>
+              {showStopPin ? (
+                <div className="space-y-3">
+                  <PinInput value={stopPin} onChange={setStopPin} label="Transaction PIN to stop" />
+                  <div className="flex gap-2">
+                    <Button variant="outline" className="flex-1" onClick={() => setShowStopPin(false)}>
+                      Cancel
+                    </Button>
+                    <Button
+                      onClick={() => void handleStop()}
+                      variant="destructive"
+                      className="flex-1 font-bold"
+                      disabled={!isValidPin(stopPin)}
+                    >
+                      Confirm stop
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  onClick={() => setShowStopPin(true)}
+                  variant="destructive"
+                  className="w-full h-14 rounded-2xl font-bold"
+                >
+                  <StopCircle className="w-5 h-5 mr-2" />
+                  Stop Giveaway
+                </Button>
+              )}
               <p className="text-xs text-center text-muted-foreground">
                 Remaining ₦{giveaway.remainingAmount.toLocaleString()} will be refunded to your wallet
               </p>

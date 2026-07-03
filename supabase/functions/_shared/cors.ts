@@ -1,6 +1,6 @@
 export const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-monnify-signature, x-blockradar-signature, x-quidax-signature",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-monnify-signature, x-blockradar-signature, x-quidax-signature, nomba-signature, nomba-timestamp",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
 };
 

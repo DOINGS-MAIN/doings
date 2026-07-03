@@ -1,5 +1,6 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
+import { requireTransactionPin } from "../_shared/pin.ts";
 
 type CreateBody = {
   title: string;
@@ -9,6 +10,7 @@ type CreateBody = {
   event_id?: string;
   is_private?: boolean;
   show_on_event_screen?: boolean;
+  pin: string;
 };
 
 type RedeemBody = {
@@ -17,6 +19,7 @@ type RedeemBody = {
 
 type StopBody = {
   giveaway_id: string;
+  pin: string;
 };
 
 function getPathAction(url: string): { action: string; id?: string } {
@@ -67,7 +70,9 @@ Deno.serve(async (req) => {
   if (req.method === "GET" && action === "get_by_code" && id) {
     const { data, error } = await supabase
       .from("giveaways")
-      .select("id, title, per_person_amount, remaining_amount, status, type, code, creator_id, event_id, is_private, created_at")
+      .select(
+        "id, title, total_amount, per_person_amount, remaining_amount, status, type, code, creator_id, event_id, is_private, show_on_event_screen, created_at",
+      )
       .eq("code", id.toUpperCase())
       .single();
     if (error || !data) return withCors({ error: "Giveaway not found" }, { status: 404 });
@@ -98,6 +103,9 @@ Deno.serve(async (req) => {
 
     if (gErr || !giveaway) return withCors({ error: "Giveaway not found" }, { status: 404 });
     if (giveaway.status !== "active") return withCors({ error: "Giveaway is no longer active" }, { status: 400 });
+    if (user.kyc_level < 1) {
+      return withCors({ error: "Verify your email to redeem giveaways" }, { status: 403 });
+    }
     if (giveaway.creator_id === user.id) return withCors({ error: "Cannot redeem your own giveaway" }, { status: 400 });
     if (giveaway.remaining_amount < giveaway.per_person_amount) {
       return withCors({ error: "Giveaway is exhausted" }, { status: 400 });
@@ -166,6 +174,9 @@ Deno.serve(async (req) => {
     const body = (await req.json()) as StopBody;
     if (!body.giveaway_id) return withCors({ error: "giveaway_id is required" }, { status: 400 });
 
+    const pinCheck = await requireTransactionPin(supabase, user.id, body.pin);
+    if (pinCheck) return pinCheck;
+
     const { data: giveaway, error: gErr } = await supabase
       .from("giveaways")
       .select("id, creator_id, remaining_amount, status, funding_transaction_id")
@@ -230,6 +241,9 @@ Deno.serve(async (req) => {
     if (user.kyc_level < 2) return withCors({ error: "KYC level 2 required to create giveaways" }, { status: 403 });
 
     const body = (await req.json()) as CreateBody;
+    const pinCheck = await requireTransactionPin(supabase, user.id, body.pin);
+    if (pinCheck) return pinCheck;
+
     if (!body.title || !body.total_amount || !body.per_person_amount || !body.type) {
       return withCors({ error: "title, total_amount, per_person_amount, and type are required" }, { status: 400 });
     }

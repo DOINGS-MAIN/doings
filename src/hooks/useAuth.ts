@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import { supabase, auth, isSupabaseConfigured } from "@/lib/supabase";
+import { supabase, auth, isSupabaseConfigured, profileApi } from "@/lib/supabase";
+import type { SignUpResult } from "@/types/auth";
+
+export type { SignUpResult } from "@/types/auth";
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -91,10 +94,17 @@ export const useAuth = () => {
       if (!user) return;
 
       void withTimeout(fetchProfile(user.id), PROFILE_TIMEOUT_MS, "fetchProfile")
-        .then((profile) => {
+        .then(async (profile) => {
+          let next = profile;
+          if (!next) {
+            const { error } = await supabase.rpc("ensure_auth_user_profile");
+            if (!error) {
+              next = await fetchProfile(user.id);
+            }
+          }
           setState((prev) => {
             if (prev.user?.id !== user.id) return prev;
-            return { ...prev, profile };
+            return { ...prev, profile: next };
           });
         })
         .catch((e) => {
@@ -118,18 +128,42 @@ export const useAuth = () => {
 
   const signInWithPassword = useCallback(async (email: string, password: string) => {
     const { data, error } = await auth.signInWithPassword(email, password);
-    if (error) throw error;
+    if (error) {
+      const msg = (error.message ?? "").toLowerCase();
+      if (msg.includes("email not confirmed") || msg.includes("not confirmed")) {
+        throw new Error(
+          "Please verify your email first. Open the confirmation link we sent you, then try logging in again."
+        );
+      }
+      throw error;
+    }
     return data.user;
   }, []);
 
   const signUpWithPassword = useCallback(
-    async (email: string, password: string, firstName: string, lastName: string, username: string) => {
+    async (email: string, password: string, firstName: string, lastName: string, username: string): Promise<SignUpResult> => {
       const { data, error } = await auth.signUpWithPassword(email, password, firstName, lastName, username);
       if (error) throw error;
-      return data.user;
+      const needsEmailConfirmation = Boolean(data.user) && !data.session;
+      return { user: data.user ?? null, needsEmailConfirmation };
     },
     []
   );
+
+  const resetPasswordForEmail = useCallback(async (email: string) => {
+    const { error } = await auth.resetPasswordForEmail(email);
+    if (error) throw error;
+  }, []);
+
+  const resendSignupEmail = useCallback(async (email: string) => {
+    const { error } = await auth.resendSignupEmail(email);
+    if (error) throw error;
+  }, []);
+
+  const updatePassword = useCallback(async (newPassword: string) => {
+    const { error } = await auth.updatePassword(newPassword);
+    if (error) throw error;
+  }, []);
 
   const signInWithGoogle = useCallback(async () => {
     const redirectTo = `${window.location.origin}/home`;
@@ -165,6 +199,19 @@ export const useAuth = () => {
     await refreshProfile();
   }, [state.user, refreshProfile]);
 
+  const setUsername = useCallback(async (username: string) => {
+    if (!state.user) return;
+    const { error } = await profileApi.setUsername(username);
+    if (error) throw error;
+    await refreshProfile();
+  }, [state.user, refreshProfile]);
+
+  const isUsernameAvailable = useCallback(async (username: string) => {
+    const { data, error } = await profileApi.isUsernameAvailable(username);
+    if (error) throw error;
+    return Boolean(data);
+  }, []);
+
   return {
     session: state.session,
     user: state.user,
@@ -174,9 +221,14 @@ export const useAuth = () => {
     isAuthenticated: !!state.session,
     signInWithPassword,
     signUpWithPassword,
+    resetPasswordForEmail,
+    resendSignupEmail,
+    updatePassword,
     signInWithGoogle,
     signOut,
     refreshProfile,
     updateProfile,
+    setUsername,
+    isUsernameAvailable,
   };
 };

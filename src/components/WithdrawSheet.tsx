@@ -7,7 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useBankAccounts, BankAccount } from "@/hooks/useBankAccounts";
 import { toast } from "sonner";
-import { Currency, KYCLevel, KYC_GATES } from "@/types/finance";
+import { Currency, KYCLevel, KYC_GATES, WithdrawalFeeSettings } from "@/types/finance";
+import { NGN_WITHDRAWAL_MIN_NAIRA } from "@/lib/withdrawalConstants";
+import { calculateWithdrawalFees } from "@/lib/withdrawalFees";
+import { PinInput } from "@/components/PinInput";
+import { isValidPin } from "@/lib/pin";
 
 interface WithdrawSheetProps {
   open: boolean;
@@ -18,15 +22,16 @@ interface WithdrawSheetProps {
   kycLevel: KYCLevel;
   ngnBalance: number;
   usdtBalance: number;
-  onWithdrawNGN: (amount: number, bankName: string, accountNumber: string, fee: number) => void;
-  onWithdrawUSDT: (amount: number, toAddress: string, network: string, provider: "blockradar" | "quidax", fee: number) => void;
+  ngnWithdrawalFees: WithdrawalFeeSettings;
+  onWithdrawNGN: (amount: number, bankCode: string, accountNumber: string, accountName: string, pin: string) => Promise<void>;
+  onWithdrawUSDT: (amount: number, toAddress: string, network: string, provider: "blockradar" | "quidax", fee: number, pin: string) => Promise<void>;
+  onPinNotSet?: () => void;
 }
 
 type WithdrawStep = "currency" | "amount" | "usdt-address" | "confirm" | "processing" | "success";
 
 const NGN_QUICK_AMOUNTS = [5000, 10000, 20000, 50000, 100000];
 const USDT_QUICK_AMOUNTS = [5, 10, 25, 50, 100];
-const WITHDRAWAL_FEE_PERCENT = 1.5;
 const USDT_WITHDRAWAL_FEE = 1; // $1 flat fee
 
 const USDT_NETWORKS = [
@@ -44,8 +49,10 @@ export const WithdrawSheet = ({
   kycLevel,
   ngnBalance,
   usdtBalance,
+  ngnWithdrawalFees,
   onWithdrawNGN,
   onWithdrawUSDT,
+  onPinNotSet,
 }: WithdrawSheetProps) => {
   const { accounts, getDefaultAccount } = useBankAccounts();
   const [currency, setCurrency] = useState<Currency>(activeCurrency);
@@ -59,10 +66,15 @@ export const WithdrawSheet = ({
   const balance = currency === "NGN" ? ngnBalance : usdtBalance;
   const symbol = currency === "NGN" ? "₦" : "$";
   const numericAmount = parseFloat(amount) || 0;
-  const fee = currency === "NGN" ? Math.ceil(numericAmount * (WITHDRAWAL_FEE_PERCENT / 100)) : USDT_WITHDRAWAL_FEE;
+  const ngnFeeBreakdown = currency === "NGN"
+    ? calculateWithdrawalFees(numericAmount, ngnWithdrawalFees)
+    : null;
+  const fee = currency === "NGN"
+    ? (ngnFeeBreakdown?.totalFeeNaira ?? 0)
+    : USDT_WITHDRAWAL_FEE;
   const totalDeduction = numericAmount + fee;
   const canWithdraw = currency === "NGN"
-    ? numericAmount >= 1000 && totalDeduction <= balance
+    ? numericAmount >= NGN_WITHDRAWAL_MIN_NAIRA && totalDeduction <= balance
     : numericAmount >= 2 && totalDeduction <= balance;
 
   const handleAmountChange = (value: string) => {
@@ -81,10 +93,10 @@ export const WithdrawSheet = ({
             </div>
             <h2 className="text-xl font-bold mb-2">Complete Full Verification</h2>
             <p className="text-muted-foreground mb-2">
-              Level 3 KYC (NIN + Selfie) is required to withdraw funds.
+              Complete BVN + NIN verification (Level 2) to withdraw funds.
             </p>
             <p className="text-sm text-muted-foreground mb-6">
-              Current level: {kycLevel}/3
+              Current level: {kycLevel}/2
             </p>
             <Button onClick={() => { onOpenChange(false); onOpenKYC(); }}>
               Complete Verification
@@ -141,24 +153,34 @@ export const WithdrawSheet = ({
   };
 
   const handleConfirm = async () => {
-    if (pin.length !== 4) {
-      toast.error("Enter your 4-digit PIN");
+    if (!isValidPin(pin)) {
+      toast.error("Enter your 4-digit transaction PIN");
+      return;
+    }
+
+    const account = selectedAccount ?? getDefaultAccount();
+    if (currency === "NGN" && !account) {
+      toast.error("Select a bank account");
       return;
     }
 
     setStep("processing");
-    await new Promise((r) => setTimeout(r, 2000));
 
     try {
-      if (currency === "NGN" && selectedAccount) {
-        onWithdrawNGN(numericAmount, selectedAccount.bankName, selectedAccount.accountNumber, fee);
+      if (currency === "NGN" && account) {
+        await onWithdrawNGN(numericAmount, account.bankCode, account.accountNumber, account.accountName, pin);
       } else if (currency === "USDT") {
-        onWithdrawUSDT(numericAmount, toAddress, selectedNetwork, "blockradar", fee);
+        await onWithdrawUSDT(numericAmount, toAddress, selectedNetwork, "blockradar", fee, pin);
       }
       setStep("success");
-    } catch {
-      toast.error("Withdrawal failed");
-      setStep("amount");
+    } catch (err) {
+      const code = (err as Error & { code?: string }).code;
+      if (code === "PIN_NOT_SET") {
+        onPinNotSet?.();
+      }
+      const message = err instanceof Error ? err.message : "Withdrawal failed";
+      toast.error(message);
+      setStep("confirm");
     }
   };
 
@@ -186,7 +208,7 @@ export const WithdrawSheet = ({
             Withdraw {currency}
           </SheetTitle>
           <SheetDescription>
-            {currency === "NGN" ? "Transfer to your bank account (Monnify)" : "Send USDT externally (Blockradar)"}
+            {currency === "NGN" ? "Transfer to your bank account" : "Send USDT externally (Blockradar)"}
           </SheetDescription>
         </SheetHeader>
 
@@ -273,10 +295,31 @@ export const WithdrawSheet = ({
                       <span className="text-muted-foreground">Amount</span>
                       <span>{symbol}{numericAmount.toLocaleString()}</span>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">Fee {currency === "NGN" ? `(${WITHDRAWAL_FEE_PERCENT}%)` : "(flat)"}</span>
-                      <span>{symbol}{fee.toLocaleString()}</span>
-                    </div>
+                    {currency === "NGN" && ngnFeeBreakdown ? (
+                      <>
+                        {ngnWithdrawalFees.platformFeePercent > 0 && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-muted-foreground">
+                              Platform fee ({ngnWithdrawalFees.platformFeePercent}%)
+                            </span>
+                            <span>₦{ngnFeeBreakdown.platformFeeNaira.toLocaleString()}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Transaction fee</span>
+                          <span>₦{ngnFeeBreakdown.transactionFeeNaira.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between text-sm font-medium">
+                          <span className="text-muted-foreground">Total fee</span>
+                          <span>₦{ngnFeeBreakdown.totalFeeNaira.toLocaleString()}</span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Fee (flat)</span>
+                        <span>{symbol}{fee.toLocaleString()}</span>
+                      </div>
+                    )}
                     <div className="border-t pt-2 flex justify-between font-bold">
                       <span>Total</span><span>{symbol}{totalDeduction.toLocaleString()}</span>
                     </div>
@@ -286,7 +329,7 @@ export const WithdrawSheet = ({
                 {numericAmount > 0 && !canWithdraw && (
                   <p className="text-sm text-destructive flex items-center gap-2">
                     <AlertCircle className="w-4 h-4" />
-                    {totalDeduction > balance ? "Insufficient balance" : currency === "NGN" ? "Minimum ₦1,000" : "Minimum $2"}
+                    {totalDeduction > balance ? "Insufficient balance" : currency === "NGN" ? `Minimum ₦${NGN_WITHDRAWAL_MIN_NAIRA.toLocaleString()}` : "Minimum $2"}
                   </p>
                 )}
 
@@ -357,16 +400,11 @@ export const WithdrawSheet = ({
                   )}
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Enter PIN to Confirm</Label>
-                  <Input type="password" inputMode="numeric" placeholder="••••" value={pin}
-                    onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                    maxLength={4} className="text-center text-2xl tracking-[1em] font-bold" />
-                </div>
+                <PinInput value={pin} onChange={setPin} label="Enter transaction PIN to confirm" />
 
                 <div className="flex gap-3">
                   <Button variant="outline" className="flex-1" onClick={() => setStep(currency === "USDT" ? "usdt-address" : "amount")}>Back</Button>
-                  <Button className="flex-1" onClick={handleConfirm} disabled={pin.length !== 4}>Confirm</Button>
+                  <Button className="flex-1" onClick={handleConfirm} disabled={!isValidPin(pin)}>Confirm</Button>
                 </div>
               </motion.div>
             )}
@@ -377,7 +415,7 @@ export const WithdrawSheet = ({
                 <motion.div animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                   className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full mb-6" />
                 <p className="text-xl font-bold">
-                  {currency === "NGN" ? "Processing via Monnify..." : "Submitting to Blockradar..."}
+                  {currency === "NGN" ? "Processing withdrawal..." : "Submitting to Blockradar..."}
                 </p>
                 <p className="text-muted-foreground">Please wait</p>
               </motion.div>

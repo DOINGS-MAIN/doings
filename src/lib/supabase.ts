@@ -34,7 +34,7 @@ async function authHeaders(): Promise<Record<string, string>> {
 async function invoke<T = unknown>(fnName: string, options?: {
   method?: string;
   body?: unknown;
-  params?: Record<string, string>;
+  params?: Record<string, string | number | boolean | undefined | null>;
   path?: string;
 }): Promise<T> {
   const method = options?.method ?? "POST";
@@ -43,8 +43,13 @@ async function invoke<T = unknown>(fnName: string, options?: {
   let url = `${supabaseUrl}/functions/v1/${fnName}`;
   if (options?.path) url += `/${options.path}`;
   if (options?.params) {
-    const qs = new URLSearchParams(options.params);
-    url += `?${qs.toString()}`;
+    const qs = new URLSearchParams();
+    for (const [key, value] of Object.entries(options.params)) {
+      if (value === undefined || value === null || value === "") continue;
+      qs.set(key, String(value));
+    }
+    const query = qs.toString();
+    if (query) url += `?${query}`;
   }
 
   const res = await fetch(url, {
@@ -60,14 +65,42 @@ async function invoke<T = unknown>(fnName: string, options?: {
     throw new Error(`Request failed: ${res.status}`);
   }
   if (!res.ok) {
+    const detail = typeof data.detail === "string" ? data.detail : "";
     const msg =
       (typeof data.error === "string" && data.error) ||
       (typeof data.message === "string" && data.message) ||
       (typeof data.msg === "string" && data.msg) ||
       `Request failed: ${res.status}`;
-    throw new Error(msg);
+    const err = new Error(detail ? `${msg}: ${detail}` : msg) as Error & { code?: string };
+    if (typeof data.code === "string") err.code = data.code;
+    throw err;
   }
   return data as T;
+}
+
+async function downloadAdminCsv(path: string, params?: Record<string, string>): Promise<void> {
+  const headers = await authHeaders();
+  const qs = new URLSearchParams({ ...(params ?? {}), format: "csv" });
+  const url = `${supabaseUrl}/functions/v1/admin/${path}?${qs.toString()}`;
+  const res = await fetch(url, { method: "GET", headers });
+  if (!res.ok) {
+    let message = `Export failed: ${res.status}`;
+    try {
+      const data = (await res.json()) as { error?: string };
+      if (data.error) message = data.error;
+    } catch {
+      // ignore
+    }
+    throw new Error(message);
+  }
+  const blob = await res.blob();
+  const filename = path.replace(/\//g, "-") + ".csv";
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(objectUrl);
 }
 
 // ── Auth ──
@@ -86,10 +119,12 @@ export const auth = {
   ) => {
     const fn = firstName.trim();
     const ln = lastName.trim();
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
     return supabase.auth.signUp({
       email: email.trim().toLowerCase(),
       password,
       options: {
+        emailRedirectTo: origin ? `${origin}/auth/callback` : undefined,
         data: {
           first_name: fn,
           last_name: ln,
@@ -99,6 +134,25 @@ export const auth = {
       },
     });
   },
+  resetPasswordForEmail: (email: string) => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    if (!origin) {
+      return Promise.resolve({ data: {}, error: new Error("Password reset is only available in the browser.") });
+    }
+    return supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+      redirectTo: `${origin}/auth/reset-password`,
+    });
+  },
+  resendSignupEmail: (email: string) =>
+    supabase.auth.resend({
+      type: "signup",
+      email: email.trim().toLowerCase(),
+      options: {
+        emailRedirectTo:
+          typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined,
+      },
+    }),
+  updatePassword: (newPassword: string) => supabase.auth.updateUser({ password: newPassword }),
   signInWithGoogle: (redirectTo: string) =>
     supabase.auth.signInWithOAuth({
       provider: "google",
@@ -112,35 +166,67 @@ export const auth = {
 
 // ── KYC ──
 export const kyc = {
-  verifyBvn: (bvn: string, dateOfBirth?: string) =>
-    invoke("kyc-dojah-verify", { body: { level: 2, bvn, dateOfBirth } }),
-  verifyNinSelfie: (nin: string, selfieBase64: string) =>
-    invoke("kyc-dojah-verify", { body: { level: 3, nin, selfieBase64 } }),
+  /** Dojah BVN + NIN (no selfie); on success server also provisions Monnify reserved account when missing. */
+  verifyBvnAndNin: (bvn: string, nin: string, dateOfBirth?: string) =>
+    invoke("kyc-dojah-verify", { body: { bvn, nin, dateOfBirth } }),
 };
 
 // ── Wallet ──
 export const wallet = {
-  createMonnifyAccount: () => invoke("create-monnify-account"),
+  createNgnAccount: (bvn?: string, nin?: string) =>
+    invoke("create-ngn-account", { body: { ...(bvn ? { bvn } : {}), ...(nin ? { nin } : {}) } }),
+  /** @deprecated Use createNgnAccount */
+  createMonnifyAccount: (bvn: string) => invoke("create-monnify-account", { body: { bvn } }),
   createBlockradarAddress: (network?: string) =>
     invoke("create-blockradar-address", { body: { network } }),
+  getWalletFundingProvider: () => supabase.rpc("get_wallet_funding_provider"),
+  getWithdrawalFeeSettings: () => supabase.rpc("get_withdrawal_fee_settings"),
   getWallets: () =>
     invoke("wallets", { method: "GET" }).catch(() => null),
 };
 
 // ── Transfers ──
 export const transfers = {
-  send: (recipientPhone: string, amount: number, currency?: "NGN" | "USDT", description?: string) =>
-    invoke("transfer", { body: { recipient_phone: recipientPhone, amount, currency, description } }),
+  lookupUser: (username: string) =>
+    invoke("lookup-user", { method: "GET", params: { username } }),
+  recentRecipients: () =>
+    invoke("lookup-user", { method: "GET", params: { recent: "true" } }),
+  send: (recipientUsername: string, amountNaira: number, pin: string, currency?: "NGN" | "USDT", description?: string) =>
+    invoke("transfer", {
+      body: { recipient_username: recipientUsername, amount: amountNaira, pin, currency, description },
+    }),
+  listBanks: () => invoke("list-banks", { method: "GET" }),
   verifyBankAccount: (bankCode: string, accountNumber: string) =>
     invoke("verify-bank-account", { body: { bank_code: bankCode, account_number: accountNumber } }),
 };
 
 // ── Withdrawals ──
 export const withdrawals = {
-  ngn: (amount: number, bankCode: string, accountNumber: string, accountName: string, narration?: string) =>
-    invoke("withdraw-ngn", { body: { amount, bank_code: bankCode, account_number: accountNumber, account_name: accountName, narration } }),
-  usdt: (amount: number, address: string, network?: string) =>
-    invoke("withdraw-usdt", { body: { amount, address, network } }),
+  ngn: (amount: number, bankCode: string, accountNumber: string, accountName: string, pin: string, narration?: string) =>
+    invoke("withdraw-ngn", {
+      body: {
+        amount,
+        bank_code: bankCode,
+        account_number: accountNumber,
+        account_name: accountName,
+        pin,
+        narration,
+      },
+    }),
+  usdt: (amount: number, address: string, pin: string, network?: string) =>
+    invoke("withdraw-usdt", { body: { amount, address, pin, network } }),
+};
+
+export const transactionPin = {
+  has: () => supabase.rpc("has_transaction_pin"),
+  set: (pin: string, currentPin?: string) =>
+    supabase.rpc("set_transaction_pin", { p_pin: pin, p_current_pin: currentPin ?? null }),
+};
+
+export const profileApi = {
+  isUsernameAvailable: (username: string) =>
+    supabase.rpc("is_username_available", { p_username: username }),
+  setUsername: (username: string) => supabase.rpc("set_username", { p_username: username }),
 };
 
 // ── Events ──
@@ -168,8 +254,8 @@ export const events = {
 
 // ── Spray ──
 export const spray = {
-  send: (eventId: string, amount: number, denomination: 200 | 500 | 1000) =>
-    invoke("spray", { body: { event_id: eventId, amount, denomination } }),
+  send: (eventId: string, amount: number, denomination: 200 | 500 | 1000, pin: string) =>
+    invoke("spray", { body: { event_id: eventId, amount, denomination, pin } }),
 };
 
 // ── Giveaways ──
@@ -177,10 +263,20 @@ export const giveaways = {
   list: () => invoke("giveaway", { method: "GET" }),
   getById: (id: string) => invoke("giveaway", { method: "GET", path: id }),
   getByCode: (code: string) => invoke("giveaway", { method: "GET", path: `code/${code}` }),
-  create: (data: { title: string; total_amount: number; per_person_amount: number; type: "live" | "scheduled"; event_id?: string; is_private?: boolean }) =>
-    invoke("giveaway", { body: data }),
+  create: (data: {
+    title: string;
+    /** Naira (major units); server converts to kobo */
+    total_amount: number;
+    per_person_amount: number;
+    type: "live" | "scheduled";
+    event_id?: string;
+    is_private?: boolean;
+    show_on_event_screen?: boolean;
+    pin: string;
+  }) => invoke("giveaway", { body: data }),
   redeem: (code: string) => invoke("giveaway", { method: "POST", path: "redeem", body: { code } }),
-  stop: (giveawayId: string) => invoke("giveaway", { method: "POST", path: "stop", body: { giveaway_id: giveawayId } }),
+  stop: (giveawayId: string, pin: string) =>
+    invoke("giveaway", { method: "POST", path: "stop", body: { giveaway_id: giveawayId, pin } }),
 };
 
 // ── Notifications ──
@@ -205,10 +301,47 @@ export const admin = {
     ban: (id: string, reason: string) => invoke("admin", { method: "POST", path: `users/${id}/ban`, body: { reason } }),
   },
   transactions: {
-    list: (params?: { page?: number; limit?: number; status?: string; type?: string; user_id?: string }) =>
-      invoke("admin", { method: "GET", path: "transactions", params: params as Record<string, string> }),
+    list: (params?: {
+      page?: number;
+      limit?: number;
+      status?: string;
+      type?: string;
+      user_id?: string;
+      provider?: string;
+      currency?: string;
+      flagged?: string;
+      search?: string;
+      date_from?: string;
+      date_to?: string;
+    }) => invoke("admin", { method: "GET", path: "transactions", params: params as Record<string, string> }),
     get: (id: string) => invoke("admin", { method: "GET", path: `transactions/${id}` }),
     flag: (id: string, reason: string) => invoke("admin", { method: "POST", path: `transactions/${id}/flag`, body: { reason } }),
+    unflag: (id: string) => invoke("admin", { method: "POST", path: `transactions/${id}/unflag` }),
+    refund: (id: string, reason?: string) => invoke("admin", { method: "POST", path: `transactions/${id}/refund`, body: { reason } }),
+    exportCsv: (params?: Record<string, string>) =>
+      downloadAdminCsv("transactions", params),
+  },
+  payments: {
+    overview: () => invoke("admin", { method: "GET", path: "payments" }),
+  },
+  queue: () => invoke("admin", { method: "GET", path: "queue" }),
+  pspEvents: {
+    list: (params?: { page?: number; limit?: number; provider?: string; direction?: string; search?: string }) =>
+      invoke("admin", { method: "GET", path: "psp-events", params: params as Record<string, string> }),
+    exportCsv: (params?: Record<string, string>) => downloadAdminCsv("psp-events", params),
+  },
+  webhooks: {
+    list: (params?: {
+      page?: number;
+      limit?: number;
+      provider?: string;
+      processed?: string;
+      event_type?: string;
+      search?: string;
+    }) => invoke("admin", { method: "GET", path: "webhooks", params: params as Record<string, string> }),
+    get: (id: string) => invoke("admin", { method: "GET", path: `webhooks/${id}` }),
+    reprocess: (id: string) => invoke("admin", { method: "POST", path: `webhooks/${id}/reprocess` }),
+    exportCsv: (params?: Record<string, string>) => downloadAdminCsv("webhooks", params),
   },
   kyc: {
     list: (params?: { page?: number; status?: string }) =>
@@ -229,4 +362,21 @@ export const admin = {
   },
   audit: (params?: { page?: number; limit?: number }) =>
     invoke("admin", { method: "GET", path: "audit", params: params as Record<string, string> }),
+  paymentRails: {
+    get: () => invoke("admin", { method: "GET", path: "payment-rails" }),
+    health: (providerId: string) => invoke("admin", { method: "GET", path: `payment-rails/health/${providerId}` }),
+    setFundingProvider: (providerId: string) =>
+      supabase.rpc("set_wallet_funding_provider", { _provider_id: providerId }),
+    setDisbursementProvider: (providerId: string) =>
+      supabase.rpc("set_disbursement_provider", { _provider_id: providerId }),
+    setPspEnv: (pspEnv: "sandbox" | "production") =>
+      supabase.rpc("set_psp_env", { _psp_env: pspEnv }),
+    getWithdrawalFees: () => supabase.rpc("get_withdrawal_fee_settings"),
+    setWithdrawalFees: (platformFeePercent: number, transactionFeeNaira: number) =>
+      supabase.rpc("set_withdrawal_fee_settings", {
+        _platform_fee_percent: platformFeePercent,
+        _transaction_fee_kobo: Math.round(transactionFeeNaira * 100),
+      }),
+    probeAll: () => invoke("admin", { method: "POST", path: "payment-rails/probe-all" }),
+  },
 };

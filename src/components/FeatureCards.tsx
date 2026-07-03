@@ -5,7 +5,7 @@ const features = [
   {
     icon: Wallet,
     title: "Instant Wallet",
-    description: "Fund your wallet via bank or card in seconds",
+    description: "Fund your wallet via bank transfer in seconds",
     color: "text-primary",
     bgColor: "bg-primary/10",
   },

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
 import { useMultiWallet } from "@/hooks/useMultiWallet";
@@ -27,6 +28,37 @@ const VIEW_BY_PERIOD: Record<TimePeriod, string> = {
   monthly: "leaderboard_monthly",
   allTime: "leaderboard_alltime",
 };
+
+/** Match materialized view windows (`INTERVAL '7 days'` / `'30 days'`). */
+function periodStartDate(period: TimePeriod): Date | null {
+  if (period === "weekly") return new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  if (period === "monthly") return new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  return null;
+}
+
+function humanizeLeaderboardError(err: PostgrestError): string {
+  const msg = (err.message ?? "").trim();
+  const code = err.code ?? "";
+  const combined = `${msg} ${err.details ?? ""}`.toLowerCase();
+
+  if (
+    code === "42501" ||
+    combined.includes("permission denied") ||
+    combined.includes("insufficient privilege")
+  ) {
+    return "You don’t have access to the leaderboard. Try signing out and back in. If it continues, contact support.";
+  }
+  if (combined.includes("jwt") && (combined.includes("expired") || combined.includes("invalid"))) {
+    return "Your session is invalid or expired. Please sign in again.";
+  }
+  if (code === "401" || combined.includes("not authenticated")) {
+    return "You need to be signed in to view the leaderboard.";
+  }
+  if (code === "42P01" || /\bdoes not exist\b/i.test(msg)) {
+    return "Leaderboard tables are missing. The team may need to apply database migrations.";
+  }
+  return msg || "Something went wrong loading the leaderboard.";
+}
 
 function koboToNaira(kobo: unknown): number {
   const n = Number(kobo);
@@ -90,7 +122,7 @@ export function useLeaderboard(period: TimePeriod) {
       .limit(100);
 
     if (qError) {
-      setError(qError.message);
+      setError(humanizeLeaderboardError(qError));
       setLeaderboard([]);
     } else {
       const rows = (data ?? []) as Record<string, unknown>[];
@@ -103,17 +135,24 @@ export function useLeaderboard(period: TimePeriod) {
     void fetchLeaderboard();
   }, [fetchLeaderboard]);
 
+  const periodCutoff = useMemo(() => periodStartDate(period), [period]);
+
+  const transactionsInPeriod = useMemo(() => {
+    if (!periodCutoff) return transactions;
+    return transactions.filter((t) => t.createdAt >= periodCutoff);
+  }, [transactions, periodCutoff]);
+
   const currentUserSprayTotal = useMemo(() => {
-    return transactions
+    return transactionsInPeriod
       .filter((t) => t.currency === "NGN" && t.status === "completed" && t.type === "spray")
       .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-  }, [transactions]);
+  }, [transactionsInPeriod]);
 
   const currentUserGiveawayTotal = useMemo(() => {
-    return transactions
+    return transactionsInPeriod
       .filter((t) => t.currency === "NGN" && t.status === "completed" && t.type === "giveaway")
       .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-  }, [transactions]);
+  }, [transactionsInPeriod]);
 
   const currentUserTotalGifted = currentUserSprayTotal + currentUserGiveawayTotal;
 
@@ -132,6 +171,7 @@ export function useLeaderboard(period: TimePeriod) {
     leaderboard,
     loading,
     error,
+    isSupabaseConfigured,
     refetch: fetchLeaderboard,
     topThree,
     currentUserEntry,

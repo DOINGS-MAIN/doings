@@ -1,7 +1,11 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
-import { createReservedAccount } from "../_shared/monnify.ts";
+import {
+  getExistingReservedAccount,
+  provisionReservedAccount,
+} from "../_shared/psp/provisionReservedAccount.ts";
 
+/** @deprecated Use create-ngn-account — kept for backward compatibility */
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return withCors({ error: "Method not allowed" }, { status: 405 });
@@ -22,23 +26,13 @@ Deno.serve(async (req) => {
   if (userErr || !user) return withCors({ error: "User not found" }, { status: 404 });
   if (user.kyc_level < 2) return withCors({ error: "KYC level 2 required" }, { status: 403 });
 
-  const { data: existing } = await supabase
-    .from("monnify_reserved_accounts")
-    .select("id, account_number, bank_name")
-    .eq("user_id", user.id)
-    .limit(1)
-    .maybeSingle();
-
+  const existing = await getExistingReservedAccount(supabase, user.id, "monnify");
   if (existing) {
     return withCors({ ok: true, already_exists: true, account: existing });
   }
 
   try {
-    const body = await req.json().catch(() => ({})) as { bvn?: string };
-    if (!body.bvn || body.bvn.replace(/\D/g, "").length !== 11) {
-      return withCors({ error: "Valid 11-digit BVN is required" }, { status: 400 });
-    }
-
+    const body = await req.json().catch(() => ({})) as { bvn?: string; nin?: string };
     const { data: ngnWallet } = await supabase
       .from("wallets")
       .select("id")
@@ -48,29 +42,17 @@ Deno.serve(async (req) => {
 
     if (!ngnWallet) return withCors({ error: "NGN wallet not found" }, { status: 500 });
 
-    const acct = await createReservedAccount({
+    const account = await provisionReservedAccount(supabase, {
       userId: user.id,
       userName: user.full_name || "Doings User",
       email: user.email || "",
-      bvn: body.bvn.replace(/\D/g, ""),
+      walletId: ngnWallet.id,
+      bvn: body.bvn,
+      nin: body.nin,
+      providerId: "monnify",
     });
 
-    const { error: insertErr } = await supabase
-      .from("monnify_reserved_accounts")
-      .insert({
-        user_id: user.id,
-        wallet_id: ngnWallet.id,
-        account_reference: acct.accountReference,
-        account_name: acct.accountName,
-        account_number: acct.accountNumber,
-        bank_name: acct.bankName,
-        bank_code: acct.bankCode,
-        reservation_reference: acct.reservationReference,
-      });
-
-    if (insertErr) throw insertErr;
-
-    return withCors({ ok: true, account: acct });
+    return withCors({ ok: true, account });
   } catch (error) {
     return withCors({ error: "Failed to create reserved account", detail: String(error) }, { status: 500 });
   }

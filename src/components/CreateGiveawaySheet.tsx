@@ -6,6 +6,9 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Gift, Users, Coins, Lock, Eye, ChevronLeft, ChevronRight, Sparkles, PartyPopper } from "lucide-react";
 import { EventData } from "@/hooks/useEvents";
+import { PinInput } from "@/components/PinInput";
+import { isValidPin } from "@/lib/pin";
+import { toast } from "sonner";
 
 interface CreateGiveawaySheetProps {
   isOpen: boolean;
@@ -19,9 +22,11 @@ interface CreateGiveawaySheetProps {
     eventName?: string;
     isPrivate: boolean;
     showOnEventScreen: boolean;
+    pin: string;
   }) => { code: string; id: string } | Promise<{ code: string; id: string }>;
   balance: number;
   liveEvents: EventData[];
+  onPinNotSet?: () => void;
 }
 
 export const CreateGiveawaySheet = ({
@@ -30,11 +35,13 @@ export const CreateGiveawaySheet = ({
   onCreateGiveaway,
   balance,
   liveEvents,
+  onPinNotSet,
 }: CreateGiveawaySheetProps) => {
   const [step, setStep] = useState(1);
   const [title, setTitle] = useState("");
   const [totalAmount, setTotalAmount] = useState("");
   const [perPersonAmount, setPerPersonAmount] = useState("");
+  const [pin, setPin] = useState("");
   const [type, setType] = useState<'live' | 'scheduled'>('scheduled');
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [isPrivate, setIsPrivate] = useState(false);
@@ -44,23 +51,44 @@ export const CreateGiveawaySheet = ({
   const numericTotal = parseFloat(totalAmount) || 0;
   const numericPerPerson = parseFloat(perPersonAmount) || 0;
   const maxWinners = numericPerPerson > 0 ? Math.floor(numericTotal / numericPerPerson) : 0;
-  const canCreate = title && numericTotal >= 100 && numericPerPerson >= 10 && numericTotal <= balance && numericPerPerson <= numericTotal;
+  const totalKobo = Math.round(numericTotal * 100);
+  const perKobo = Math.round(numericPerPerson * 100);
+  const evenlyDivisible = perKobo > 0 && totalKobo % perKobo === 0;
+  const trimmedTitle = title.trim();
+  const canCreate =
+    trimmedTitle.length > 0 &&
+    numericTotal >= 100 &&
+    numericPerPerson >= 10 &&
+    numericTotal <= balance &&
+    numericPerPerson <= numericTotal &&
+    evenlyDivisible;
 
   const selectedEvent = liveEvents.find(e => e.id === selectedEventId);
 
   const handleCreate = async () => {
-    const result = await onCreateGiveaway({
-      title,
-      totalAmount: numericTotal,
-      perPersonAmount: numericPerPerson,
-      type,
-      eventId: selectedEventId || undefined,
-      eventName: selectedEvent?.title,
-      isPrivate,
-      showOnEventScreen: type === 'live' ? showOnEventScreen : false,
-    });
-    setCreatedGiveaway(result);
-    setStep(4);
+    if (!isValidPin(pin)) {
+      toast.error("Enter your 4-digit transaction PIN");
+      return;
+    }
+    try {
+      const result = await onCreateGiveaway({
+        title: title.trim(),
+        totalAmount: numericTotal,
+        perPersonAmount: numericPerPerson,
+        type,
+        eventId: selectedEventId || undefined,
+        eventName: selectedEvent?.title,
+        isPrivate,
+        showOnEventScreen: type === 'live' ? showOnEventScreen : false,
+        pin,
+      });
+      setCreatedGiveaway(result);
+      setStep(4);
+    } catch (error) {
+      const code = (error as Error & { code?: string }).code;
+      if (code === "PIN_NOT_SET") onPinNotSet?.();
+      toast.error(error instanceof Error ? error.message : "Failed to create giveaway");
+    }
   };
 
   const handleClose = () => {
@@ -73,6 +101,7 @@ export const CreateGiveawaySheet = ({
     setIsPrivate(false);
     setShowOnEventScreen(true);
     setCreatedGiveaway(null);
+    setPin("");
     onClose();
   };
 
@@ -108,7 +137,10 @@ export const CreateGiveawaySheet = ({
                 <label className="text-sm font-medium text-foreground mb-2 block">Type</label>
                 <div className="grid grid-cols-2 gap-3">
                   <motion.button
-                    onClick={() => setType('scheduled')}
+                    onClick={() => {
+                      setType("scheduled");
+                      setSelectedEventId(null);
+                    }}
                     className={`p-4 rounded-2xl border-2 transition-all ${
                       type === 'scheduled' 
                         ? 'border-primary bg-primary/10' 
@@ -136,7 +168,7 @@ export const CreateGiveawaySheet = ({
                 </div>
               </div>
 
-              {type === 'live' && selectedEventId && (
+              {type === 'live' && (
                 <div>
                   <label className="text-sm font-medium text-foreground mb-2 block">Select Event</label>
                   {liveEvents.length > 0 ? (
@@ -171,7 +203,7 @@ export const CreateGiveawaySheet = ({
 
             <Button
               onClick={() => setStep(2)}
-              disabled={!title || (type === 'live' && !selectedEventId)}
+              disabled={!title.trim() || (type === 'live' && !selectedEventId)}
               className="w-full h-14 rounded-2xl bg-primary text-primary-foreground font-bold text-lg"
             >
               Continue
@@ -257,6 +289,19 @@ export const CreateGiveawaySheet = ({
               Continue
               <ChevronRight className="w-5 h-5 ml-2" />
             </Button>
+            {!canCreate &&
+              trimmedTitle.length > 0 &&
+              numericTotal >= 100 &&
+              numericPerPerson >= 10 &&
+              numericPerPerson <= numericTotal && (
+                <p className="text-center text-xs text-destructive">
+                  {numericTotal > balance
+                    ? `Total cannot exceed your balance (₦${balance.toLocaleString()}). Fund your wallet first.`
+                    : !evenlyDivisible
+                      ? "Total must divide evenly by amount per person (no leftover kobo — e.g. ₦500 / ₦100 = 5 winners)."
+                      : null}
+                </p>
+              )}
           </motion.div>
         );
 
@@ -333,8 +378,11 @@ export const CreateGiveawaySheet = ({
               </div>
             </div>
 
+            <PinInput value={pin} onChange={setPin} label="Transaction PIN" />
+
             <Button
-              onClick={handleCreate}
+              onClick={() => void handleCreate()}
+              disabled={!canCreate || !isValidPin(pin)}
               className="w-full h-14 rounded-2xl bg-gradient-to-r from-primary to-accent text-primary-foreground font-bold text-lg"
             >
               Create Giveaway 🎁

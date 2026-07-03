@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { getAppUserId } from "@/lib/appUser";
 import { supabase, notifications as notificationsApi } from "@/lib/supabase";
 
 export interface Notification {
@@ -25,13 +26,13 @@ export const useNotifications = () => {
       setUnreadCount(result.unread_count ?? 0);
     } catch {
       // Fallback: direct query
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      const appUserId = await getAppUserId();
+      if (!appUserId) return;
 
       const { data } = await supabase
         .from("notifications")
         .select("id, type, title, body, read, created_at")
-        .eq("user_id", session.user.id)
+        .eq("user_id", appUserId)
         .order("created_at", { ascending: false })
         .limit(50);
 
@@ -45,16 +46,30 @@ export const useNotifications = () => {
   }, []);
 
   useEffect(() => {
-    fetchNotifications();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
 
-    const channel = supabase
-      .channel("notification-changes")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications" }, () => {
-        fetchNotifications();
-      })
-      .subscribe();
+    const setup = async () => {
+      await fetchNotifications();
+      const appUserId = await getAppUserId();
+      if (!appUserId || cancelled) return;
 
-    return () => { supabase.removeChannel(channel); };
+      channel = supabase
+        .channel(`notifications-${appUserId}`)
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${appUserId}` },
+          () => { void fetchNotifications(); },
+        )
+        .subscribe();
+    };
+
+    void setup();
+
+    return () => {
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
+    };
   }, [fetchNotifications]);
 
   const markRead = useCallback(async (notificationId: string) => {

@@ -14,7 +14,10 @@ import LeaderboardPage from "@/pages/dashboard/LeaderboardPage";
 import ProfilePage from "@/pages/dashboard/ProfilePage";
 import NotFound from "./pages/NotFound";
 import EventScreenPage from "./pages/EventScreenPage";
+import AuthCallbackPage from "./pages/AuthCallbackPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
+import { AdminAuthShell } from "./components/admin/AdminAuthShell";
 import { AdminLayout } from "./components/admin/AdminLayout";
 import { AdminDashboard } from "./pages/admin/AdminDashboard";
 import { AdminUsers } from "./pages/admin/AdminUsers";
@@ -24,6 +27,12 @@ import { AdminEvents } from "./pages/admin/AdminEvents";
 import { AdminLogin } from "./pages/admin/AdminLogin";
 import { AdminChangePassword } from "./pages/admin/AdminChangePassword";
 import { AdminSettings } from "./pages/admin/AdminSettings";
+import { AdminPaymentRails } from "./pages/admin/AdminPaymentRails";
+import { AdminPaymentsOverview } from "./pages/admin/AdminPaymentsOverview";
+import { AdminWebhooks } from "./pages/admin/AdminWebhooks";
+import { AdminTransactionDetail } from "./pages/admin/AdminTransactionDetail";
+import { AdminQueue } from "./pages/admin/AdminQueue";
+import { AdminPspEvents } from "./pages/admin/AdminPspEvents";
 
 const queryClient = new QueryClient();
 
@@ -36,6 +45,8 @@ const App = () => (
         <Routes>
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
 
           <Route element={<RequireAuth />}>
             <Route path="/events/:eventId/screen" element={<EventScreenPage />} />
@@ -48,16 +59,24 @@ const App = () => (
             </Route>
           </Route>
 
-          <Route path="/admin/login" element={<AdminLogin />} />
-          <Route path="/admin/change-password" element={<AdminChangePassword />} />
+          <Route element={<AdminAuthShell />}>
+            <Route path="/admin/login" element={<AdminLogin />} />
+            <Route path="/admin/change-password" element={<AdminChangePassword />} />
 
-          <Route path="/admin" element={<AdminLayout />}>
-            <Route index element={<AdminDashboard />} />
-            <Route path="users" element={<AdminUsers />} />
-            <Route path="transactions" element={<AdminTransactions />} />
-            <Route path="kyc" element={<AdminKYC />} />
-            <Route path="events" element={<AdminEvents />} />
-            <Route path="settings" element={<AdminSettings />} />
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route index element={<AdminDashboard />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="transactions" element={<AdminTransactions />} />
+              <Route path="transactions/:txnId" element={<AdminTransactionDetail />} />
+              <Route path="payments" element={<AdminPaymentsOverview />} />
+              <Route path="queue" element={<AdminQueue />} />
+              <Route path="psp-events" element={<AdminPspEvents />} />
+              <Route path="webhooks" element={<AdminWebhooks />} />
+              <Route path="payment-rails" element={<AdminPaymentRails />} />
+              <Route path="kyc" element={<AdminKYC />} />
+              <Route path="events" element={<AdminEvents />} />
+              <Route path="settings" element={<AdminSettings />} />
+            </Route>
           </Route>
 
           <Route path="*" element={<NotFound />} />

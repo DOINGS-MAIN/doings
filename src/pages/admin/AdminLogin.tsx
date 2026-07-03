@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, Navigate } from "react-router-dom";
 import { Shield, Eye, EyeOff, Mail, Lock } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -13,28 +13,50 @@ export const AdminLogin = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [isResetMode, setIsResetMode] = useState(false);
   const [loading, setLoading] = useState(false);
-  const { login, resetPassword } = useAdminAuth();
+  const [error, setError] = useState<string | null>(null);
+  const { login, resetPassword, isAuthenticated, loading: authLoading } = useAdminAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const handleLogin = (e: React.FormEvent) => {
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      navigate("/admin", { replace: true });
+    }
+  }, [authLoading, isAuthenticated, navigate]);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">Checking session…</p>
+      </div>
+    );
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to="/admin" replace />;
+  }
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     setLoading(true);
 
-    setTimeout(() => {
-      const result = login(email, password);
-      setLoading(false);
-
+    try {
+      const result = await login(email, password);
       if (result.success) {
-        if (result.mustChangePassword) {
-          navigate("/admin/change-password");
-        } else {
-          navigate("/admin");
-        }
+        navigate("/admin", { replace: true });
       } else {
-        toast({ title: "Login Failed", description: result.error, variant: "destructive" });
+        const message = result.error ?? "Login failed. Please try again.";
+        setError(message);
+        toast({ title: "Login Failed", description: message, variant: "destructive" });
       }
-    }, 500);
+    } catch {
+      const message = "Something went wrong. Please try again.";
+      setError(message);
+      toast({ title: "Login Failed", description: message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleReset = (e: React.FormEvent) => {
@@ -95,6 +117,11 @@ export const AdminLogin = () => {
             </form>
           ) : (
             <form onSubmit={handleLogin} className="space-y-4">
+              {error && (
+                <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                  {error}
+                </div>
+              )}
               <div>
                 <label className="text-sm font-medium text-muted-foreground mb-2 block">Email</label>
                 <div className="relative">
@@ -146,8 +173,9 @@ export const AdminLogin = () => {
           {/* Demo credentials hint */}
           <div className="mt-6 p-3 rounded-xl bg-muted/50 border border-border">
             <p className="text-xs text-muted-foreground text-center">
-              <span className="font-semibold text-primary">Demo:</span> admin@doings.app / admin123
-            </p>
+            Use an account with an active row in <code className="text-foreground">admin_roles</code>.
+            There is no default seeded admin — create one in Supabase first.
+          </p>
           </div>
         </CardContent>
       </Card>

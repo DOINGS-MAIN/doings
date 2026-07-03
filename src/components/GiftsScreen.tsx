@@ -8,7 +8,7 @@ interface GiftsScreenProps {
   myGiveaways: Giveaway[];
   onCreateGiveaway: () => void;
   onRedeemGiveaway: () => void;
-  onViewGiveaway: (giveaway: Giveaway) => void;
+  onViewGiveaway: (giveaway: Giveaway) => void | Promise<void>;
 }
 
 export const GiftsScreen = ({
@@ -29,7 +29,7 @@ export const GiftsScreen = ({
       : completedGiveaways;
 
   const totalDistributed = myGiveaways.reduce((sum, g) => sum + (g.totalAmount - g.remainingAmount), 0);
-  const totalRedemptions = myGiveaways.reduce((sum, g) => sum + g.redemptions.length, 0);
+  const totalRedemptions = myGiveaways.reduce((sum, g) => sum + g.redemptionCount, 0);
 
   const getStatusIcon = (status: Giveaway['status']) => {
     switch (status) {
@@ -84,8 +84,8 @@ export const GiftsScreen = ({
         </div>
         <div className="glass rounded-2xl p-4 text-center">
           <Sparkles className="w-6 h-6 text-primary mx-auto mb-2" />
-          <p className="text-lg font-bold text-foreground">₦{(totalDistributed / 1000).toFixed(0)}k</p>
-          <p className="text-xs text-muted-foreground">Given</p>
+          <p className="text-lg font-bold text-foreground">₦{totalDistributed.toLocaleString()}</p>
+          <p className="text-xs text-muted-foreground">Given out</p>
         </div>
       </motion.div>
 
@@ -203,7 +203,7 @@ export const GiftsScreen = ({
                         ₦{giveaway.perPersonAmount.toLocaleString()}/person
                       </span>
                       <span className="text-xs text-muted-foreground">
-                        • {giveaway.redemptions.length} redeemed
+                        • {giveaway.redemptionCount} redeemed
                       </span>
                     </div>
                   </div>
@@ -223,8 +223,11 @@ export const GiftsScreen = ({
                   <div className="h-1.5 bg-muted rounded-full overflow-hidden">
                     <motion.div
                       initial={{ width: 0 }}
-                      animate={{ 
-                        width: `${((giveaway.totalAmount - giveaway.remainingAmount) / giveaway.totalAmount) * 100}%` 
+                      animate={{
+                        width:
+                          giveaway.totalAmount > 0
+                            ? `${((giveaway.totalAmount - giveaway.remainingAmount) / giveaway.totalAmount) * 100}%`
+                            : "0%",
                       }}
                       className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
                     />

@@ -4,9 +4,17 @@ import { useAdminData } from "@/hooks/useAdminData";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 
 export const AdminLayout = () => {
-  const { isAuthenticated, currentAccount, logout } = useAdminAuth();
+  const { isAuthenticated, currentAccount, logout, loading } = useAdminAuth();
   const { getStats } = useAdminData();
   const stats = getStats();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <p className="text-sm text-muted-foreground">Loading admin session…</p>
+      </div>
+    );
+  }
 
   if (!isAuthenticated || !currentAccount) {
     return <Navigate to="/admin/login" replace />;

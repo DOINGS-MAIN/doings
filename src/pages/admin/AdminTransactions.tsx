@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { 
   Search, 
+  Eye,
   Filter, 
   MoreHorizontal,
   RefreshCw,
@@ -45,22 +47,69 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useAdminAuth } from "@/hooks/useAdminAuth";
+import { canWritePayments } from "@/lib/adminPermissions";
+import { admin as adminApi } from "@/lib/supabase";
 import { AdminTransaction } from "@/types/admin";
 import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 export const AdminTransactions = () => {
-  const { transactions, getStats, refundTransaction, flagTransaction, unflagTransaction } = useAdminData();
+  const navigate = useNavigate();
+  const { currentAccount } = useAdminAuth();
+  const canWrite = currentAccount ? canWritePayments(currentAccount.role) : false;
+  const {
+    transactions,
+    getStats,
+    refundTransaction,
+    flagTransaction,
+    unflagTransaction,
+    fetchTransactions,
+    transactionsLoading,
+    transactionTotal,
+    transactionPage,
+  } = useAdminData();
   const stats = getStats();
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [flagFilter, setFlagFilter] = useState<string>("all");
+  const [providerFilter, setProviderFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
   const [selectedTxn, setSelectedTxn] = useState<AdminTransaction | null>(null);
   const [actionType, setActionType] = useState<"flag" | "refund" | null>(null);
   const [flagReason, setFlagReason] = useState("");
 
-  const formatCurrency = (amount: number) => {
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, typeFilter, statusFilter, flagFilter, providerFilter]);
+
+  useEffect(() => {
+    fetchTransactions({
+      page,
+      limit: 50,
+      search: debouncedSearch,
+      type: typeFilter,
+      status: statusFilter,
+      flagged: flagFilter,
+      provider: providerFilter,
+    });
+  }, [page, debouncedSearch, typeFilter, statusFilter, flagFilter, providerFilter, fetchTransactions]);
+
+  const formatCurrency = (amount: number, currency: AdminTransaction["currency"] = "NGN") => {
+    if (currency === "USDT") {
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 2,
+      }).format(Math.abs(amount));
+    }
     return new Intl.NumberFormat("en-NG", {
       style: "currency",
       currency: "NGN",
@@ -68,21 +117,7 @@ export const AdminTransactions = () => {
     }).format(Math.abs(amount));
   };
 
-  const filteredTransactions = transactions
-    .filter((txn) => {
-      const matchesSearch = 
-        txn.userName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        txn.reference.toLowerCase().includes(searchQuery.toLowerCase());
-      
-      const matchesType = typeFilter === "all" || txn.type === typeFilter;
-      const matchesStatus = statusFilter === "all" || txn.status === statusFilter;
-      const matchesFlag = flagFilter === "all" || 
-        (flagFilter === "flagged" && txn.flagged) ||
-        (flagFilter === "unflagged" && !txn.flagged);
-      
-      return matchesSearch && matchesType && matchesStatus && matchesFlag;
-    })
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  const totalPages = Math.max(1, Math.ceil(transactionTotal / 50));
 
   const getStatusBadge = (status: AdminTransaction["status"]) => {
     switch (status) {
@@ -90,6 +125,8 @@ export const AdminTransactions = () => {
         return <Badge className="bg-success/20 text-success border-0">Completed</Badge>;
       case "pending":
         return <Badge className="bg-primary/20 text-primary border-0">Pending</Badge>;
+      case "processing":
+        return <Badge className="bg-accent/20 text-accent border-0">Processing</Badge>;
       case "failed":
         return <Badge variant="destructive">Failed</Badge>;
       case "refunded":
@@ -112,24 +149,38 @@ export const AdminTransactions = () => {
     );
   };
 
-  const handleFlag = () => {
+  const handleFlag = async () => {
     if (!selectedTxn) return;
-    flagTransaction(selectedTxn.id, flagReason);
-    toast.success("Transaction flagged for review");
+    try {
+      await flagTransaction(selectedTxn.id, flagReason);
+      toast.success("Transaction flagged for review");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to flag transaction");
+      return;
+    }
     setSelectedTxn(null);
     setActionType(null);
     setFlagReason("");
   };
 
-  const handleUnflag = (txn: AdminTransaction) => {
-    unflagTransaction(txn.id);
-    toast.success("Transaction unflagged");
+  const handleUnflag = async (txn: AdminTransaction) => {
+    try {
+      await unflagTransaction(txn.id);
+      toast.success("Transaction unflagged");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to unflag");
+    }
   };
 
-  const handleRefund = () => {
+  const handleRefund = async () => {
     if (!selectedTxn) return;
-    refundTransaction(selectedTxn.id);
-    toast.success("Transaction refunded successfully");
+    try {
+      await refundTransaction(selectedTxn.id, "Admin refund");
+      toast.success("Transaction refunded successfully");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Refund failed");
+      return;
+    }
     setSelectedTxn(null);
     setActionType(null);
   };
@@ -207,8 +258,22 @@ export const AdminTransactions = () => {
             <SelectItem value="all">All Status</SelectItem>
             <SelectItem value="completed">Completed</SelectItem>
             <SelectItem value="pending">Pending</SelectItem>
+            <SelectItem value="processing">Processing</SelectItem>
             <SelectItem value="failed">Failed</SelectItem>
             <SelectItem value="refunded">Refunded</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={providerFilter} onValueChange={setProviderFilter}>
+          <SelectTrigger className="w-[140px]">
+            <SelectValue placeholder="Provider" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Providers</SelectItem>
+            <SelectItem value="monnify">Monnify</SelectItem>
+            <SelectItem value="nomba">Nomba</SelectItem>
+            <SelectItem value="flutterwave">Flutterwave</SelectItem>
+            <SelectItem value="blockradar">Blockradar</SelectItem>
+            <SelectItem value="internal">Internal</SelectItem>
           </SelectContent>
         </Select>
         <Select value={flagFilter} onValueChange={setFlagFilter}>
@@ -221,7 +286,19 @@ export const AdminTransactions = () => {
             <SelectItem value="unflagged">Unflagged</SelectItem>
           </SelectContent>
         </Select>
-        <Button variant="outline" className="gap-2">
+        <Button
+          variant="outline"
+          className="gap-2"
+          onClick={() =>
+            adminApi.transactions.exportCsv({
+              ...(statusFilter !== "all" ? { status: statusFilter } : {}),
+              ...(typeFilter !== "all" ? { type: typeFilter } : {}),
+              ...(providerFilter !== "all" ? { provider: providerFilter } : {}),
+              ...(flagFilter !== "all" ? { flagged: flagFilter === "flagged" ? "true" : "false" } : {}),
+              ...(debouncedSearch ? { search: debouncedSearch } : {}),
+            })
+          }
+        >
           <Download className="w-4 h-4" />
           Export
         </Button>
@@ -236,16 +313,32 @@ export const AdminTransactions = () => {
               <TableHead className="text-muted-foreground">User</TableHead>
               <TableHead className="text-muted-foreground">Type</TableHead>
               <TableHead className="text-muted-foreground">Amount</TableHead>
+              <TableHead className="text-muted-foreground">Fee</TableHead>
+              <TableHead className="text-muted-foreground">Provider</TableHead>
               <TableHead className="text-muted-foreground">Status</TableHead>
               <TableHead className="text-muted-foreground">Date</TableHead>
               <TableHead className="text-muted-foreground w-[50px]"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredTransactions.map((txn) => (
+            {transactionsLoading ? (
+              <TableRow>
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                  Loading transactions...
+                </TableCell>
+              </TableRow>
+            ) : transactions.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                  No transactions found
+                </TableCell>
+              </TableRow>
+            ) : (
+            transactions.map((txn) => (
               <TableRow 
                 key={txn.id} 
-                className={`border-border ${txn.flagged ? "bg-destructive/5" : ""}`}
+                className={`border-border cursor-pointer hover:bg-muted/30 ${txn.flagged ? "bg-destructive/5" : ""}`}
+                onClick={() => navigate(`/admin/transactions/${txn.id}`)}
               >
                 <TableCell>
                   <div className="flex items-center gap-2">
@@ -259,14 +352,24 @@ export const AdminTransactions = () => {
                 <TableCell>{getTypeBadge(txn.type)}</TableCell>
                 <TableCell>
                   <span className={`font-semibold ${txn.amount >= 0 ? "text-success" : "text-foreground"}`}>
-                    {txn.amount >= 0 ? "+" : "-"}{formatCurrency(txn.amount)}
+                    {txn.amount >= 0 ? "+" : "-"}{formatCurrency(txn.amount, txn.currency)}
                   </span>
                 </TableCell>
+                <TableCell>
+                  {(txn.fee ?? 0) > 0 ? (
+                    <span className="text-sm font-medium text-primary">
+                      {formatCurrency(txn.fee ?? 0, txn.currency)}
+                    </span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">—</span>
+                  )}
+                </TableCell>
+                <TableCell className="text-sm capitalize">{txn.provider ?? "—"}</TableCell>
                 <TableCell>{getStatusBadge(txn.status)}</TableCell>
                 <TableCell className="text-sm text-muted-foreground">
                   {format(txn.createdAt, "MMM d, yyyy HH:mm")}
                 </TableCell>
-                <TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -274,51 +377,67 @@ export const AdminTransactions = () => {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
-                      {txn.flagged ? (
-                        <DropdownMenuItem onClick={() => handleUnflag(txn)}>
-                          <FlagOff className="w-4 h-4 mr-2" />
-                          Remove Flag
-                        </DropdownMenuItem>
-                      ) : (
-                        <DropdownMenuItem 
-                          onClick={() => {
-                            setSelectedTxn(txn);
-                            setActionType("flag");
-                          }}
-                          className="text-destructive"
-                        >
-                          <Flag className="w-4 h-4 mr-2" />
-                          Flag Transaction
-                        </DropdownMenuItem>
-                      )}
-                      {txn.status === "completed" && txn.amount > 0 && (
+                      <DropdownMenuItem onClick={() => navigate(`/admin/transactions/${txn.id}`)}>
+                        <Eye className="w-4 h-4 mr-2" />
+                        View details
+                      </DropdownMenuItem>
+                      {canWrite && (
                         <>
                           <DropdownMenuSeparator />
-                          <DropdownMenuItem 
-                            onClick={() => {
-                              setSelectedTxn(txn);
-                              setActionType("refund");
-                            }}
-                            className="text-accent"
-                          >
-                            <RefreshCw className="w-4 h-4 mr-2" />
-                            Process Refund
-                          </DropdownMenuItem>
+                          {txn.flagged ? (
+                            <DropdownMenuItem onClick={() => handleUnflag(txn)}>
+                              <FlagOff className="w-4 h-4 mr-2" />
+                              Remove Flag
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setSelectedTxn(txn);
+                                setActionType("flag");
+                              }}
+                              className="text-destructive"
+                            >
+                              <Flag className="w-4 h-4 mr-2" />
+                              Flag Transaction
+                            </DropdownMenuItem>
+                          )}
+                          {txn.status === "completed" && txn.amount > 0 && (
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setSelectedTxn(txn);
+                                setActionType("refund");
+                              }}
+                              className="text-accent"
+                            >
+                              <RefreshCw className="w-4 h-4 mr-2" />
+                              Process Refund
+                            </DropdownMenuItem>
+                          )}
                         </>
                       )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </TableCell>
               </TableRow>
-            ))}
+            ))
+            )}
           </TableBody>
         </Table>
       </div>
 
-      {/* Results count */}
-      <p className="text-sm text-muted-foreground">
-        Showing {filteredTransactions.length} of {transactions.length} transactions
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Showing {transactions.length} of {transactionTotal} transactions (page {transactionPage} of {totalPages})
+        </p>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+            Previous
+          </Button>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+            Next
+          </Button>
+        </div>
+      </div>
 
       {/* Flag Dialog */}
       <Dialog 
@@ -344,7 +463,7 @@ export const AdminTransactions = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Amount</span>
-                <span className="font-semibold">{formatCurrency(selectedTxn?.amount || 0)}</span>
+                <span className="font-semibold">{formatCurrency(selectedTxn?.amount || 0, selectedTxn?.currency)}</span>
               </div>
             </div>
             <div className="space-y-2">
