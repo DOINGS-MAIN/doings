@@ -1,6 +1,7 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
-import { getAuthUserIdFromRequest } from "../_shared/db.ts";
-import { verifyBankAccount } from "../_shared/monnify.ts";
+import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
+import { getPlatformPaymentSettings } from "../_shared/psp/platformSettings.ts";
+import { verifyBankAccount } from "../_shared/psp/registry.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -23,13 +24,27 @@ Deno.serve(async (req) => {
     return withCors({ error: "account_number must be exactly 10 digits" }, { status: 400 });
   }
 
+  const supabase = getServiceClient();
+  let platform;
   try {
-    const result = await verifyBankAccount(bankCode, accountNumber);
+    platform = await getPlatformPaymentSettings(supabase);
+  } catch {
+    return withCors({ error: "Payment provider not configured" }, { status: 500 });
+  }
+
+  try {
+    const result = await verifyBankAccount(
+      platform.disbursementProviderId,
+      bankCode,
+      accountNumber,
+      platform.pspEnv,
+    );
     return withCors({
       ok: true,
       bank_code: bankCode,
       account_number: accountNumber,
       account_name: result.accountName,
+      provider: platform.disbursementProviderId,
     });
   } catch (err) {
     return withCors({ error: "Bank verification failed", detail: String(err) }, { status: 502 });

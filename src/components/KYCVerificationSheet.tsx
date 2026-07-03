@@ -114,7 +114,7 @@ export const KYCVerificationSheet = ({
     {
       level: 2 as KYCLevel,
       title: "BVN + NIN",
-      subtitle: "Dojah identity check & Monnify bank account",
+      subtitle: "Dojah identity check & bank transfer account",
       icon: Fingerprint,
       benefits: ["Fund NGN (transfer account)", "USDT deposit address", "Send, spray, withdraw"],
       color: "text-primary",

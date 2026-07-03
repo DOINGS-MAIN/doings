@@ -31,6 +31,7 @@ export type CreateGiveawayPayload = {
   eventName?: string;
   isPrivate: boolean;
   showOnEventScreen: boolean;
+  pin: string;
 };
 
 export interface DashboardShellValue {
@@ -41,20 +42,26 @@ export interface DashboardShellValue {
   kycLevel: number;
   ngnBalance: number;
   usdtBalance: number;
+  balanceRefreshing: boolean;
+  refreshBalances: () => Promise<void>;
   activeCurrency: Currency;
   setActiveCurrency: Dispatch<SetStateAction<Currency>>;
   transactions: FinanceTransaction[];
   monnifyAccount: MonnifyReservedAccount | undefined;
+  ngnReservedAccount: MonnifyReservedAccount | undefined;
+  fundingProviderId: string;
   blockradarAddresses: BlockradarAddress[];
+  createNgnAccount: (bvn?: string) => Promise<unknown>;
   createMonnifyAccount: (bvn: string) => Promise<unknown>;
   createBlockradarAddress: (network?: string) => Promise<unknown>;
-  withdrawNGN: (amount: number, bankName: string, accountNumber: string, fee: number) => void;
+  withdrawNGN: (amount: number, bankCode: string, accountNumber: string, accountName: string, pin: string) => Promise<void>;
   withdrawUSDT: (
     amount: number,
     toAddress: string,
     network: string,
     provider: "blockradar" | "quidax",
-    fee: number
+    fee: number,
+    pin: string
   ) => void;
   verifyLevel1: (action: "resend" | "check") => Promise<{ success: boolean; message: string }>;
   verifyLevel2: (bvn: string, nin: string, dateOfBirth: string) => Promise<{ success: boolean; message: string }>;
@@ -72,7 +79,7 @@ export interface DashboardShellValue {
   joinEvent: (eventId: string) => void;
   createGiveaway: (data: CreateGiveawayPayload) => Promise<Giveaway>;
   redeemGiveaway: (code: string) => Promise<unknown>;
-  stopGiveaway: (giveawayId: string) => Promise<number>;
+  stopGiveaway: (giveawayId: string, pin: string) => Promise<number>;
   getMyGiveaways: () => Giveaway[];
   findGiveawayByCode: (code: string) => Giveaway | undefined;
   liveEventsForList: LiveEventListItem[];
@@ -87,6 +94,7 @@ export interface DashboardShellValue {
   setShowRedeemGiveaway: Dispatch<SetStateAction<boolean>>;
   setShowAvatarCustomization: Dispatch<SetStateAction<boolean>>;
   setShowBankAccounts: Dispatch<SetStateAction<boolean>>;
+  setShowTransactionPin: Dispatch<SetStateAction<boolean>>;
   setShowNotifications: Dispatch<SetStateAction<boolean>>;
   handleJoinEvent: (event: EventData) => void;
   handleManageEvent: (event: EventData) => void;
@@ -95,6 +103,7 @@ export interface DashboardShellValue {
   handleViewGiveaway: (giveaway: Giveaway) => void | Promise<void>;
   signOut: () => Promise<void>;
   updateProfile: (updates: { full_name?: string }) => Promise<void>;
+  setUsername: (username: string) => Promise<void>;
 }
 
 const DashboardShellContext = createContext<DashboardShellValue | null>(null);

@@ -46,16 +46,30 @@ export const useNotifications = () => {
   }, []);
 
   useEffect(() => {
-    fetchNotifications();
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
 
-    const channel = supabase
-      .channel("notification-changes")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications" }, () => {
-        fetchNotifications();
-      })
-      .subscribe();
+    const setup = async () => {
+      await fetchNotifications();
+      const appUserId = await getAppUserId();
+      if (!appUserId || cancelled) return;
 
-    return () => { supabase.removeChannel(channel); };
+      channel = supabase
+        .channel(`notifications-${appUserId}`)
+        .on(
+          "postgres_changes",
+          { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${appUserId}` },
+          () => { void fetchNotifications(); },
+        )
+        .subscribe();
+    };
+
+    void setup();
+
+    return () => {
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
+    };
   }, [fetchNotifications]);
 
   const markRead = useCallback(async (notificationId: string) => {

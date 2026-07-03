@@ -1,13 +1,19 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
-import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
+import { getAuthUserIdFromRequest, getServiceClient, resolveAppUserId } from "../_shared/db.ts";
 import { checkTransferLimit } from "../_shared/limits.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
+import { requireTransactionPin } from "../_shared/pin.ts";
+import { normalizeUsername, USERNAME_RE } from "../_shared/username.ts";
+
+/** In-app P2P sends are always fee-free — never apply withdrawal/platform fees here. */
+const P2P_TRANSFER_FEE = 0;
 
 type TransferBody = {
-  recipient_phone: string;
+  recipient_username: string;
   amount: number;
   currency?: "NGN" | "USDT";
   description?: string;
+  pin: string;
 };
 
 Deno.serve(async (req) => {
@@ -21,21 +27,32 @@ Deno.serve(async (req) => {
   if (!authUserId) return withCors({ error: "Unauthorized" }, { status: 401 });
 
   const supabase = getServiceClient();
+  const senderId = await resolveAppUserId(authHeader);
+  if (!senderId) return withCors({ error: "User not found" }, { status: 404 });
+
   const { data: sender, error: senderErr } = await supabase
     .from("users")
     .select("id, kyc_level")
-    .eq("auth_id", authUserId)
+    .eq("id", senderId)
     .single();
 
   if (senderErr || !sender) return withCors({ error: "User not found" }, { status: 404 });
   if (sender.kyc_level < 2) return withCors({ error: "Complete BVN and NIN verification to send money" }, { status: 403 });
 
+  const body = (await req.json()) as TransferBody;
+  const pinCheck = await requireTransactionPin(supabase, sender.id, body.pin);
+  if (pinCheck) return pinCheck;
+
   const rl = await checkRateLimit(RATE_LIMITS.transfer(sender.id));
   if (!rl.allowed) return withCors({ error: "Too many transfer requests. Try again shortly." }, { status: 429 });
 
-  const body = (await req.json()) as TransferBody;
-  if (!body.recipient_phone || !body.amount) {
-    return withCors({ error: "recipient_phone and amount are required" }, { status: 400 });
+  if (!body.recipient_username || body.amount == null) {
+    return withCors({ error: "recipient_username and amount are required" }, { status: 400 });
+  }
+
+  const recipientUsername = normalizeUsername(body.recipient_username);
+  if (!USERNAME_RE.test(recipientUsername)) {
+    return withCors({ error: "Invalid recipient username" }, { status: 400 });
   }
 
   const currency = body.currency ?? "NGN";
@@ -43,6 +60,7 @@ Deno.serve(async (req) => {
     return withCors({ error: "currency must be NGN or USDT" }, { status: 400 });
   }
 
+  /** Amount in major units (naira or USDT); converted to smallest unit server-side. */
   const smallestUnit = currency === "NGN"
     ? Math.round(body.amount * 100)
     : Math.round(body.amount * 1_000_000);
@@ -52,15 +70,14 @@ Deno.serve(async (req) => {
   const { allowed, reason } = await checkTransferLimit(sender.id, sender.kyc_level, currency, smallestUnit);
   if (!allowed) return withCors({ error: reason }, { status: 403 });
 
-  const normalizedPhone = body.recipient_phone.replace(/\s+/g, "");
-
   const { data: recipient, error: recipientErr } = await supabase
     .from("users")
-    .select("id, kyc_level")
-    .eq("phone", normalizedPhone)
-    .single();
+    .select("id, kyc_level, status")
+    .eq("username", recipientUsername)
+    .maybeSingle();
 
-  if (recipientErr || !recipient) {
+  if (recipientErr) throw recipientErr;
+  if (!recipient || recipient.status !== "active") {
     return withCors({ error: "Recipient not found. They must have a Doings account." }, { status: 404 });
   }
 
@@ -90,6 +107,10 @@ Deno.serve(async (req) => {
     return withCors({ error: `${currency} wallet not found` }, { status: 500 });
   }
 
+  const description = body.description?.trim()
+    ? body.description.trim()
+    : `Transfer to @${recipientUsername}`;
+
   try {
     const { data: transferId, error: transferErr } = await supabase.rpc("internal_transfer", {
       p_sender_wallet_id: senderWallet.id,
@@ -97,9 +118,9 @@ Deno.serve(async (req) => {
       p_sender_user_id: sender.id,
       p_receiver_user_id: recipient.id,
       p_amount: smallestUnit,
-      p_fee: 0,
-      p_description: body.description ?? `Transfer to ${normalizedPhone}`,
-      p_type: "transfer",
+      p_fee: P2P_TRANSFER_FEE,
+      p_description: description,
+      p_type: "send",
     });
 
     if (transferErr) throw transferErr;
@@ -109,7 +130,7 @@ Deno.serve(async (req) => {
       transfer_id: transferId,
       currency,
       amount: body.amount,
-      recipient_phone: normalizedPhone,
+      recipient_username: recipientUsername,
     });
   } catch (err) {
     const msg = String(err);

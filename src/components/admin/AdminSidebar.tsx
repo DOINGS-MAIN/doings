@@ -6,7 +6,12 @@ import {
   Calendar,
   Settings,
   LogOut,
-  Shield
+  Shield,
+  Route,
+  Webhook,
+  BarChart3,
+  ListTodo,
+  Activity,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -25,7 +30,12 @@ interface AdminSidebarProps {
 const navItems = [
   { path: "/admin", label: "Dashboard", icon: LayoutDashboard, permission: "dashboard" },
   { path: "/admin/users", label: "User Management", icon: Users, permission: "users" },
+  { path: "/admin/payments", label: "Payments", icon: BarChart3, permission: "payments" },
+  { path: "/admin/queue", label: "Review Queue", icon: ListTodo, permission: "queue" },
   { path: "/admin/transactions", label: "Transactions", icon: CreditCard, permission: "transactions" },
+  { path: "/admin/psp-events", label: "PSP Activity", icon: Activity, permission: "psp_events" },
+  { path: "/admin/webhooks", label: "Webhooks", icon: Webhook, permission: "webhooks" },
+  { path: "/admin/payment-rails", label: "Payment Rails", icon: Route, permission: "payment_rails" },
   { path: "/admin/kyc", label: "KYC Review", icon: FileCheck, permission: "kyc" },
   { path: "/admin/events", label: "Event Moderation", icon: Calendar, permission: "events" },
 ];

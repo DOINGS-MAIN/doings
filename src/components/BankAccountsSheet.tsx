@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Building2, Plus, Trash2, Check, CreditCard, Star, Search } from "lucide-react";
+import { Building2, Plus, Trash2, Check, CreditCard, Star, Search, Loader2, RefreshCw } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useBankAccounts, NIGERIAN_BANKS, BankAccount } from "@/hooks/useBankAccounts";
+import { useBankAccounts, BankAccount } from "@/hooks/useBankAccounts";
 import { transfers } from "@/lib/supabase";
 import { toast } from "sonner";
 
@@ -15,7 +15,17 @@ interface BankAccountsSheetProps {
 }
 
 export const BankAccountsSheet = ({ open, onOpenChange }: BankAccountsSheetProps) => {
-  const { accounts, addBankAccount, removeBankAccount, setDefaultAccount } = useBankAccounts();
+  const {
+    accounts,
+    banks,
+    banksProvider,
+    banksLoading,
+    banksError,
+    refetchBanks,
+    addBankAccount,
+    removeBankAccount,
+    setDefaultAccount,
+  } = useBankAccounts();
   const [showAddForm, setShowAddForm] = useState(false);
   const [bankSearch, setBankSearch] = useState("");
   const [selectedBank, setSelectedBank] = useState<{ code: string; name: string } | null>(null);
@@ -23,7 +33,7 @@ export const BankAccountsSheet = ({ open, onOpenChange }: BankAccountsSheetProps
   const [accountName, setAccountName] = useState("");
   const [isVerifying, setIsVerifying] = useState(false);
 
-  const filteredBanks = NIGERIAN_BANKS.filter((bank) =>
+  const filteredBanks = banks.filter((bank) =>
     bank.name.toLowerCase().includes(bankSearch.toLowerCase())
   );
 
@@ -51,7 +61,7 @@ export const BankAccountsSheet = ({ open, onOpenChange }: BankAccountsSheetProps
     }
 
     try {
-      await addBankAccount(selectedBank.code, accountNumber, accountName);
+      await addBankAccount(selectedBank.code, selectedBank.name, accountNumber, accountName);
       toast.success("Bank account added successfully!");
       resetForm();
     } catch (error) {
@@ -198,6 +208,11 @@ export const BankAccountsSheet = ({ open, onOpenChange }: BankAccountsSheetProps
                 {!selectedBank ? (
                   <div className="space-y-3">
                     <Label>Select Bank</Label>
+                    {banksProvider && (
+                      <p className="text-xs text-muted-foreground">
+                        Bank list from {banksProvider}
+                      </p>
+                    )}
                     <div className="relative">
                       <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
@@ -205,21 +220,41 @@ export const BankAccountsSheet = ({ open, onOpenChange }: BankAccountsSheetProps
                         value={bankSearch}
                         onChange={(e) => setBankSearch(e.target.value)}
                         className="pl-10"
+                        disabled={banksLoading || Boolean(banksError)}
                       />
                     </div>
-                    <div className="grid max-h-[40dvh] grid-cols-2 gap-2 overflow-y-auto overscroll-y-contain">
-                      {filteredBanks.map((bank) => (
-                        <Button
-                          key={bank.code}
-                          variant="outline"
-                          className="h-auto py-3 justify-start"
-                          onClick={() => setSelectedBank(bank)}
-                        >
-                          <Building2 className="w-4 h-4 mr-2 shrink-0" />
-                          <span className="text-left text-sm truncate">{bank.name}</span>
+                    {banksLoading ? (
+                      <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        <span>Loading banks...</span>
+                      </div>
+                    ) : banksError ? (
+                      <div className="space-y-3 py-8 text-center">
+                        <p className="text-sm text-muted-foreground">
+                          Could not load banks from the payment provider.
+                        </p>
+                        <Button variant="outline" size="sm" onClick={() => refetchBanks()}>
+                          <RefreshCw className="w-4 h-4 mr-2" />
+                          Retry
                         </Button>
-                      ))}
-                    </div>
+                      </div>
+                    ) : filteredBanks.length === 0 ? (
+                      <p className="py-8 text-center text-sm text-muted-foreground">No banks match your search.</p>
+                    ) : (
+                      <div className="grid max-h-[40dvh] grid-cols-2 gap-2 overflow-y-auto overscroll-y-contain">
+                        {filteredBanks.map((bank) => (
+                          <Button
+                            key={bank.code}
+                            variant="outline"
+                            className="h-auto py-3 justify-start"
+                            onClick={() => setSelectedBank(bank)}
+                          >
+                            <Building2 className="w-4 h-4 mr-2 shrink-0" />
+                            <span className="text-left text-sm truncate">{bank.name}</span>
+                          </Button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="space-y-4">

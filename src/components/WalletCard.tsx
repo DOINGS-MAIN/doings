@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Plus, ArrowUpRight, ArrowDownLeft, History, Coins } from "lucide-react";
+import { Eye, EyeOff, Plus, ArrowUpRight, ArrowDownLeft, History, Coins, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Currency } from "@/types/finance";
@@ -13,6 +13,8 @@ interface WalletCardProps {
   onWithdraw: () => void;
   activeCurrency: Currency;
   onCurrencyChange: (currency: Currency) => void;
+  onRefreshBalance?: () => void;
+  balanceRefreshing?: boolean;
 }
 
 export const WalletCard = ({
@@ -24,6 +26,8 @@ export const WalletCard = ({
   onWithdraw,
   activeCurrency,
   onCurrencyChange,
+  onRefreshBalance,
+  balanceRefreshing = false,
 }: WalletCardProps) => {
   const [showBalance, setShowBalance] = useState(true);
 
@@ -107,6 +111,7 @@ export const WalletCard = ({
               <button
                 onClick={() => setShowBalance(!showBalance)}
                 className="p-1 hover:bg-white/20 rounded-lg transition-colors"
+                aria-label={showBalance ? "Hide balance" : "Show balance"}
               >
                 {showBalance ? (
                   <EyeOff className="w-5 h-5 text-white/70" />
@@ -114,6 +119,18 @@ export const WalletCard = ({
                   <Eye className="w-5 h-5 text-white/70" />
                 )}
               </button>
+              {onRefreshBalance && (
+                <button
+                  type="button"
+                  onClick={onRefreshBalance}
+                  disabled={balanceRefreshing}
+                  className="p-1 hover:bg-white/20 rounded-lg transition-colors disabled:opacity-50"
+                  aria-label="Refresh balance"
+                  title="Refresh balance"
+                >
+                  <RefreshCw className={`w-5 h-5 text-white/70 ${balanceRefreshing ? "animate-spin" : ""}`} />
+                </button>
+              )}
             </div>
             {/* Other currency hint */}
             {showBalance && (

@@ -10,6 +10,21 @@ export async function sha512Hex(input: string): Promise<string> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+export async function hmacSha256Base64(secret: string, payload: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: { name: "SHA-256" } },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  const bytes = new Uint8Array(sig);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
 export async function hmacHex(algo: "SHA-256" | "SHA-512", secret: string, payload: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     "raw",

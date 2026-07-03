@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Building2, CreditCard, Copy, Check, ArrowLeft, Coins, QrCode, Globe } from "lucide-react";
+import { X, Building2, Copy, Check, ArrowLeft, Coins, QrCode, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -9,12 +9,16 @@ import { Currency, KYCLevel, KYC_GATES, MonnifyReservedAccount, BlockradarAddres
 interface FundWalletSheetProps {
   isOpen: boolean;
   onClose: () => void;
-  onFundNGN: (amount: number, method: "bank" | "card", description: string) => void;
+  onFundNGN: (amount: number, description: string) => void;
   onFundUSDT: (amount: number, provider: "blockradar", description: string) => void;
   activeCurrency: Currency;
   kycLevel: KYCLevel;
   onOpenKYC: () => void;
+  fundingProviderId?: string;
+  ngnReservedAccount?: MonnifyReservedAccount;
   monnifyAccount?: MonnifyReservedAccount;
+  onCreateNgnAccount: (bvn?: string) => Promise<MonnifyReservedAccount>;
+  /** @deprecated Use onCreateNgnAccount */
   onCreateMonnifyAccount: (bvn: string) => Promise<MonnifyReservedAccount>;
   blockradarAddresses: BlockradarAddress[];
   onCreateBlockradarAddress: (network: string) => Promise<BlockradarAddress>;
@@ -22,11 +26,9 @@ interface FundWalletSheetProps {
 
 type Step =
   | "currency"
-  | "method"
   | "amount"
   | "monnify-bvn"
   | "bank"
-  | "card"
   | "usdt-network"
   | "usdt-deposit";
 
@@ -46,14 +48,16 @@ export const FundWalletSheet = ({
   activeCurrency,
   kycLevel,
   onOpenKYC,
+  fundingProviderId = "monnify",
+  ngnReservedAccount,
   monnifyAccount,
+  onCreateNgnAccount,
   onCreateMonnifyAccount,
   blockradarAddresses,
   onCreateBlockradarAddress,
 }: FundWalletSheetProps) => {
-  const [step, setStep] = useState<Step>("method");
+  const [step, setStep] = useState<Step>("amount");
   const [currency, setCurrency] = useState<Currency>(activeCurrency);
-  const [method, setMethod] = useState<"bank" | "card" | null>(null);
   const [amount, setAmount] = useState<string>("");
   const [copied, setCopied] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -62,7 +66,17 @@ export const FundWalletSheet = ({
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [monnifyBvn, setMonnifyBvn] = useState("");
 
-  const bankDetails = monnifyAccount || {
+  const reservedAccount = ngnReservedAccount ?? monnifyAccount;
+  const providerLabel =
+    fundingProviderId === "nomba"
+      ? "Nombank"
+      : fundingProviderId === "monnify"
+      ? "Monnify"
+      : fundingProviderId === "flutterwave"
+      ? "Flutterwave"
+      : fundingProviderId;
+  const needsBvnForAccount = fundingProviderId === "monnify" || fundingProviderId === "flutterwave";
+  const bankDetails = reservedAccount || {
     bankName: "Wema Bank",
     accountNumber: "Not created yet",
     accountName: "DOINGS/User",
@@ -92,15 +106,10 @@ export const FundWalletSheet = ({
 
     setCurrency(c);
     if (c === "NGN") {
-      setStep("method");
+      setStep("amount");
     } else {
       setStep("usdt-network");
     }
-  };
-
-  const handleSelectMethod = (m: "bank" | "card") => {
-    setMethod(m);
-    setStep("amount");
   };
 
   const handleAmountSelect = (value: number) => {
@@ -114,15 +123,26 @@ export const FundWalletSheet = ({
       return;
     }
 
-    if (method === "bank") {
-      if (!monnifyAccount) {
-        setStep("monnify-bvn");
+    if (!reservedAccount) {
+        if (needsBvnForAccount) {
+          setStep("monnify-bvn");
+          return;
+        }
+        void (async () => {
+          setIsCreatingAccount(true);
+          try {
+            await onCreateNgnAccount();
+            toast.success("Funding account created.");
+            setStep("bank");
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "Could not create funding account");
+          } finally {
+            setIsCreatingAccount(false);
+          }
+        })();
         return;
       }
       setStep("bank");
-    } else {
-      setStep("card");
-    }
   };
 
   const handleSelectNetwork = async (networkId: string) => {
@@ -151,29 +171,22 @@ export const FundWalletSheet = ({
 
   const handleBankConfirm = () => {
     const numAmount = parseInt(amount, 10);
-    onFundNGN(numAmount, "bank", `Bank Transfer - ${bankDetails.bankName}`);
+    onFundNGN(numAmount, `Bank Transfer - ${bankDetails.bankName}`);
     toast.info(
-      "After you transfer, Monnify notifies us and your NGN balance updates automatically (usually within a few minutes)."
+      `After you transfer, ${providerLabel} notifies us and your NGN balance updates automatically (usually within a few minutes).`
     );
-    handleReset();
-  };
-
-  const handleCardPayment = () => {
-    const numAmount = parseInt(amount, 10);
-    onFundNGN(numAmount, "card", "Card Payment");
-    toast.info("Card funding is not wired to a live gateway yet. Use bank transfer to fund for now.");
     handleReset();
   };
 
   const handleMonnifyBvnContinue = async () => {
     const digits = monnifyBvn.replace(/\D/g, "");
     if (digits.length !== 11) {
-      toast.error("Enter a valid 11-digit BVN (required by Monnify for virtual accounts).");
+      toast.error("Enter a valid 11-digit BVN (required for virtual account creation).");
       return;
     }
     setIsCreatingAccount(true);
     try {
-      await onCreateMonnifyAccount(digits);
+      await onCreateNgnAccount(digits);
       toast.success("Reserved account created. You can copy bank details on the next step.");
       setStep("bank");
     } catch (e) {
@@ -184,8 +197,7 @@ export const FundWalletSheet = ({
   };
 
   const handleReset = () => {
-    setStep("method");
-    setMethod(null);
+    setStep(activeCurrency === "USDT" ? "usdt-network" : "amount");
     setAmount("");
     setIsProcessing(false);
     setIsCreatingAccount(false);
@@ -197,10 +209,10 @@ export const FundWalletSheet = ({
   };
 
   const handleBack = () => {
-    if (step === "method" || step === "usdt-network") setStep("currency");
-    else if (step === "amount") setStep("method");
+    if (step === "usdt-network") setStep("currency");
+    else if (step === "amount") setStep("currency");
     else if (step === "monnify-bvn") setStep("amount");
-    else if (step === "bank" || step === "card") setStep("amount");
+    else if (step === "bank") setStep("amount");
     else if (step === "usdt-deposit") setStep("usdt-network");
   };
 
@@ -231,18 +243,16 @@ export const FundWalletSheet = ({
 
             <div className="flex shrink-0 items-center justify-between border-b border-border px-6 pb-4">
               <div className="flex items-center gap-3">
-                {step !== "currency" && step !== "method" && (
+                {step !== "currency" && step !== "amount" && (
                   <button onClick={handleBack} className="p-2 hover:bg-muted rounded-full transition-colors">
                     <ArrowLeft className="w-5 h-5 text-muted-foreground" />
                   </button>
                 )}
                 <h2 className="text-xl font-bold text-foreground">
                   {step === "currency" && "Fund Wallet"}
-                  {step === "method" && `Fund ${currency} Wallet`}
-                  {step === "amount" && "Enter Amount"}
+                  {step === "amount" && "Fund NGN Wallet"}
                   {step === "monnify-bvn" && "Verify BVN"}
                   {step === "bank" && "Bank Transfer"}
-                  {step === "card" && "Card Payment"}
                   {step === "usdt-network" && "Select Network"}
                   {step === "usdt-deposit" && "Deposit USDT"}
                 </h2>
@@ -267,7 +277,7 @@ export const FundWalletSheet = ({
                       <div className="w-14 h-14 rounded-2xl bg-primary/20 flex items-center justify-center text-2xl">🇳🇬</div>
                       <div className="text-left flex-1">
                         <h3 className="font-bold text-foreground">Naira (NGN)</h3>
-                        <p className="text-sm text-muted-foreground">Bank transfer or card (Monnify)</p>
+                        <p className="text-sm text-muted-foreground">Bank transfer via {providerLabel}</p>
                       </div>
                     </motion.button>
                     <motion.button
@@ -287,52 +297,12 @@ export const FundWalletSheet = ({
                   </motion.div>
                 )}
 
-                {/* NGN Method Selection */}
-                {step === "method" && (
-                  <motion.div key="method" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-4">
-                    <p className="text-muted-foreground text-sm mb-6">Choose how you'd like to fund your wallet</p>
-                    <motion.button
-                      className="w-full p-4 glass rounded-2xl flex items-center gap-4 hover:bg-card-elevated transition-colors"
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => handleSelectMethod("bank")}
-                    >
-                      <div className="w-14 h-14 rounded-2xl bg-success/20 flex items-center justify-center">
-                        <Building2 className="w-7 h-7 text-success" />
-                      </div>
-                      <div className="text-left flex-1">
-                        <h3 className="font-bold text-foreground">Bank Transfer</h3>
-                        <p className="text-sm text-muted-foreground">Monnify Reserved Account</p>
-                      </div>
-                      <span className="text-xs text-success font-medium bg-success/10 px-2 py-1 rounded-full">No fees</span>
-                    </motion.button>
-                    <motion.button
-                      className="w-full p-4 glass rounded-2xl flex items-center gap-4 hover:bg-card-elevated transition-colors"
-                      whileHover={{ scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => handleSelectMethod("card")}
-                    >
-                      <div className="w-14 h-14 rounded-2xl bg-secondary/20 flex items-center justify-center">
-                        <CreditCard className="w-7 h-7 text-secondary" />
-                      </div>
-                      <div className="text-left flex-1">
-                        <h3 className="font-bold text-foreground">Card Payment</h3>
-                        <p className="text-sm text-muted-foreground">Debit/Credit card • Instant</p>
-                      </div>
-                      <span className="text-xs text-muted-foreground font-medium bg-muted px-2 py-1 rounded-full">1.5% fee</span>
-                    </motion.button>
-
-                    {/* Show currency switcher */}
-                    <Button variant="ghost" className="w-full text-sm" onClick={() => setStep("currency")}>
-                      <Coins className="w-4 h-4 mr-2" />
-                      Fund USDT instead
-                    </Button>
-                  </motion.div>
-                )}
-
-                {/* Amount */}
-                {step === "amount" && (
+                {/* NGN amount */}
+                {step === "amount" && currency === "NGN" && (
                   <motion.div key="amount" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-6">
+                    <p className="text-sm text-muted-foreground text-center">
+                      Fund via bank transfer to your {providerLabel} virtual account
+                    </p>
                     <div className="text-center">
                       <p className="text-muted-foreground text-sm mb-4">How much do you want to add?</p>
                       <div className="relative">
@@ -361,22 +331,18 @@ export const FundWalletSheet = ({
                         </motion.button>
                       ))}
                     </div>
-                    {method === "card" && amount && parseFloat(amount) > 0 && (
-                      <div className="glass rounded-xl p-3 flex justify-between items-center">
-                        <span className="text-sm text-muted-foreground">Processing fee (1.5%)</span>
-                        <span className="text-sm font-semibold text-foreground">
-                          {symbol}{Math.round(parseFloat(amount) * 0.015).toLocaleString()}
-                        </span>
-                      </div>
-                    )}
                     <Button
                       variant="gold"
                       size="lg"
                       className="w-full"
                       onClick={handleProceed}
-                      disabled={!amount || parseFloat(amount) < (currency === "NGN" ? 100 : 1)}
+                      disabled={!amount || parseFloat(amount) < 100}
                     >
                       Continue
+                    </Button>
+                    <Button variant="ghost" className="w-full text-sm" onClick={() => setStep("currency")}>
+                      <Coins className="w-4 h-4 mr-2" />
+                      Fund USDT instead
                     </Button>
                   </motion.div>
                 )}
@@ -390,7 +356,7 @@ export const FundWalletSheet = ({
                     className="space-y-6"
                   >
                     <p className="text-sm text-muted-foreground">
-                      Monnify needs your <span className="font-medium text-foreground">BVN</span> once to generate your personal transfer account. This is not stored in plain text on our
+                      {providerLabel} needs your <span className="font-medium text-foreground">BVN</span> once to generate your personal transfer account. This is not stored in plain text on our
                       servers after verification.
                     </p>
                     <div>
@@ -432,21 +398,21 @@ export const FundWalletSheet = ({
                         <Building2 className="w-8 h-8 text-success" />
                       </div>
                       <p className="text-muted-foreground text-sm">
-                        Transfer exactly <span className="text-primary font-bold">₦{parseInt(amount).toLocaleString()}</span> to your Monnify account
+                        Transfer exactly <span className="text-primary font-bold">₦{parseInt(amount).toLocaleString()}</span> to your {providerLabel} account
                       </p>
                     </div>
                     <div className="glass rounded-2xl p-4 space-y-4">
-                      <div><p className="text-xs text-muted-foreground">Bank Name</p><p className="font-bold text-foreground">{monnifyAccount?.bankName || "Wema Bank"}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Bank Name</p><p className="font-bold text-foreground">{reservedAccount?.bankName || bankDetails.bankName}</p></div>
                       <div className="flex justify-between items-center">
-                        <div><p className="text-xs text-muted-foreground">Account Number</p><p className="font-bold text-foreground text-lg">{monnifyAccount?.accountNumber || "Generating..."}</p></div>
-                        <button onClick={() => handleCopy(monnifyAccount?.accountNumber || "")} className="p-2 hover:bg-muted rounded-lg transition-colors">
+                        <div><p className="text-xs text-muted-foreground">Account Number</p><p className="font-bold text-foreground text-lg">{reservedAccount?.accountNumber || bankDetails.accountNumber}</p></div>
+                        <button onClick={() => handleCopy(reservedAccount?.accountNumber || bankDetails.accountNumber || "")} className="p-2 hover:bg-muted rounded-lg transition-colors">
                           {copied ? <Check className="w-5 h-5 text-success" /> : <Copy className="w-5 h-5 text-muted-foreground" />}
                         </button>
                       </div>
-                      <div><p className="text-xs text-muted-foreground">Account Name</p><p className="font-bold text-foreground">{monnifyAccount?.accountName || "DOINGS/User"}</p></div>
+                      <div><p className="text-xs text-muted-foreground">Account Name</p><p className="font-bold text-foreground">{reservedAccount?.accountName || bankDetails.accountName}</p></div>
                     </div>
                     <div className="glass rounded-xl p-3 border-l-4 border-primary">
-                      <p className="text-xs text-muted-foreground">💡 Your wallet will be credited automatically via Monnify webhook</p>
+                      <p className="text-xs text-muted-foreground">💡 Your wallet will be credited automatically via {providerLabel} webhook</p>
                     </div>
                     <Button variant="gold" size="lg" className="w-full" onClick={handleBankConfirm} disabled={isProcessing}>
                       {isProcessing ? (
@@ -455,38 +421,6 @@ export const FundWalletSheet = ({
                           Verifying Transfer...
                         </motion.div>
                       ) : "I've Made the Transfer"}
-                    </Button>
-                  </motion.div>
-                )}
-
-                {/* Card Payment */}
-                {step === "card" && (
-                  <motion.div key="card" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-6">
-                    <div className="text-center mb-6">
-                      <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-secondary/20 flex items-center justify-center">
-                        <CreditCard className="w-8 h-8 text-secondary" />
-                      </div>
-                      <p className="text-muted-foreground text-sm">Pay <span className="text-primary font-bold">₦{parseInt(amount).toLocaleString()}</span> with your card</p>
-                    </div>
-                    <div className="space-y-4">
-                      <div><label className="text-sm text-muted-foreground mb-2 block">Card Number</label><Input placeholder="1234 5678 9012 3456" className="bg-muted border-none" defaultValue="4242 4242 4242 4242" /></div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div><label className="text-sm text-muted-foreground mb-2 block">Expiry</label><Input placeholder="MM/YY" className="bg-muted border-none" defaultValue="12/28" /></div>
-                        <div><label className="text-sm text-muted-foreground mb-2 block">CVV</label><Input type="password" placeholder="•••" className="bg-muted border-none" defaultValue="123" /></div>
-                      </div>
-                    </div>
-                    <div className="glass rounded-xl p-3 space-y-2">
-                      <div className="flex justify-between text-sm"><span className="text-muted-foreground">Amount</span><span className="text-foreground">₦{parseInt(amount).toLocaleString()}</span></div>
-                      <div className="flex justify-between text-sm"><span className="text-muted-foreground">Fee (1.5%)</span><span className="text-foreground">₦{Math.round(parseInt(amount) * 0.015).toLocaleString()}</span></div>
-                      <div className="border-t border-border pt-2 flex justify-between"><span className="font-bold text-foreground">Total</span><span className="font-bold text-primary">₦{(parseInt(amount) + Math.round(parseInt(amount) * 0.015)).toLocaleString()}</span></div>
-                    </div>
-                    <Button variant="gold" size="lg" className="w-full" onClick={handleCardPayment} disabled={isProcessing}>
-                      {isProcessing ? (
-                        <motion.div className="flex items-center gap-2" animate={{ opacity: [1, 0.5, 1] }} transition={{ duration: 1, repeat: Infinity }}>
-                          <div className="w-5 h-5 border-2 border-primary-foreground border-t-transparent rounded-full animate-spin" />
-                          Processing...
-                        </motion.div>
-                      ) : `Pay ₦${(parseInt(amount) + Math.round(parseInt(amount) * 0.015)).toLocaleString()}`}
                     </Button>
                   </motion.div>
                 )}
@@ -528,7 +462,7 @@ export const FundWalletSheet = ({
                         <span className="text-sm text-muted-foreground">Generating address via Blockradar...</span>
                       </div>
                     )}
-                    <Button variant="ghost" className="w-full text-sm" onClick={() => { setCurrency("NGN"); setStep("method"); }}>
+                    <Button variant="ghost" className="w-full text-sm" onClick={() => { setCurrency("NGN"); setStep("amount"); }}>
                       Fund NGN instead
                     </Button>
                   </motion.div>

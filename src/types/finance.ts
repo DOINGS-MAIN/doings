@@ -39,6 +39,11 @@ export interface KYCState {
   ninVerified: boolean;
 }
 
+export interface WithdrawalFeeSettings {
+  platformFeePercent: number;
+  transactionFeeNaira: number;
+}
+
 // KYC level gates
 export const KYC_GATES = {
   VIEW_WALLET: 0 as KYCLevel,
@@ -93,7 +98,7 @@ export interface FinanceTransaction {
   fee: number;
   netAmount: number;
   status: TransactionStatus;
-  provider?: "monnify" | "blockradar" | "quidax" | "internal";
+  provider?: "monnify" | "nomba" | "flutterwave" | "blockradar" | "quidax" | "internal";
   providerRef?: string;
   idempotencyKey: string;
   description: string;
@@ -123,7 +128,11 @@ export interface MonnifyReservedAccount {
   bankCode: string;
   reservationReference: string;
   status: "ACTIVE" | "INACTIVE";
+  providerId?: string;
 }
+
+/** Provider-agnostic NGN funding account (Monnify, Nomba, etc.) */
+export type NgnReservedAccount = MonnifyReservedAccount;
 
 export interface BlockradarAddress {
   address: string;
@@ -144,6 +153,7 @@ export interface MultiWalletState {
   wallets: Record<Currency, Wallet>;
   transactions: FinanceTransaction[];
   monnifyAccount?: MonnifyReservedAccount;
+  ngnReservedAccount?: NgnReservedAccount;
   blockradarAddresses: BlockradarAddress[];
   quidaxUser?: QuidaxSubUser;
 }

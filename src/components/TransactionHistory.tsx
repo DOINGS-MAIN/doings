@@ -45,6 +45,11 @@ const getStatusIcon = (status: FinanceTransaction["status"]) => {
   }
 };
 
+const HIDDEN_USER_PROVIDER_TAGS = new Set(["flutterwave", "monnify", "nomba", "internal"]);
+
+const showProviderTag = (provider?: string) =>
+  Boolean(provider && !HIDDEN_USER_PROVIDER_TAGS.has(provider.toLowerCase()));
+
 export const TransactionHistory = ({ transactions, isOpen, onClose }: TransactionHistoryProps) => {
   const [filter, setFilter] = useState<"all" | "NGN" | "USDT">("all");
 
@@ -138,7 +143,7 @@ export const TransactionHistory = ({ transactions, isOpen, onClose }: Transactio
                           }`}>
                             {transaction.currency}
                           </span>
-                          {transaction.provider && (
+                          {showProviderTag(transaction.provider) && (
                             <span className="text-xs opacity-60 capitalize">• {transaction.provider}</span>
                           )}
                         </div>

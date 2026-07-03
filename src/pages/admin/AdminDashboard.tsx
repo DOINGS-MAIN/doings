@@ -6,7 +6,8 @@ import {
   TrendingUp,
   AlertTriangle,
   DollarSign,
-  Activity
+  Activity,
+  Coins,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAdminData } from "@/hooks/useAdminData";
@@ -40,6 +41,14 @@ export const AdminDashboard = () => {
       icon: DollarSign,
       color: "text-secondary",
       bgColor: "bg-secondary/10",
+    },
+    {
+      title: "Fee Revenue",
+      value: formatCurrency(stats.totalFeeRevenue),
+      subtitle: `${formatCurrency(stats.todayFeeRevenue)} today`,
+      icon: Coins,
+      color: "text-primary",
+      bgColor: "bg-primary/10",
     },
     {
       title: "Pending KYC",
@@ -79,7 +88,7 @@ export const AdminDashboard = () => {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
         {statCards.map((stat) => (
           <Card key={stat.title} className="bg-card border-border">
             <CardContent className="p-6">
@@ -141,6 +150,9 @@ export const AdminDashboard = () => {
                   <p className={`font-semibold text-sm ${txn.amount >= 0 ? "text-success" : "text-foreground"}`}>
                     {txn.amount >= 0 ? "+" : ""}{formatCurrency(Math.abs(txn.amount))}
                   </p>
+                  {(txn.fee ?? 0) > 0 && (
+                    <p className="text-xs text-primary">Fee {formatCurrency(txn.fee ?? 0)}</p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     {formatDistanceToNow(txn.createdAt, { addSuffix: true })}
                   </p>

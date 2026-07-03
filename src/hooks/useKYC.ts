@@ -99,8 +99,19 @@ export const useKYC = () => {
 
   const verifyLevel2 = useCallback(async (bvn: string, nin: string, dateOfBirth: string) => {
     try {
-      await kyc.verifyBvnAndNin(bvn, nin, dateOfBirth || undefined);
+      const result = await kyc.verifyBvnAndNin(bvn, nin, dateOfBirth || undefined) as {
+        va_pending?: boolean;
+        message?: string;
+        va_error?: string;
+      };
       await fetchKYCState();
+      if (result.va_pending) {
+        return {
+          success: true,
+          message: result.message ||
+            "Identity verified. Open Fund Wallet to finish setting up your transfer account.",
+        };
+      }
       return { success: true, message: "BVN, NIN, and bank transfer account are ready." };
     } catch (err: unknown) {
       return { success: false, message: err instanceof Error ? err.message : "Verification failed" };

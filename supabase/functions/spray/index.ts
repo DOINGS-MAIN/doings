@@ -1,10 +1,12 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
+import { requireTransactionPin } from "../_shared/pin.ts";
 
 type SprayBody = {
   event_id: string;
   amount: number;
   denomination: 200 | 500 | 1000;
+  pin: string;
 };
 
 Deno.serve(async (req) => {
@@ -28,6 +30,9 @@ Deno.serve(async (req) => {
   if (sprayer.kyc_level < 2) return withCors({ error: "KYC level 2 required to spray" }, { status: 403 });
 
   const body = (await req.json()) as SprayBody;
+  const pinCheck = await requireTransactionPin(supabase, sprayer.id, body.pin);
+  if (pinCheck) return pinCheck;
+
   if (!body.event_id || !body.amount || !body.denomination) {
     return withCors({ error: "event_id, amount, and denomination are required" }, { status: 400 });
   }

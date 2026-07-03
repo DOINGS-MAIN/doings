@@ -14,39 +14,13 @@ export interface BankAccount {
   createdAt: Date;
 }
 
-const QUERY_KEY = ["bank-accounts"] as const;
+export type NigerianBank = {
+  code: string;
+  name: string;
+};
 
-// Nigerian banks list (picker UI)
-export const NIGERIAN_BANKS = [
-  { code: "044", name: "Access Bank" },
-  { code: "023", name: "Citibank Nigeria" },
-  { code: "063", name: "Diamond Bank" },
-  { code: "050", name: "Ecobank Nigeria" },
-  { code: "084", name: "Enterprise Bank" },
-  { code: "070", name: "Fidelity Bank" },
-  { code: "011", name: "First Bank of Nigeria" },
-  { code: "214", name: "First City Monument Bank" },
-  { code: "058", name: "Guaranty Trust Bank" },
-  { code: "030", name: "Heritage Bank" },
-  { code: "301", name: "Jaiz Bank" },
-  { code: "082", name: "Keystone Bank" },
-  { code: "526", name: "Parallex Bank" },
-  { code: "076", name: "Polaris Bank" },
-  { code: "101", name: "Providus Bank" },
-  { code: "221", name: "Stanbic IBTC Bank" },
-  { code: "068", name: "Standard Chartered Bank" },
-  { code: "232", name: "Sterling Bank" },
-  { code: "100", name: "Suntrust Bank" },
-  { code: "032", name: "Union Bank of Nigeria" },
-  { code: "033", name: "United Bank for Africa" },
-  { code: "215", name: "Unity Bank" },
-  { code: "035", name: "Wema Bank" },
-  { code: "057", name: "Zenith Bank" },
-  { code: "999", name: "OPay" },
-  { code: "998", name: "Palmpay" },
-  { code: "997", name: "Kuda Bank" },
-  { code: "996", name: "Moniepoint" },
-];
+const ACCOUNTS_QUERY_KEY = ["bank-accounts"] as const;
+const BANKS_QUERY_KEY = ["ngn-banks"] as const;
 
 function mapRow(row: {
   id: string;
@@ -83,6 +57,17 @@ async function fetchBankAccounts(): Promise<BankAccount[]> {
   return (data ?? []).map((r) => mapRow(r as Parameters<typeof mapRow>[0]));
 }
 
+async function fetchNigerianBanks(): Promise<{ banks: NigerianBank[]; provider: string }> {
+  const res = (await transfers.listBanks()) as {
+    banks?: NigerianBank[];
+    provider?: string;
+  };
+  return {
+    banks: res.banks ?? [],
+    provider: res.provider ?? "",
+  };
+}
+
 async function getPublicUserId(): Promise<string> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Sign in required");
@@ -96,23 +81,38 @@ export const useBankAccounts = () => {
   const { isAuthenticated } = useAuth();
 
   const { data: rawAccounts = [], isLoading } = useQuery({
-    queryKey: QUERY_KEY,
+    queryKey: ACCOUNTS_QUERY_KEY,
     queryFn: fetchBankAccounts,
     enabled: isAuthenticated,
   });
+
+  const {
+    data: banksData,
+    isLoading: banksLoading,
+    error: banksError,
+    refetch: refetchBanks,
+  } = useQuery({
+    queryKey: BANKS_QUERY_KEY,
+    queryFn: fetchNigerianBanks,
+    enabled: isAuthenticated,
+    staleTime: 24 * 60 * 60 * 1000,
+  });
+
   const accounts = isAuthenticated ? rawAccounts : [];
+  const banks = banksData?.banks ?? [];
+  const banksProvider = banksData?.provider ?? "";
 
   const addMutation = useMutation({
     mutationFn: async ({
       bankCode,
+      bankName,
       accountNumber,
       accountName,
-      bankName,
     }: {
       bankCode: string;
+      bankName: string;
       accountNumber: string;
       accountName: string;
-      bankName: string;
     }) => {
       const verify = (await transfers.verifyBankAccount(bankCode, accountNumber)) as {
         account_name?: string;
@@ -144,7 +144,7 @@ export const useBankAccounts = () => {
       if (error) throw error;
       return mapRow(data as Parameters<typeof mapRow>[0]);
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY }),
   });
 
   const removeMutation = useMutation({
@@ -168,7 +168,7 @@ export const useBankAccounts = () => {
         }
       }
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY }),
   });
 
   const defaultMutation = useMutation({
@@ -176,18 +176,17 @@ export const useBankAccounts = () => {
       const { error } = await supabase.from("bank_accounts").update({ is_default: true }).eq("id", accountId);
       if (error) throw error;
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ACCOUNTS_QUERY_KEY }),
   });
 
   const addBankAccount = useCallback(
-    async (bankCode: string, accountNumber: string, accountName: string) => {
-      const bank = NIGERIAN_BANKS.find((b) => b.code === bankCode);
-      if (!bank) throw new Error("Invalid bank selected");
+    async (bankCode: string, bankName: string, accountNumber: string, accountName: string) => {
+      if (!bankCode || !bankName) throw new Error("Invalid bank selected");
       return addMutation.mutateAsync({
         bankCode,
+        bankName,
         accountNumber,
         accountName,
-        bankName: bank.name,
       });
     },
     [addMutation]
@@ -215,6 +214,11 @@ export const useBankAccounts = () => {
 
   return {
     accounts,
+    banks,
+    banksProvider,
+    banksLoading,
+    banksError,
+    refetchBanks,
     loading: isLoading || addMutation.isPending || removeMutation.isPending || defaultMutation.isPending,
     kycStatus: "none" as const,
     kycSubmittedAt: undefined as Date | undefined,

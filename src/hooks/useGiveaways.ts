@@ -121,6 +121,7 @@ export const useGiveaways = () => {
       eventName?: string;
       isPrivate: boolean;
       showOnEventScreen: boolean;
+      pin: string;
     }) => {
       const result = await giveawaysApi.create({
         title: data.title,
@@ -130,6 +131,7 @@ export const useGiveaways = () => {
         event_id: data.eventId,
         is_private: data.isPrivate,
         show_on_event_screen: data.showOnEventScreen,
+        pin: data.pin,
       });
       await fetchGiveaways();
 
@@ -184,16 +186,12 @@ export const useGiveaways = () => {
   );
 
   const stopGiveaway = useCallback(
-    async (giveawayId: string): Promise<number> => {
-      try {
-        const result = await giveawaysApi.stop(giveawayId);
-        await fetchGiveaways();
-        const r = result as Record<string, unknown>;
-        const kobo = (r.refunded as number) ?? (r.refunded_amount as number) ?? 0;
-        return kobo / 100;
-      } catch {
-        return 0;
-      }
+    async (giveawayId: string, pin: string): Promise<number> => {
+      const result = await giveawaysApi.stop(giveawayId, pin);
+      await fetchGiveaways();
+      const r = result as Record<string, unknown>;
+      const kobo = (r.refunded as number) ?? (r.refunded_amount as number) ?? 0;
+      return kobo / 100;
     },
     [fetchGiveaways]
   );

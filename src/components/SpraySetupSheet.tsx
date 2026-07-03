@@ -3,16 +3,19 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, ArrowLeft, Banknote, Zap, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { PinInput } from "@/components/PinInput";
+import { isValidPin } from "@/lib/pin";
 
 interface SpraySetupSheetProps {
   isOpen: boolean;
   onClose: () => void;
-  onStartSpray: (amount: number, denomination: number) => void;
+  onStartSpray: (amount: number, denomination: number, pin: string) => void;
   balance: number;
   eventName: string;
+  onPinNotSet?: () => void;
 }
 
-type Step = "amount" | "denomination";
+type Step = "amount" | "denomination" | "pin";
 
 const QUICK_AMOUNTS = [5000, 10000, 20000, 50000, 100000];
 const DENOMINATIONS = [
@@ -26,11 +29,14 @@ export const SpraySetupSheet = ({
   onClose, 
   onStartSpray, 
   balance,
-  eventName 
+  eventName,
+  onPinNotSet,
 }: SpraySetupSheetProps) => {
   const [step, setStep] = useState<Step>("amount");
   const [selectedAmount, setSelectedAmount] = useState<number>(0);
   const [customAmount, setCustomAmount] = useState<string>("");
+  const [selectedDenomination, setSelectedDenomination] = useState<number>(0);
+  const [pin, setPin] = useState("");
 
   const handleSelectAmount = (amount: number) => {
     if (amount > balance) {
@@ -56,19 +62,31 @@ export const SpraySetupSheet = ({
   };
 
   const handleSelectDenomination = (denomination: number) => {
-    onStartSpray(selectedAmount, denomination);
+    setSelectedDenomination(denomination);
+    setStep("pin");
+  };
+
+  const handleConfirmPin = () => {
+    if (!isValidPin(pin)) {
+      toast.error("Enter your 4-digit transaction PIN");
+      return;
+    }
+    onStartSpray(selectedAmount, selectedDenomination, pin);
     handleReset();
   };
 
   const handleReset = () => {
     setStep("amount");
     setSelectedAmount(0);
+    setSelectedDenomination(0);
     setCustomAmount("");
+    setPin("");
     onClose();
   };
 
   const handleBack = () => {
-    if (step === "denomination") setStep("amount");
+    if (step === "pin") setStep("denomination");
+    else if (step === "denomination") setStep("amount");
   };
 
   const noteCount = selectedAmount > 0 ? Math.floor(selectedAmount / 200) : 0;
@@ -115,6 +133,7 @@ export const SpraySetupSheet = ({
                   <h2 className="text-xl font-bold text-foreground">
                     {step === "amount" && "Let's Spray! 💸"}
                     {step === "denomination" && "Choose Notes"}
+                    {step === "pin" && "Confirm with PIN"}
                   </h2>
                   <p className="text-sm text-muted-foreground">{eventName}</p>
                 </div>
@@ -260,6 +279,28 @@ export const SpraySetupSheet = ({
                         💡 Higher denominations = faster spray but fewer notes. Lower = more notes, longer spray!
                       </p>
                     </div>
+                  </motion.div>
+                )}
+
+                {step === "pin" && (
+                  <motion.div
+                    key="pin"
+                    initial={{ opacity: 0, x: -20 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    exit={{ opacity: 0, x: 20 }}
+                    className="space-y-6"
+                  >
+                    <div className="glass rounded-2xl p-4 text-center">
+                      <p className="text-sm text-muted-foreground">Confirm spray of</p>
+                      <p className="text-3xl font-black text-gradient-gold">
+                        ₦{selectedAmount.toLocaleString()}
+                      </p>
+                      <p className="text-sm text-muted-foreground mt-1">₦{selectedDenomination} notes</p>
+                    </div>
+                    <PinInput value={pin} onChange={setPin} label="Transaction PIN" />
+                    <Button variant="gold" size="lg" className="w-full h-14" onClick={handleConfirmPin} disabled={!isValidPin(pin)}>
+                      Start spraying
+                    </Button>
                   </motion.div>
                 )}
               </AnimatePresence>

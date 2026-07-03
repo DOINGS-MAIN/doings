@@ -1,11 +1,21 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { sha256Hex } from "../_shared/crypto.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
-import { createReservedAccount } from "../_shared/monnify.ts";
+import {
+  dojahGetJson,
+  dojahHeaders,
+  parseDojahIdentityEntity,
+} from "../_shared/dojahClient.ts";
+import { getPlatformPaymentSettings } from "../_shared/psp/platformSettings.ts";
+import {
+  getExistingReservedAccount,
+  provisionReservedAccount,
+  type ReservedAccountRow,
+} from "../_shared/psp/provisionReservedAccount.ts";
 
 type VerifyBody = {
-  bvn: string;
-  nin: string;
+  bvn?: string;
+  nin?: string;
   dateOfBirth?: string;
 };
 
@@ -29,11 +39,39 @@ function surnamesCompatible(bvnFull: string, ninFull: string): boolean {
   return a === b || a.includes(b) || b.includes(a);
 }
 
-function dojahHeaders(appId: string, secret: string) {
+function formatReservedAccount(account: ReservedAccountRow) {
   return {
-    Authorization: secret,
-    AppId: appId,
-  } as Record<string, string>;
+    accountNumber: account.accountNumber,
+    bankName: account.bankName,
+    accountName: account.accountName,
+    provider: account.providerId,
+  };
+}
+
+async function tryProvisionFundingAccount(
+  supabase: ReturnType<typeof getServiceClient>,
+  input: {
+    userId: string;
+    userName: string;
+    email: string;
+    walletId: string;
+    bvn?: string;
+    nin?: string;
+    providerId: string;
+  },
+): Promise<ReservedAccountRow | null> {
+  const existing = await getExistingReservedAccount(supabase, input.userId, input.providerId);
+  if (existing) return existing;
+
+  return await provisionReservedAccount(supabase, {
+    userId: input.userId,
+    userName: input.userName,
+    email: input.email,
+    walletId: input.walletId,
+    bvn: input.bvn,
+    nin: input.nin,
+    providerId: input.providerId,
+  });
 }
 
 Deno.serve(async (req) => {
@@ -61,10 +99,6 @@ Deno.serve(async (req) => {
 
   if (userErr || !userRow) return withCors({ error: "User profile not found" }, { status: 404 });
 
-  if (userRow.kyc_level >= 2) {
-    return withCors({ error: "Identity is already verified at this tier" }, { status: 400 });
-  }
-
   if (userRow.kyc_level < 1) {
     return withCors({ error: "Verify your email before completing BVN and NIN" }, { status: 403 });
   }
@@ -72,6 +106,71 @@ Deno.serve(async (req) => {
   const body = (await req.json()) as VerifyBody;
   const bvn = cleanDigits(body.bvn);
   const nin = cleanDigits(body.nin);
+
+  const platform = await getPlatformPaymentSettings(supabase);
+  const fundingProviderId = platform.walletFundingProviderId;
+  const needsBvnForVa = fundingProviderId === "monnify" || fundingProviderId === "flutterwave";
+
+  // Already L2 — skip Dojah; only provision VA if missing (e.g. prior VA failure).
+  if (userRow.kyc_level >= 2) {
+    const existingVa = await getExistingReservedAccount(supabase, userRow.id, fundingProviderId);
+    if (existingVa) {
+      return withCors({
+        ok: true,
+        already_verified: true,
+        level: 2,
+        verified_name: userRow.full_name,
+        funding_provider: fundingProviderId,
+        reserved_account: formatReservedAccount(existingVa),
+      });
+    }
+
+    if (needsBvnForVa && bvn.length !== 11) {
+      return withCors({
+        error: "Your identity is already verified. Enter your BVN to create your transfer account.",
+        code: "bvn_required_for_va",
+      }, { status: 400 });
+    }
+
+    const { data: ngnWallet } = await supabase
+      .from("wallets")
+      .select("id")
+      .eq("user_id", userRow.id)
+      .eq("currency", "NGN")
+      .single();
+
+    if (!ngnWallet) {
+      return withCors({ error: "NGN wallet missing; contact support" }, { status: 500 });
+    }
+
+    try {
+      const reservedAccount = await tryProvisionFundingAccount(supabase, {
+        userId: userRow.id,
+        userName: userRow.full_name || "Doings User",
+        email: userRow.email || "",
+        walletId: ngnWallet.id,
+        bvn: bvn || undefined,
+        nin: nin || undefined,
+        providerId: fundingProviderId,
+      });
+
+      return withCors({
+        ok: true,
+        already_verified: true,
+        level: 2,
+        verified_name: userRow.full_name,
+        funding_provider: fundingProviderId,
+        reserved_account: reservedAccount ? formatReservedAccount(reservedAccount) : undefined,
+      });
+    } catch (e) {
+      return withCors({
+        error: "Could not create your bank transfer account. Try Fund Wallet or contact support.",
+        detail: String(e),
+        code: "va_provision_failed",
+      }, { status: 502 });
+    }
+  }
+
   if (bvn.length !== 11) return withCors({ error: "BVN must be 11 digits" }, { status: 400 });
   if (nin.length !== 11) return withCors({ error: "NIN must be 11 digits" }, { status: 400 });
 
@@ -92,39 +191,43 @@ Deno.serve(async (req) => {
     const { error: attErr } = await supabase.from("kyc_l2_attempts").insert({ user_id: userRow.id });
     if (attErr) throw attErr;
 
-    const bvnUrl = new URL("https://api.dojah.io/api/v1/kyc/bvn");
-    bvnUrl.searchParams.set("bvn", bvn);
-    const bvnRes = await fetch(bvnUrl.toString(), { headers });
-    const bvnRaw = await bvnRes.json();
+    const { res: bvnRes, json: bvnRaw } = await dojahGetJson("/api/v1/kyc/bvn/full", { bvn }, headers);
     if (!bvnRes.ok) {
-      const msg = typeof bvnRaw?.message === "string" ? bvnRaw.message : `Dojah BVN error (${bvnRes.status})`;
+      const msg = typeof bvnRaw?.message === "string"
+        ? bvnRaw.message
+        : typeof bvnRaw?.error === "string"
+        ? bvnRaw.error
+        : `Dojah BVN error (${bvnRes.status})`;
       return withCors({ error: "BVN verification failed", detail: msg }, { status: 400 });
     }
 
-    const bvnEntity = bvnRaw?.entity ?? bvnRaw?.data ?? {};
-    const bvnFirstName = (bvnEntity.first_name ?? bvnEntity.firstName ?? "").trim();
-    const bvnLastName = (bvnEntity.last_name ?? bvnEntity.lastName ?? "").trim();
-    const bvnMiddleName = (bvnEntity.middle_name ?? bvnEntity.middleName ?? "").trim();
-    const verifiedFullName = [bvnFirstName, bvnMiddleName, bvnLastName].filter(Boolean).join(" ");
+    const bvnIdentity = parseDojahIdentityEntity(bvnRaw);
+    const {
+      firstName: bvnFirstName,
+      lastName: bvnLastName,
+      fullName: verifiedFullName,
+      dateOfBirth: bvnDob,
+    } = bvnIdentity;
 
     if (!bvnFirstName || !bvnLastName) {
-      return withCors({ error: "BVN verification returned incomplete name data" }, { status: 400 });
+      return withCors({
+        error: "BVN verification returned incomplete name data",
+        detail: "Dojah did not return first and last name for this BVN. Ensure BVN lookup/full is enabled on your Dojah plan.",
+      }, { status: 400 });
     }
 
-    const ninUrl = new URL("https://api.dojah.io/api/v1/kyc/nin");
-    ninUrl.searchParams.set("nin", nin);
-    const ninRes = await fetch(ninUrl.toString(), { headers });
-    const ninRaw = await ninRes.json();
+    const { res: ninRes, json: ninRaw } = await dojahGetJson("/api/v1/kyc/nin", { nin }, headers);
     if (!ninRes.ok) {
-      const msg = typeof ninRaw?.message === "string" ? ninRaw.message : `Dojah NIN error (${ninRes.status})`;
+      const msg = typeof ninRaw?.message === "string"
+        ? ninRaw.message
+        : typeof ninRaw?.error === "string"
+        ? ninRaw.error
+        : `Dojah NIN error (${ninRes.status})`;
       return withCors({ error: "NIN verification failed", detail: msg }, { status: 400 });
     }
 
-    const ninEntity = ninRaw?.entity ?? ninRaw?.data ?? {};
-    const ninFirstName = (ninEntity.first_name ?? ninEntity.firstName ?? "").trim();
-    const ninLastName = (ninEntity.last_name ?? ninEntity.lastName ?? "").trim();
-    const ninMiddleName = (ninEntity.middle_name ?? ninEntity.middleName ?? "").trim();
-    const ninFullName = [ninFirstName, ninMiddleName, ninLastName].filter(Boolean).join(" ");
+    const ninIdentity = parseDojahIdentityEntity(ninRaw);
+    const ninFullName = ninIdentity.fullName;
 
     if (!surnamesCompatible(verifiedFullName, ninFullName || verifiedFullName)) {
       return withCors({
@@ -132,31 +235,7 @@ Deno.serve(async (req) => {
       }, { status: 400 });
     }
 
-    const { data: existingVa } = await supabase
-      .from("monnify_reserved_accounts")
-      .select("id")
-      .eq("user_id", userRow.id)
-      .maybeSingle();
-
-    let monnifyPayload: Awaited<ReturnType<typeof createReservedAccount>> | null = null;
-
-    if (!existingVa) {
-      try {
-        monnifyPayload = await createReservedAccount({
-          userId: userRow.id,
-          userName: verifiedFullName || userRow.full_name || "Doings User",
-          email: userRow.email || "",
-          bvn,
-          nin,
-        });
-      } catch (e) {
-        return withCors({
-          error: "Identity verified, but we could not create your bank transfer account. Try again shortly or contact support.",
-          detail: String(e),
-        }, { status: 502 });
-      }
-    }
-
+    // Persist KYC before VA provisioning so a PSP failure does not force re-verification.
     const bvnHash = await sha256Hex(bvn);
     const ninHash = await sha256Hex(nin);
     const { error: kycInsErr } = await supabase.from("kyc_verifications").insert({
@@ -168,7 +247,7 @@ Deno.serve(async (req) => {
       bvn_last_four: bvn.slice(-4),
       bvn_first_name: bvnFirstName,
       bvn_last_name: bvnLastName,
-      bvn_dob: bvnEntity.date_of_birth ?? bvnEntity.dateOfBirth ?? body.dateOfBirth ?? null,
+      bvn_dob: bvnDob ?? body.dateOfBirth ?? null,
       nin_hash: ninHash,
       nin_last_four: nin.slice(-4),
       raw_response: { bvn: bvnRaw, nin: ninRaw },
@@ -178,42 +257,59 @@ Deno.serve(async (req) => {
 
     await supabase.from("users").update({ full_name: verifiedFullName }).eq("id", userRow.id);
 
-    if (monnifyPayload) {
-      const { data: ngnWallet } = await supabase
-        .from("wallets")
-        .select("id")
-        .eq("user_id", userRow.id)
-        .eq("currency", "NGN")
-        .single();
+    const { data: ngnWallet } = await supabase
+      .from("wallets")
+      .select("id")
+      .eq("user_id", userRow.id)
+      .eq("currency", "NGN")
+      .single();
 
-      if (!ngnWallet) {
-        return withCors({ error: "NGN wallet missing; contact support" }, { status: 500 });
-      }
-
-      const { error: monInsErr } = await supabase.from("monnify_reserved_accounts").insert({
-        user_id: userRow.id,
-        wallet_id: ngnWallet.id,
-        account_reference: monnifyPayload.accountReference,
-        account_name: monnifyPayload.accountName,
-        account_number: monnifyPayload.accountNumber,
-        bank_name: monnifyPayload.bankName,
-        bank_code: monnifyPayload.bankCode,
-        reservation_reference: monnifyPayload.reservationReference,
+    if (!ngnWallet) {
+      return withCors({
+        ok: true,
+        level: 2,
+        verified_name: verifiedFullName,
+        funding_provider: fundingProviderId,
+        va_pending: true,
+        message: "Identity verified. NGN wallet missing — contact support to finish transfer account setup.",
       });
-      if (monInsErr) throw monInsErr;
+    }
+
+    let reservedAccount: ReservedAccountRow | null = null;
+    let vaError: string | undefined;
+
+    try {
+      reservedAccount = await tryProvisionFundingAccount(supabase, {
+        userId: userRow.id,
+        userName: verifiedFullName || userRow.full_name || "Doings User",
+        email: userRow.email || "",
+        walletId: ngnWallet.id,
+        bvn,
+        nin,
+        providerId: fundingProviderId,
+      });
+    } catch (e) {
+      vaError = String(e);
+    }
+
+    if (vaError) {
+      return withCors({
+        ok: true,
+        level: 2,
+        verified_name: verifiedFullName,
+        funding_provider: fundingProviderId,
+        va_pending: true,
+        va_error: vaError,
+        message: "Identity verified. Transfer account setup failed — open Fund Wallet to retry with your BVN.",
+      });
     }
 
     return withCors({
       ok: true,
       level: 2,
       verified_name: verifiedFullName,
-      reserved_account: monnifyPayload
-        ? {
-            accountNumber: monnifyPayload.accountNumber,
-            bankName: monnifyPayload.bankName,
-            accountName: monnifyPayload.accountName,
-          }
-        : undefined,
+      funding_provider: fundingProviderId,
+      reserved_account: reservedAccount ? formatReservedAccount(reservedAccount) : undefined,
     });
   } catch (error) {
     return withCors({ error: "KYC verification failed", detail: String(error) }, { status: 500 });

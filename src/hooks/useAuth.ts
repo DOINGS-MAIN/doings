@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import { supabase, auth, isSupabaseConfigured } from "@/lib/supabase";
+import { supabase, auth, isSupabaseConfigured, profileApi } from "@/lib/supabase";
 import type { SignUpResult } from "@/types/auth";
 
 export type { SignUpResult } from "@/types/auth";
@@ -199,6 +199,19 @@ export const useAuth = () => {
     await refreshProfile();
   }, [state.user, refreshProfile]);
 
+  const setUsername = useCallback(async (username: string) => {
+    if (!state.user) return;
+    const { error } = await profileApi.setUsername(username);
+    if (error) throw error;
+    await refreshProfile();
+  }, [state.user, refreshProfile]);
+
+  const isUsernameAvailable = useCallback(async (username: string) => {
+    const { data, error } = await profileApi.isUsernameAvailable(username);
+    if (error) throw error;
+    return Boolean(data);
+  }, []);
+
   return {
     session: state.session,
     user: state.user,
@@ -215,5 +228,7 @@ export const useAuth = () => {
     signOut,
     refreshProfile,
     updateProfile,
+    setUsername,
+    isUsernameAvailable,
   };
 };

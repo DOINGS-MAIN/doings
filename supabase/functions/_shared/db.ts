@@ -47,3 +47,15 @@ export function getAuthedClient(authHeader: string) {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
+
+/** Ensures `public.users` exists for the JWT bearer and returns `users.id`. */
+export async function resolveAppUserId(authHeader: string): Promise<string | null> {
+  const authorization = /^Bearer\s+/i.test(authHeader) ? authHeader : `Bearer ${authHeader}`;
+  const client = getAuthedClient(authorization);
+  const { data, error } = await client.rpc("ensure_auth_user_profile");
+  if (error) {
+    console.error("resolveAppUserId:", error.message);
+    return null;
+  }
+  return typeof data === "string" ? data : null;
+}

@@ -1,5 +1,6 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
+import { requireTransactionPin } from "../_shared/pin.ts";
 
 type CreateBody = {
   title: string;
@@ -9,6 +10,7 @@ type CreateBody = {
   event_id?: string;
   is_private?: boolean;
   show_on_event_screen?: boolean;
+  pin: string;
 };
 
 type RedeemBody = {
@@ -17,6 +19,7 @@ type RedeemBody = {
 
 type StopBody = {
   giveaway_id: string;
+  pin: string;
 };
 
 function getPathAction(url: string): { action: string; id?: string } {
@@ -171,6 +174,9 @@ Deno.serve(async (req) => {
     const body = (await req.json()) as StopBody;
     if (!body.giveaway_id) return withCors({ error: "giveaway_id is required" }, { status: 400 });
 
+    const pinCheck = await requireTransactionPin(supabase, user.id, body.pin);
+    if (pinCheck) return pinCheck;
+
     const { data: giveaway, error: gErr } = await supabase
       .from("giveaways")
       .select("id, creator_id, remaining_amount, status, funding_transaction_id")
@@ -235,6 +241,9 @@ Deno.serve(async (req) => {
     if (user.kyc_level < 2) return withCors({ error: "KYC level 2 required to create giveaways" }, { status: 403 });
 
     const body = (await req.json()) as CreateBody;
+    const pinCheck = await requireTransactionPin(supabase, user.id, body.pin);
+    if (pinCheck) return pinCheck;
+
     if (!body.title || !body.total_amount || !body.per_person_amount || !body.type) {
       return withCors({ error: "title, total_amount, per_person_amount, and type are required" }, { status: 400 });
     }

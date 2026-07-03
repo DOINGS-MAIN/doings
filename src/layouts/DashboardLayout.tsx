@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { FloatingMoney } from "@/components/FloatingMoney";
@@ -15,6 +15,7 @@ import { BankAccountsSheet } from "@/components/BankAccountsSheet";
 import { KYCVerificationSheet } from "@/components/KYCVerificationSheet";
 import { WithdrawSheet } from "@/components/WithdrawSheet";
 import { SendMoneySheet } from "@/components/SendMoneySheet";
+import { TransactionPinSheet } from "@/components/TransactionPinSheet";
 import { CreateGiveawaySheet } from "@/components/CreateGiveawaySheet";
 import { GiveawayDetailsSheet } from "@/components/GiveawayDetailsSheet";
 import { RedeemGiveawaySheet } from "@/components/RedeemGiveawaySheet";
@@ -27,12 +28,16 @@ import { useEvents, EventData } from "@/hooks/useEvents";
 import { useGiveaways, Giveaway } from "@/hooks/useGiveaways";
 import { toast } from "sonner";
 import { Currency } from "@/types/finance";
+import { useTransactionPin } from "@/hooks/useTransactionPin";
 import { DashboardShellContext, type DashboardShellValue } from "@/contexts/DashboardShellContext";
 
 export function DashboardLayout() {
-  const { user, profile, signOut, updateProfile } = useAuth();
+  const { user, profile, signOut, updateProfile, setUsername } = useAuth();
   const location = useLocation();
 
+  const { hasPin, loading: pinLoading } = useTransactionPin();
+
+  const [showTransactionPin, setShowTransactionPin] = useState(false);
   const [showFundSheet, setShowFundSheet] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [activeCurrency, setActiveCurrency] = useState<Currency>("NGN");
@@ -42,6 +47,13 @@ export function DashboardLayout() {
   const [isSprayActive, setIsSprayActive] = useState(false);
   const [sprayAmount, setSprayAmount] = useState(0);
   const [sprayDenomination, setSprayDenomination] = useState(0);
+  const [sprayPin, setSprayPin] = useState("");
+
+  useEffect(() => {
+    if (!pinLoading && hasPin === false) {
+      setShowTransactionPin(true);
+    }
+  }, [hasPin, pinLoading]);
 
   const [showAvatarCustomization, setShowAvatarCustomization] = useState(false);
   const [avatarData, setAvatarData] = useState<AvatarData>({
@@ -73,11 +85,17 @@ export function DashboardLayout() {
     usdtBalance,
     transactions,
     monnifyAccount,
+    ngnReservedAccount,
+    fundingProviderId,
     blockradarAddresses,
     withdrawNGN,
     withdrawUSDT,
+    createNgnAccount,
     createMonnifyAccount,
     createBlockradarAddress,
+    refreshBalances,
+    balanceRefreshing,
+    withdrawalFeeSettings,
   } = useMultiWallet();
 
   const { currentLevel: kycLevel, verifyLevel1, verifyLevel2 } = useKYC();
@@ -127,49 +145,56 @@ export function DashboardLayout() {
     joinEvent(event.id);
   };
 
-  const handleStartSpray = (amount: number, denomination: number) => {
+  const openPinSettings = () => setShowTransactionPin(true);
+
+  const handleStartSpray = (amount: number, denomination: number, pin: string) => {
     setSprayAmount(amount);
     setSprayDenomination(denomination);
+    setSprayPin(pin);
     setShowSpraySetup(false);
     setIsSprayActive(true);
   };
 
+  const recordSpray = async (sprayedAmount: number) => {
+    if (!selectedEvent || sprayedAmount <= 0) return;
+    await sprayApi.send(
+      selectedEvent.id,
+      sprayedAmount,
+      sprayDenomination as 200 | 500 | 1000,
+      sprayPin,
+    );
+  };
+
   const handleSprayComplete = async (sprayedAmount: number) => {
     try {
-      if (selectedEvent) {
-        await sprayApi.send(
-          selectedEvent.id,
-          Math.round(sprayedAmount * 100),
-          sprayDenomination as 200 | 500 | 1000
-        );
-      }
+      await recordSpray(sprayedAmount);
       toast.success(`Successfully sprayed ₦${sprayedAmount.toLocaleString()}! 🎉`);
-    } catch {
-      toast.error("Failed to complete spray");
+    } catch (err) {
+      const code = (err as Error & { code?: string }).code;
+      if (code === "PIN_NOT_SET") openPinSettings();
+      toast.error(err instanceof Error ? err.message : "Failed to complete spray");
     }
     setIsSprayActive(false);
     setSelectedEvent(null);
+    setSprayPin("");
   };
 
   const handleSprayCancel = async (sprayedAmount: number) => {
     if (sprayedAmount > 0) {
       try {
-        if (selectedEvent) {
-          await sprayApi.send(
-            selectedEvent.id,
-            Math.round(sprayedAmount * 100),
-            sprayDenomination as 200 | 500 | 1000
-          );
-        }
+        await recordSpray(sprayedAmount);
         toast.info(`Spray stopped. ₦${sprayedAmount.toLocaleString()} was sprayed.`);
-      } catch {
-        toast.error("Failed to record spray");
+      } catch (err) {
+        const code = (err as Error & { code?: string }).code;
+        if (code === "PIN_NOT_SET") openPinSettings();
+        toast.error(err instanceof Error ? err.message : "Failed to record spray");
       }
     } else {
       toast.info("Spray cancelled");
     }
     setIsSprayActive(false);
     setSelectedEvent(null);
+    setSprayPin("");
   };
 
   const handleGoLive = (eventId: string) => {
@@ -203,8 +228,8 @@ export function DashboardLayout() {
     return redeemGiveaway(code);
   };
 
-  const handleStopGiveaway = async (giveawayId: string) => {
-    const refund = await stopGiveaway(giveawayId);
+  const handleStopGiveaway = async (giveawayId: string, pin: string) => {
+    const refund = await stopGiveaway(giveawayId, pin);
     if (refund > 0) {
       toast.success(`₦${refund.toLocaleString()} refunded to your wallet`);
     } else {
@@ -224,7 +249,7 @@ export function DashboardLayout() {
     }
   };
 
-  const handleFundNGN = (_amount: number, _method: "bank" | "card", _description: string) => {
+  const handleFundNGN = (_amount: number, _description: string) => {
     toast.info("Transfer to your reserved account. Balance updates automatically.");
     setShowFundSheet(false);
   };
@@ -234,7 +259,8 @@ export function DashboardLayout() {
     setShowFundSheet(false);
   };
 
-  const handleCreateMonnifyAccount = async (bvn: string) => createMonnifyAccount(bvn);
+  const handleCreateNgnAccount = async (bvn?: string) => createNgnAccount(bvn);
+  const handleCreateMonnifyAccount = async (bvn: string) => createNgnAccount(bvn);
 
   const shellValue: DashboardShellValue = {
     user,
@@ -244,11 +270,16 @@ export function DashboardLayout() {
     kycLevel,
     ngnBalance,
     usdtBalance,
+    balanceRefreshing,
+    refreshBalances,
     activeCurrency,
     setActiveCurrency,
     transactions,
     monnifyAccount,
+    ngnReservedAccount,
+    fundingProviderId,
     blockradarAddresses,
+    createNgnAccount,
     createMonnifyAccount,
     createBlockradarAddress,
     withdrawNGN,
@@ -283,6 +314,7 @@ export function DashboardLayout() {
     setShowRedeemGiveaway,
     setShowAvatarCustomization,
     setShowBankAccounts,
+    setShowTransactionPin,
     setShowNotifications,
     handleJoinEvent,
     handleManageEvent,
@@ -291,6 +323,7 @@ export function DashboardLayout() {
     handleViewGiveaway,
     signOut,
     updateProfile,
+    setUsername,
   };
 
   return (
@@ -328,7 +361,10 @@ export function DashboardLayout() {
             setShowFundSheet(false);
             setShowKYC(true);
           }}
+          fundingProviderId={fundingProviderId}
+          ngnReservedAccount={ngnReservedAccount}
           monnifyAccount={monnifyAccount}
+          onCreateNgnAccount={handleCreateNgnAccount}
           onCreateMonnifyAccount={handleCreateMonnifyAccount}
           blockradarAddresses={blockradarAddresses}
           onCreateBlockradarAddress={createBlockradarAddress}
@@ -353,6 +389,7 @@ export function DashboardLayout() {
           onStartSpray={handleStartSpray}
           balance={ngnBalance}
           eventName={selectedEvent?.title || ""}
+          onPinNotSet={openPinSettings}
         />
 
         <AnimatePresence>
@@ -421,15 +458,17 @@ export function DashboardLayout() {
           kycLevel={kycLevel}
           ngnBalance={ngnBalance}
           usdtBalance={usdtBalance}
-          onWithdrawNGN={(amount, bankName, accountNumber, fee) => {
-            withdrawNGN(amount, bankName, accountNumber, fee);
+          ngnWithdrawalFees={withdrawalFeeSettings}
+          onWithdrawNGN={(amount, bankCode, accountNumber, accountName, pin) =>
+            withdrawNGN(amount, bankCode, accountNumber, accountName, pin)
+          }
+          onWithdrawUSDT={(amount, toAddress, network, provider, fee, pin) => {
+            void withdrawUSDT(amount, toAddress, network, provider, fee, pin);
           }}
-          onWithdrawUSDT={(amount, toAddress, network, provider, fee) => {
-            withdrawUSDT(amount, toAddress, network, provider, fee);
-          }}
+          onPinNotSet={openPinSettings}
         />
 
-        <SendMoneySheet open={showSendMoney} onOpenChange={setShowSendMoney} />
+        <SendMoneySheet open={showSendMoney} onOpenChange={setShowSendMoney} onPinNotSet={openPinSettings} />
 
         <CreateGiveawaySheet
           isOpen={showCreateGiveaway}
@@ -437,6 +476,7 @@ export function DashboardLayout() {
           onCreateGiveaway={handleCreateGiveaway}
           balance={ngnBalance}
           liveEvents={getMyLiveEvents()}
+          onPinNotSet={openPinSettings}
         />
 
         <GiveawayDetailsSheet
@@ -447,7 +487,10 @@ export function DashboardLayout() {
             setSelectedGiveaway(null);
           }}
           onStop={handleStopGiveaway}
+          onPinNotSet={openPinSettings}
         />
+
+        <TransactionPinSheet open={showTransactionPin} onOpenChange={setShowTransactionPin} />
 
         <RedeemGiveawaySheet
           isOpen={showRedeemGiveaway}

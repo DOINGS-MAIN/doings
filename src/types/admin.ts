@@ -36,7 +36,10 @@ export interface AdminTransaction {
   userName: string;
   type: "deposit" | "withdrawal" | "spray" | "giveaway" | "refund";
   amount: number;
-  status: "pending" | "completed" | "failed" | "refunded";
+  currency: "NGN" | "USDT";
+  status: "pending" | "processing" | "completed" | "failed" | "refunded";
+  provider?: string;
+  providerRef?: string;
   method?: string;
   reference: string;
   description: string;
@@ -44,6 +47,115 @@ export interface AdminTransaction {
   processedAt?: Date;
   flagged?: boolean;
   flagReason?: string;
+  fee?: number;
+  netAmount?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AdminLedgerEntry {
+  id: string;
+  entryType: "debit" | "credit";
+  amount: number;
+  balanceBefore: number;
+  balanceAfter: number;
+  createdAt: Date;
+}
+
+export interface PspEventRecord {
+  id: string;
+  transactionId?: string;
+  providerId: string;
+  direction: "inbound" | "outbound";
+  eventType: string;
+  status?: string;
+  providerStatus?: string;
+  reference?: string;
+  providerRef?: string;
+  requestSummary?: Record<string, unknown>;
+  responseSummary?: Record<string, unknown>;
+  errorMessage?: string;
+  createdAt: Date;
+}
+
+export interface WebhookLogSummary {
+  id: string;
+  provider: string;
+  eventType?: string;
+  processed: boolean;
+  processingError?: string;
+  signatureValid?: boolean;
+  idempotencyKey?: string;
+  createdAt: Date;
+  processedAt?: Date;
+}
+
+export interface WebhookLogDetail extends WebhookLogSummary {
+  payload: Record<string, unknown>;
+  headers?: Record<string, unknown>;
+  signature?: string;
+}
+
+export interface AdminTransactionDetail {
+  transaction: AdminTransaction & {
+    userPhone?: string;
+    userEmail?: string;
+  };
+  ledgerEntries: AdminLedgerEntry[];
+  pspEvents: PspEventRecord[];
+  relatedWebhooks: WebhookLogSummary[];
+}
+
+export interface PaymentsOverview {
+  today: {
+    deposits: { count: number; volumeKobo: number };
+    withdrawals: { count: number; volumeKobo: number };
+  };
+  queues: {
+    pendingWithdrawals: number;
+    processingWithdrawals: number;
+    failed24h: number;
+    unprocessedWebhooks: number;
+  };
+  platform: PlatformPaymentSettings;
+  byProvider: { provider: string; deposits: number; withdrawals: number; failed: number }[];
+  recentFailures: {
+    id: string;
+    type: string;
+    amount: number;
+    currency: string;
+    provider?: string;
+    reference: string;
+    userName: string;
+    createdAt: Date;
+  }[];
+  providerHealth: {
+    providerId: string;
+    ok: boolean;
+    message: string;
+    checkedAt: Date;
+  }[];
+}
+
+export interface ReviewQueueItem {
+  id: string;
+  type?: string;
+  amount?: number;
+  currency?: string;
+  provider?: string;
+  status?: string;
+  reference?: string;
+  userName?: string;
+  flagReason?: string;
+  eventType?: string;
+  processingError?: string;
+  idempotencyKey?: string;
+  createdAt: Date;
+}
+
+export interface ReviewQueue {
+  stuckWithdrawals: ReviewQueueItem[];
+  unprocessedWebhooks: ReviewQueueItem[];
+  flaggedTransactions: ReviewQueueItem[];
 }
 
 export interface KYCSubmission {
@@ -82,6 +194,26 @@ export interface AdminEvent {
   flagReason?: string;
 }
 
+export type PspCapability = "wallet_funding" | "disbursement" | "bank_verify";
+export type PspProviderStatus = "active" | "disabled" | "sandbox_only";
+export type PspEnv = "sandbox" | "production";
+
+export interface PspProvider {
+  id: string;
+  displayName: string;
+  capabilities: PspCapability[];
+  status: PspProviderStatus;
+  configSchema: Record<string, unknown>;
+  updatedAt?: Date;
+}
+
+export interface PlatformPaymentSettings {
+  walletFundingProviderId: string;
+  disbursementProviderId: string;
+  pspEnv: PspEnv;
+  updatedAt?: Date;
+}
+
 export interface AdminStats {
   totalUsers: number;
   activeUsers: number;
@@ -90,6 +222,8 @@ export interface AdminStats {
   totalTransactions: number;
   totalVolume: number;
   todayVolume: number;
+  totalFeeRevenue: number;
+  todayFeeRevenue: number;
   activeEvents: number;
   totalEvents: number;
   flaggedTransactions: number;
@@ -98,8 +232,8 @@ export interface AdminStats {
 // Role permissions
 export const ROLE_PERMISSIONS: Record<AdminRole, string[]> = {
   super_admin: ["*"],
-  finance: ["dashboard", "transactions", "reports"],
-  support: ["dashboard", "users", "transactions.view"],
+  finance: ["dashboard", "transactions", "reports", "payment_rails", "payments", "webhooks", "queue", "psp_events"],
+  support: ["dashboard", "users", "transactions.view", "payments", "webhooks", "queue", "psp_events"],
   compliance: ["dashboard", "kyc", "users.view"],
   moderation: ["dashboard", "events", "users.view"],
 };

@@ -102,7 +102,7 @@ export async function checkTransferLimit(
     return { allowed: false, reason: `Transfers not available at KYC level ${kycLevel}` };
   }
 
-  const spent = await getDailySpent(userId, currency, ["transfer"]);
+  const spent = await getDailySpent(userId, currency, ["send"]);
   const remaining = dailyLimit - spent;
 
   if (amountSmallestUnit > remaining) {

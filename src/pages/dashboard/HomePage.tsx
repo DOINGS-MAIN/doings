@@ -80,6 +80,8 @@ export default function HomePage() {
         onWithdraw={() => d.setShowWithdraw(true)}
         activeCurrency={d.activeCurrency}
         onCurrencyChange={d.setActiveCurrency}
+        onRefreshBalance={() => void d.refreshBalances()}
+        balanceRefreshing={d.balanceRefreshing}
       />
 
       <motion.div

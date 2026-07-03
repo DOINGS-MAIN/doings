@@ -20,6 +20,7 @@ export default function LoginPage() {
     resendSignupEmail,
     signInWithGoogle,
     updateProfile,
+    setUsername,
   } = useAuth();
 
   useEffect(() => {
@@ -86,6 +87,7 @@ export default function LoginPage() {
           resendSignupEmail={resendSignupEmail}
           signInWithGoogle={signInWithGoogle}
           updateProfile={updateProfile}
+          saveUsername={setUsername}
         />
       </motion.div>
     </div>

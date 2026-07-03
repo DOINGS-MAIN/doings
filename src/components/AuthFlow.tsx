@@ -8,17 +8,11 @@ import { toast } from "sonner";
 import { ArrowRight, Mail, Loader2 } from "lucide-react";
 import type { User } from "@supabase/supabase-js";
 import type { SignUpResult } from "@/types/auth";
+import { normalizeUsernameInput, USERNAME_RE, usernameRpcError } from "@/lib/username";
+import { profileApi } from "@/lib/supabase";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_PASSWORD = 8;
-/** Stored without @; lowercase letters, digits, underscore; 3–30 chars */
-const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
-
-function normalizeUsernameInput(raw: string): string {
-  let s = raw.trim().toLowerCase();
-  if (s.startsWith("@")) s = s.slice(1);
-  return s.replace(/[^a-z0-9_]/g, "").slice(0, 30);
-}
 
 function metaFullName(user: User | null): string {
   if (!user?.user_metadata) return "";
@@ -44,6 +38,7 @@ interface AuthFlowProps {
   resendSignupEmail: (email: string) => Promise<void>;
   signInWithGoogle: () => Promise<unknown>;
   updateProfile?: (updates: { full_name?: string }) => Promise<void>;
+  saveUsername?: (username: string) => Promise<void>;
 }
 
 export const AuthFlow = ({
@@ -54,6 +49,7 @@ export const AuthFlow = ({
   resendSignupEmail,
   signInWithGoogle,
   updateProfile,
+  saveUsername,
 }: AuthFlowProps) => {
   const [mode, setMode] = useState<"login" | "signup">("login");
   const [step, setStep] = useState<"form" | "name" | "success" | "verify-email" | "forgot" | "forgot-sent">("form");
@@ -118,6 +114,15 @@ export const AuthFlow = ({
         setError("Username: 3–30 characters, letters, numbers, or underscore only");
         return;
       }
+      const { data: available, error: availErr } = await profileApi.isUsernameAvailable(u);
+      if (availErr) {
+        setError(usernameRpcError(availErr));
+        return;
+      }
+      if (!available) {
+        setError("This username is already taken");
+        return;
+      }
     }
 
     setLoading(true);
@@ -153,7 +158,7 @@ export const AuthFlow = ({
         }
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      setError(usernameRpcError(err, err instanceof Error ? err.message : "Something went wrong"));
     } finally {
       setLoading(false);
     }
@@ -204,13 +209,31 @@ export const AuthFlow = ({
   const handleNameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!fullName.trim()) return;
+
+    const u = normalizeUsernameInput(username);
+    if (!USERNAME_RE.test(u)) {
+      setError("Username: 3–30 characters, letters, numbers, or underscore only");
+      return;
+    }
+
     setLoading(true);
     setError("");
     try {
+      const { data: available, error: availErr } = await profileApi.isUsernameAvailable(u);
+      if (availErr) {
+        setError(usernameRpcError(availErr));
+        return;
+      }
+      if (!available) {
+        setError("This username is already taken");
+        return;
+      }
+
       await updateProfile?.({ full_name: fullName.trim() });
+      await saveUsername?.(u);
       finishAuth();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to save name");
+      setError(usernameRpcError(err, err instanceof Error ? err.message : "Failed to save profile"));
     } finally {
       setLoading(false);
     }
@@ -574,8 +597,8 @@ export const AuthFlow = ({
                 <span className="text-2xl">👤</span>
               </div>
               <div>
-                <h2 className="font-bold text-xl text-foreground">What&apos;s your name?</h2>
-                <p className="text-sm text-muted-foreground">So people know who&apos;s spraying</p>
+                <h2 className="font-bold text-xl text-foreground">Complete your profile</h2>
+                <p className="text-sm text-muted-foreground">Name and username for sprays &amp; send money</p>
               </div>
             </div>
 
@@ -589,12 +612,33 @@ export const AuthFlow = ({
                 autoFocus
               />
 
+              <div className="space-y-2">
+                <Label htmlFor="oauth-username">Username</Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium pointer-events-none select-none">
+                    @
+                  </span>
+                  <Input
+                    id="oauth-username"
+                    type="text"
+                    placeholder="your_handle"
+                    value={username}
+                    onChange={(e) => setUsername(normalizeUsernameInput(e.target.value))}
+                    autoComplete="username"
+                    className="text-base pl-8"
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  3–30 characters: lowercase letters, numbers, underscore
+                </p>
+              </div>
+
               <Button
                 type="submit"
                 variant="hero"
                 size="lg"
                 className="w-full"
-                disabled={!fullName.trim() || loading}
+                disabled={!fullName.trim() || !USERNAME_RE.test(normalizeUsernameInput(username)) || loading}
               >
                 {loading ? (
                   <Loader2 className="w-5 h-5 animate-spin" />

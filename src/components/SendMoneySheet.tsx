@@ -1,17 +1,22 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, User, Search, Check, ArrowRight, AlertCircle, AtSign, Phone } from "lucide-react";
+import { Send, Search, Check, ArrowRight, AlertCircle, AtSign, Loader2 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useMultiWallet } from "@/hooks/useMultiWallet";
 import { transfers } from "@/lib/supabase";
+import { formatUsername, normalizeUsernameInput, USERNAME_RE } from "@/lib/username";
+import { PinInput } from "@/components/PinInput";
+import { isValidPin, rpcErrorMessage } from "@/lib/pin";
+import { P2P_TRANSFER_FEE_NAIRA } from "@/lib/transferConstants";
 import { toast } from "sonner";
 
 interface SendMoneySheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onPinNotSet?: () => void;
 }
 
 type SendStep = "recipient" | "amount" | "confirm" | "processing" | "success";
@@ -21,49 +26,77 @@ interface Recipient {
   name: string;
   username: string;
   avatar: string;
-  phone?: string;
 }
 
 const QUICK_AMOUNTS = [1000, 2000, 5000, 10000, 20000];
 
-// Mock recent recipients
-const RECENT_RECIPIENTS: Recipient[] = [
-  { id: "1", name: "Adebayo Johnson", username: "@adebayo_j", avatar: "🧑🏾" },
-  { id: "2", name: "Chidinma Okonkwo", username: "@chi_chi", avatar: "👩🏾" },
-  { id: "3", name: "Fatima Ibrahim", username: "@fatima_i", avatar: "👩🏽" },
-  { id: "4", name: "Emmanuel Okoro", username: "@emeka_o", avatar: "👨🏾" },
-];
+function mapLookupUser(row: {
+  id: string;
+  name: string;
+  username: string;
+  avatar?: string;
+}): Recipient {
+  return {
+    id: row.id,
+    name: row.name,
+    username: row.username.startsWith("@") ? row.username : formatUsername(row.username),
+    avatar: row.avatar ?? "👤",
+  };
+}
 
-export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
-  const { ngnBalance, debitWallet } = useMultiWallet();
+export const SendMoneySheet = ({ open, onOpenChange, onPinNotSet }: SendMoneySheetProps) => {
+  const { ngnBalance, refreshBalances } = useMultiWallet();
   const balance = ngnBalance;
   const [step, setStep] = useState<SendStep>("recipient");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRecipient, setSelectedRecipient] = useState<Recipient | null>(null);
+  const [recentRecipients, setRecentRecipients] = useState<Recipient[]>([]);
+  const [recentLoading, setRecentLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [pin, setPin] = useState("");
 
+  const normalizedSearch = normalizeUsernameInput(searchQuery);
   const numericAmount = parseFloat(amount) || 0;
   const canSend = numericAmount >= 100 && numericAmount <= balance;
 
-  const handleSearch = async () => {
-    if (searchQuery.length < 3) return;
+  const loadRecentRecipients = useCallback(async () => {
+    setRecentLoading(true);
+    try {
+      const res = (await transfers.recentRecipients()) as { recipients?: Recipient[] };
+      setRecentRecipients((res.recipients ?? []).map(mapLookupUser));
+    } catch {
+      setRecentRecipients([]);
+    } finally {
+      setRecentLoading(false);
+    }
+  }, []);
 
-    // Simulate search
-    toast.loading("Searching...", { id: "search" });
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    
-    // Mock found user
-    const foundUser: Recipient = {
-      id: "found-1",
-      name: searchQuery.includes("@") ? "Found User" : "New User",
-      username: searchQuery.startsWith("@") ? searchQuery : `@${searchQuery.toLowerCase().replace(/\s/g, "_")}`,
-      avatar: "👤",
-    };
-    
-    toast.success("User found!", { id: "search" });
-    setSelectedRecipient(foundUser);
+  useEffect(() => {
+    if (open) {
+      void loadRecentRecipients();
+    }
+  }, [open, loadRecentRecipients]);
+
+  const handleSearch = async () => {
+    if (!USERNAME_RE.test(normalizedSearch)) {
+      toast.error("Enter a valid username (3–30 characters)");
+      return;
+    }
+
+    setSearching(true);
+    try {
+      const res = (await transfers.lookupUser(normalizedSearch)) as { user?: Recipient };
+      if (!res.user) throw new Error("User not found");
+      setSelectedRecipient(mapLookupUser(res.user));
+      toast.success("User found");
+    } catch (error) {
+      setSelectedRecipient(null);
+      toast.error(rpcErrorMessage(error, "User not found"));
+    } finally {
+      setSearching(false);
+    }
   };
 
   const handleAmountChange = (value: string) => {
@@ -72,20 +105,24 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
   };
 
   const handleConfirm = async () => {
-    if (pin.length !== 4) {
-      toast.error("Please enter your 4-digit PIN");
+    if (!isValidPin(pin)) {
+      toast.error("Enter your 4-digit transaction PIN");
       return;
     }
+    if (!selectedRecipient) return;
 
     setStep("processing");
 
     try {
-      const recipientPhone = selectedRecipient?.phone ?? selectedRecipient?.username?.replace("@", "") ?? "";
-      await transfers.send(recipientPhone, Math.round(numericAmount * 100), "NGN", note || undefined);
+      const username = normalizeUsernameInput(selectedRecipient.username);
+      await transfers.send(username, numericAmount, pin, "NGN", note || undefined);
+      await refreshBalances();
       setStep("success");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Transfer failed. Please try again.");
-      setStep("amount");
+      const code = (error as Error & { code?: string }).code;
+      if (code === "PIN_NOT_SET") onPinNotSet?.();
+      toast.error(rpcErrorMessage(error, "Transfer failed. Please try again."));
+      setStep("confirm");
     }
   };
 
@@ -111,13 +148,12 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
             Send Money
           </SheetTitle>
           <SheetDescription>
-            Send money to friends and family instantly
+            Send money to another Doings user by username — no platform or transaction fees.
           </SheetDescription>
         </SheetHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain pb-6 [-webkit-overflow-scrolling:touch]">
           <AnimatePresence mode="sync">
-            {/* Recipient Step */}
             {step === "recipient" && (
               <motion.div
                 key="recipient"
@@ -126,26 +162,33 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
                 exit={{ opacity: 0, x: -20 }}
                 className="space-y-6"
               >
-                {/* Search Input */}
                 <div className="space-y-2">
-                  <Label>Find Recipient</Label>
+                  <Label>Find by username</Label>
                   <div className="flex gap-2">
                     <div className="relative flex-1">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                      <AtSign className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                       <Input
-                        placeholder="Username, phone, or email"
+                        placeholder="username"
                         value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onChange={(e) => setSearchQuery(normalizeUsernameInput(e.target.value))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void handleSearch();
+                        }}
                         className="pl-10"
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        spellCheck={false}
                       />
                     </div>
-                    <Button onClick={handleSearch} disabled={searchQuery.length < 3}>
-                      Search
+                    <Button onClick={() => void handleSearch()} disabled={searching || normalizedSearch.length < 3}>
+                      {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
                     </Button>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Letters, numbers, and underscores only. No phone or email lookup yet.
+                  </p>
                 </div>
 
-                {/* Selected Recipient */}
                 {selectedRecipient && (
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
@@ -165,49 +208,38 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
                   </motion.div>
                 )}
 
-                {/* Quick Select Buttons */}
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                    onClick={() => setSearchQuery("@")}
-                  >
-                    <AtSign className="w-4 h-4 mr-1" />
-                    Username
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                    onClick={() => setSearchQuery("+234")}
-                  >
-                    <Phone className="w-4 h-4 mr-1" />
-                    Phone
-                  </Button>
-                </div>
-
-                {/* Recent Recipients */}
                 {!selectedRecipient && (
                   <div className="space-y-3">
                     <p className="text-sm font-medium text-muted-foreground">Recent</p>
-                    <div className="space-y-2">
-                      {RECENT_RECIPIENTS.map((recipient) => (
-                        <button
-                          key={recipient.id}
-                          onClick={() => setSelectedRecipient(recipient)}
-                          className="w-full p-3 rounded-xl bg-card border border-border hover:border-primary/50 transition-colors flex items-center gap-3"
-                        >
-                          <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-xl">
-                            {recipient.avatar}
-                          </div>
-                          <div className="text-left">
-                            <p className="font-medium">{recipient.name}</p>
-                            <p className="text-sm text-muted-foreground">{recipient.username}</p>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
+                    {recentLoading ? (
+                      <div className="flex items-center justify-center py-8 text-muted-foreground">
+                        <Loader2 className="w-5 h-5 animate-spin mr-2" />
+                        Loading…
+                      </div>
+                    ) : recentRecipients.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-4 text-center">
+                        No recent recipients yet
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {recentRecipients.map((recipient) => (
+                          <button
+                            key={recipient.id}
+                            type="button"
+                            onClick={() => setSelectedRecipient(recipient)}
+                            className="w-full p-3 rounded-xl bg-card border border-border hover:border-primary/50 transition-colors flex items-center gap-3"
+                          >
+                            <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-xl">
+                              {recipient.avatar}
+                            </div>
+                            <div className="text-left">
+                              <p className="font-medium">{recipient.name}</p>
+                              <p className="text-sm text-muted-foreground">{recipient.username}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -223,7 +255,6 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
               </motion.div>
             )}
 
-            {/* Amount Step */}
             {step === "amount" && (
               <motion.div
                 key="amount"
@@ -232,7 +263,6 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
                 exit={{ opacity: 0, x: -20 }}
                 className="space-y-6"
               >
-                {/* Recipient Card */}
                 <div className="p-4 rounded-2xl bg-card border border-border flex items-center gap-3">
                   <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center text-xl">
                     {selectedRecipient?.avatar}
@@ -240,19 +270,18 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
                   <div className="flex-1">
                     <p className="text-sm text-muted-foreground">Sending to</p>
                     <p className="font-bold">{selectedRecipient?.name}</p>
+                    <p className="text-xs text-muted-foreground">{selectedRecipient?.username}</p>
                   </div>
                   <Button variant="ghost" size="sm" onClick={() => setStep("recipient")}>
                     Change
                   </Button>
                 </div>
 
-                {/* Balance Display */}
                 <div className="text-center">
                   <p className="text-sm text-muted-foreground">Available Balance</p>
                   <p className="text-2xl font-bold">₦{balance.toLocaleString()}</p>
                 </div>
 
-                {/* Amount Input */}
                 <div className="space-y-2">
                   <Label>Amount</Label>
                   <div className="relative">
@@ -263,14 +292,13 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
                       type="text"
                       inputMode="numeric"
                       placeholder="0"
-                      value={amount ? parseInt(amount).toLocaleString() : ""}
+                      value={amount ? parseInt(amount, 10).toLocaleString() : ""}
                       onChange={(e) => handleAmountChange(e.target.value.replace(/,/g, ""))}
                       className="pl-10 text-2xl font-bold h-16 text-center"
                     />
                   </div>
                 </div>
 
-                {/* Quick Amounts */}
                 <div className="flex flex-wrap gap-2">
                   {QUICK_AMOUNTS.map((amt) => (
                     <Button
@@ -285,7 +313,6 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
                   ))}
                 </div>
 
-                {/* Note */}
                 <div className="space-y-2">
                   <Label>Add a note (optional)</Label>
                   <Input
@@ -296,7 +323,6 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
                   />
                 </div>
 
-                {/* Validation */}
                 {numericAmount > 0 && numericAmount < 100 && (
                   <p className="text-sm text-destructive flex items-center gap-2">
                     <AlertCircle className="w-4 h-4" />
@@ -321,7 +347,6 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
               </motion.div>
             )}
 
-            {/* Confirm Step */}
             {step === "confirm" && (
               <motion.div
                 key="confirm"
@@ -334,38 +359,31 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
                   <div className="w-20 h-20 mx-auto rounded-full bg-primary/10 flex items-center justify-center mb-4">
                     <div className="text-4xl">{selectedRecipient?.avatar}</div>
                   </div>
-                  <p className="text-muted-foreground">Sending to {selectedRecipient?.name}</p>
+                  <p className="text-muted-foreground">
+                    Sending to {selectedRecipient?.name} ({selectedRecipient?.username})
+                  </p>
                   <p className="text-4xl font-black">₦{numericAmount.toLocaleString()}</p>
-                  {note && (
-                    <p className="text-sm text-muted-foreground mt-2">"{note}"</p>
+                  {P2P_TRANSFER_FEE_NAIRA === 0 && (
+                    <p className="text-sm text-green-600 dark:text-green-400 mt-2 font-medium">
+                      No fees — recipient gets the full amount
+                    </p>
                   )}
+                  {note && <p className="text-sm text-muted-foreground mt-2">&ldquo;{note}&rdquo;</p>}
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Enter PIN to Confirm</Label>
-                  <Input
-                    type="password"
-                    inputMode="numeric"
-                    placeholder="••••"
-                    value={pin}
-                    onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                    maxLength={4}
-                    className="text-center text-2xl tracking-[1em] font-bold"
-                  />
-                </div>
+                <PinInput value={pin} onChange={setPin} label="Enter transaction PIN to confirm" />
 
                 <div className="flex gap-3">
                   <Button variant="outline" className="flex-1" onClick={() => setStep("amount")}>
                     Back
                   </Button>
-                  <Button className="flex-1" onClick={handleConfirm} disabled={pin.length !== 4}>
+                  <Button className="flex-1" onClick={() => void handleConfirm()} disabled={!isValidPin(pin)}>
                     Send Money
                   </Button>
                 </div>
               </motion.div>
             )}
 
-            {/* Processing Step */}
             {step === "processing" && (
               <motion.div
                 key="processing"
@@ -383,7 +401,6 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
               </motion.div>
             )}
 
-            {/* Success Step */}
             {step === "success" && (
               <motion.div
                 key="success"
@@ -399,14 +416,12 @@ export const SendMoneySheet = ({ open, onOpenChange }: SendMoneySheetProps) => {
                 >
                   <Check className="w-12 h-12 text-green-500" />
                 </motion.div>
-                <h3 className="text-2xl font-bold mb-2">Money Sent! 🎉</h3>
+                <h3 className="text-2xl font-bold mb-2">Money Sent!</h3>
                 <p className="text-4xl font-black mb-2">₦{numericAmount.toLocaleString()}</p>
                 <p className="text-muted-foreground mb-6">
-                  Successfully sent to {selectedRecipient?.name}
+                  Successfully sent to {selectedRecipient?.username}
                 </p>
-                <Button onClick={resetAndClose}>
-                  Done
-                </Button>
+                <Button onClick={resetAndClose}>Done</Button>
               </motion.div>
             )}
           </AnimatePresence>
