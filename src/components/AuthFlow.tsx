@@ -198,7 +198,10 @@ export const AuthFlow = ({
     setError("");
     try {
       await resendSignupEmail(trimmedEmail);
-      toast.success("If that email is pending signup, we sent another confirmation link.");
+      // Supabase returns OK even when no mail is sent (already confirmed / unknown email).
+      toast.success(
+        "If this address still needs confirmation, we sent a new link. Check inbox and spam."
+      );
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Could not resend email");
     } finally {

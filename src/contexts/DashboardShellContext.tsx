@@ -40,8 +40,10 @@ export interface DashboardShellValue {
   avatarData: AvatarData;
   setAvatarData: Dispatch<SetStateAction<AvatarData>>;
   kycLevel: number;
+  kycLoading: boolean;
   ngnBalance: number;
-  usdtBalance: number;
+  usdcBalance: number;
+  walletLoading: boolean;
   balanceRefreshing: boolean;
   refreshBalances: () => Promise<void>;
   activeCurrency: Currency;
@@ -55,14 +57,14 @@ export interface DashboardShellValue {
   createMonnifyAccount: (bvn: string) => Promise<unknown>;
   createBlockradarAddress: (network?: string) => Promise<unknown>;
   withdrawNGN: (amount: number, bankCode: string, accountNumber: string, accountName: string, pin: string) => Promise<void>;
-  withdrawUSDT: (
+  withdrawUSDC: (
     amount: number,
     toAddress: string,
     network: string,
     provider: "blockradar" | "quidax",
     fee: number,
     pin: string
-  ) => void;
+  ) => Promise<void>;
   verifyLevel1: (action: "resend" | "check") => Promise<{ success: boolean; message: string }>;
   verifyLevel2: (bvn: string, nin: string, dateOfBirth: string) => Promise<{ success: boolean; message: string }>;
   events: EventData[];
@@ -90,6 +92,7 @@ export interface DashboardShellValue {
   setShowKYC: Dispatch<SetStateAction<boolean>>;
   setShowWithdraw: Dispatch<SetStateAction<boolean>>;
   setShowSendMoney: Dispatch<SetStateAction<boolean>>;
+  setShowConvert: Dispatch<SetStateAction<boolean>>;
   setShowCreateGiveaway: Dispatch<SetStateAction<boolean>>;
   setShowRedeemGiveaway: Dispatch<SetStateAction<boolean>>;
   setShowAvatarCustomization: Dispatch<SetStateAction<boolean>>;

@@ -16,7 +16,7 @@ interface ProfileScreenProps {
   avatarData: AvatarData;
   kycLevel: number;
   ngnBalance: number;
-  usdtBalance: number;
+  usdcBalance: number;
   userName: string;
   userUsername: string | null;
   userPhone: string;
@@ -41,7 +41,7 @@ export const ProfileScreen = ({
   avatarData,
   kycLevel,
   ngnBalance,
-  usdtBalance,
+  usdcBalance,
   userName,
   userUsername,
   userPhone,
@@ -312,8 +312,8 @@ export const ProfileScreen = ({
             <p className="text-xs text-muted-foreground">NGN Balance</p>
           </div>
           <div className="text-center">
-            <p className="text-lg font-bold text-foreground">${usdtBalance.toFixed(2)}</p>
-            <p className="text-xs text-muted-foreground">USDT Balance</p>
+            <p className="text-lg font-bold text-foreground">${usdcBalance.toFixed(2)}</p>
+            <p className="text-xs text-muted-foreground">USDC Balance</p>
           </div>
         </div>
       </motion.div>

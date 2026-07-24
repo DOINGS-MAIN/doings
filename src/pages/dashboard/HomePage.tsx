@@ -50,7 +50,7 @@ export default function HomePage() {
         </div>
       </motion.header>
 
-      {d.kycLevel < 2 && (
+      {d.kycLoading ? null : d.kycLevel < 2 && (
         <motion.div
           className="mx-6 mb-4 p-3 rounded-2xl bg-primary/10 border border-primary/20 flex items-center gap-3 cursor-pointer"
           onClick={() => d.setShowKYC(true)}
@@ -73,15 +73,17 @@ export default function HomePage() {
 
       <WalletCard
         ngnBalance={d.ngnBalance}
-        usdtBalance={d.usdtBalance}
+        usdcBalance={d.usdcBalance}
         onAddFunds={() => d.setShowFundSheet(true)}
         onViewHistory={() => d.setShowHistory(true)}
         onSend={() => d.setShowSendMoney(true)}
+        onConvert={() => d.setShowConvert(true)}
         onWithdraw={() => d.setShowWithdraw(true)}
         activeCurrency={d.activeCurrency}
         onCurrencyChange={d.setActiveCurrency}
         onRefreshBalance={() => void d.refreshBalances()}
         balanceRefreshing={d.balanceRefreshing}
+        loading={d.walletLoading}
       />
 
       <motion.div

@@ -13,7 +13,7 @@ import type {
 } from "@/types/admin";
 
 const toDisplay = (amount: number, currency: string) =>
-  currency === "USDT" ? amount / 1_000_000 : amount / 100;
+  currency === "USDC" ? amount / 1_000_000 : amount / 100;
 
 function mapTransaction(row: Record<string, unknown>): AdminTransaction & {
   userPhone?: string;

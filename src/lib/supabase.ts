@@ -191,13 +191,22 @@ export const transfers = {
     invoke("lookup-user", { method: "GET", params: { username } }),
   recentRecipients: () =>
     invoke("lookup-user", { method: "GET", params: { recent: "true" } }),
-  send: (recipientUsername: string, amountNaira: number, pin: string, currency?: "NGN" | "USDT", description?: string) =>
+  send: (recipientUsername: string, amountNaira: number, pin: string, currency?: "NGN" | "USDC", description?: string) =>
     invoke("transfer", {
       body: { recipient_username: recipientUsername, amount: amountNaira, pin, currency, description },
     }),
   listBanks: () => invoke("list-banks", { method: "GET" }),
   verifyBankAccount: (bankCode: string, accountNumber: string) =>
     invoke("verify-bank-account", { body: { bank_code: bankCode, account_number: accountNumber } }),
+};
+
+// ── FX / Convert ──
+export const fx = {
+  getSettings: () => invoke("fx-quote", { method: "GET" }),
+  createQuote: (side: "sell" | "buy", usdcAmount: number) =>
+    invoke("fx-quote", { body: { side, usdc_amount: usdcAmount } }),
+  convert: (quoteId: string, pin: string) =>
+    invoke("fx-convert", { body: { quote_id: quoteId, pin } }),
 };
 
 // ── Withdrawals ──
@@ -213,8 +222,8 @@ export const withdrawals = {
         narration,
       },
     }),
-  usdt: (amount: number, address: string, pin: string, network?: string) =>
-    invoke("withdraw-usdt", { body: { amount, address, pin, network } }),
+  usdc: (amount: number, address: string, pin: string, network?: string) =>
+    invoke("withdraw-usdc", { body: { amount, address, pin, network } }),
 };
 
 export const transactionPin = {
@@ -378,5 +387,45 @@ export const admin = {
         _transaction_fee_kobo: Math.round(transactionFeeNaira * 100),
       }),
     probeAll: () => invoke("admin", { method: "POST", path: "payment-rails/probe-all" }),
+  },
+  fx: {
+    getSettings: () => supabase.rpc("get_fx_admin_settings"),
+    setSettings: (payload: {
+      enabled: boolean;
+      rateSource: "binance" | "paycrest";
+      sellFlatNaira: number;
+      sellPercent: number;
+      buyFlatNaira: number;
+      buyPercent: number;
+      sellPlatformFeePercent: number;
+      buyPlatformFeePercent: number;
+      dailyCapUsdc: number;
+      minTradeUsdc: number;
+      quoteTtlSeconds: number;
+    }) =>
+      supabase.rpc("set_fx_settings", {
+        _enabled: payload.enabled,
+        _rate_source: payload.rateSource,
+        _sell_flat_kobo: Math.round(payload.sellFlatNaira * 100),
+        _sell_percent: payload.sellPercent,
+        _buy_flat_kobo: Math.round(payload.buyFlatNaira * 100),
+        _buy_percent: payload.buyPercent,
+        _sell_platform_fee_percent: payload.sellPlatformFeePercent,
+        _buy_platform_fee_percent: payload.buyPlatformFeePercent,
+        _daily_cap_usdc_micro: Math.round(payload.dailyCapUsdc * 1_000_000),
+        _min_trade_usdc_micro: Math.round(payload.minTradeUsdc * 1_000_000),
+        _quote_ttl_seconds: payload.quoteTtlSeconds,
+      }),
+    getTreasuryBalances: () => supabase.rpc("get_treasury_balances"),
+    recordTopup: (currency: "NGN" | "USDC", amount: number, reference?: string, note?: string) => {
+      const smallest = currency === "NGN" ? Math.round(amount * 100) : Math.round(amount * 1_000_000);
+      return supabase.rpc("record_treasury_topup", {
+        p_currency: currency,
+        p_amount: smallest,
+        p_reference: reference ?? null,
+        p_note: note ?? null,
+      });
+    },
+    refreshRate: () => invoke("fx-rates", { method: "POST" }),
   },
 };

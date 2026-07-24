@@ -1,8 +1,10 @@
 import { motion } from "framer-motion";
-import { ArrowUpRight, ArrowDownLeft, Gift, Wallet, Clock, CheckCircle2, XCircle, Send, Coins } from "lucide-react";
+import { ArrowUpRight, ArrowDownLeft, Gift, Wallet, Clock, CheckCircle2, XCircle, Send, Copy, ExternalLink, Check } from "lucide-react";
 import { FinanceTransaction } from "@/types/finance";
 import { format } from "date-fns";
 import { useState } from "react";
+import { toast } from "sonner";
+import { getCryptoTrackId, shortenCryptoId, solanaExplorerTxUrl } from "@/lib/cryptoTx";
 
 interface TransactionHistoryProps {
   transactions: FinanceTransaction[];
@@ -10,7 +12,7 @@ interface TransactionHistoryProps {
   onClose: () => void;
 }
 
-const getTransactionIcon = (type: FinanceTransaction["type"], currency: string) => {
+const getTransactionIcon = (type: FinanceTransaction["type"], _currency: string) => {
   switch (type) {
     case "deposit":
       return <ArrowDownLeft className="w-5 h-5 text-success" />;
@@ -51,7 +53,8 @@ const showProviderTag = (provider?: string) =>
   Boolean(provider && !HIDDEN_USER_PROVIDER_TAGS.has(provider.toLowerCase()));
 
 export const TransactionHistory = ({ transactions, isOpen, onClose }: TransactionHistoryProps) => {
-  const [filter, setFilter] = useState<"all" | "NGN" | "USDT">("all");
+  const [filter, setFilter] = useState<"all" | "NGN" | "USDC">("all");
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
@@ -71,8 +74,19 @@ export const TransactionHistory = ({ transactions, isOpen, onClose }: Transactio
   const formatAmount = (txn: FinanceTransaction) => {
     const symbol = txn.currency === "NGN" ? "₦" : "$";
     const absAmount = Math.abs(txn.amount);
-    const formatted = txn.currency === "USDT" ? absAmount.toFixed(2) : absAmount.toLocaleString();
+    const formatted = txn.currency === "USDC" ? absAmount.toFixed(2) : absAmount.toLocaleString();
     return `${txn.amount > 0 ? "+" : ""}${symbol}${formatted}`;
+  };
+
+  const copyTrackId = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiedId(id);
+      toast.success("Transaction ID copied");
+      window.setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500);
+    } catch {
+      toast.error("Could not copy");
+    }
   };
 
   return (
@@ -89,9 +103,8 @@ export const TransactionHistory = ({ transactions, isOpen, onClose }: Transactio
             Close
           </button>
         </div>
-        {/* Currency Filter */}
         <div className="flex gap-2">
-          {(["all", "NGN", "USDT"] as const).map((f) => (
+          {(["all", "NGN", "USDC"] as const).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -99,7 +112,7 @@ export const TransactionHistory = ({ transactions, isOpen, onClose }: Transactio
                 filter === f ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
               }`}
             >
-              {f === "all" ? "All" : f === "NGN" ? "🇳🇬 NGN" : "💎 USDT"}
+              {f === "all" ? "All" : f === "NGN" ? "🇳🇬 NGN" : "💎 USDC"}
             </button>
           ))}
         </div>
@@ -120,42 +133,83 @@ export const TransactionHistory = ({ transactions, isOpen, onClose }: Transactio
                   {format(new Date(dateKey), "MMMM d, yyyy")}
                 </h3>
                 <div className="space-y-3">
-                  {groupedTransactions[dateKey].map((transaction, index) => (
-                    <motion.div
-                      key={transaction.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: dateIndex * 0.1 + index * 0.05 }}
-                      className="glass rounded-2xl p-4 flex items-center gap-4"
-                    >
-                      <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center">
-                        {getTransactionIcon(transaction.type, transaction.currency)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <p className="font-semibold text-foreground truncate">{transaction.description}</p>
-                          {getStatusIcon(transaction.status)}
+                  {groupedTransactions[dateKey].map((transaction, index) => {
+                    const trackId = getCryptoTrackId({
+                      providerRef: transaction.providerRef,
+                      metadata: transaction.metadata,
+                      currency: transaction.currency,
+                      provider: transaction.provider,
+                    });
+
+                    return (
+                      <motion.div
+                        key={transaction.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: dateIndex * 0.1 + index * 0.05 }}
+                        className="glass rounded-2xl p-4 flex items-center gap-4"
+                      >
+                        <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center">
+                          {getTransactionIcon(transaction.type, transaction.currency)}
                         </div>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <span>{format(new Date(transaction.createdAt), "h:mm a")}</span>
-                          <span className={`text-xs px-1.5 py-0.5 rounded ${
-                            transaction.currency === "NGN" ? "bg-primary/10 text-primary" : "bg-emerald-500/10 text-emerald-500"
-                          }`}>
-                            {transaction.currency}
-                          </span>
-                          {showProviderTag(transaction.provider) && (
-                            <span className="text-xs opacity-60 capitalize">• {transaction.provider}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold text-foreground truncate">{transaction.description}</p>
+                            {getStatusIcon(transaction.status)}
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                            <span>{format(new Date(transaction.createdAt), "h:mm a")}</span>
+                            <span
+                              className={`text-xs px-1.5 py-0.5 rounded ${
+                                transaction.currency === "NGN"
+                                  ? "bg-primary/10 text-primary"
+                                  : "bg-emerald-500/10 text-emerald-500"
+                              }`}
+                            >
+                              {transaction.currency}
+                            </span>
+                            {showProviderTag(transaction.provider) && (
+                              <span className="text-xs opacity-60 capitalize">• {transaction.provider}</span>
+                            )}
+                          </div>
+                          {trackId && (
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              <span className="font-mono text-[11px] text-muted-foreground truncate" title={trackId}>
+                                {shortenCryptoId(trackId)}
+                              </span>
+                              <button
+                                type="button"
+                                className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                                aria-label="Copy transaction ID"
+                                onClick={() => void copyTrackId(trackId)}
+                              >
+                                {copiedId === trackId ? (
+                                  <Check className="h-3 w-3 text-success" />
+                                ) : (
+                                  <Copy className="h-3 w-3" />
+                                )}
+                              </button>
+                              <a
+                                href={solanaExplorerTxUrl(trackId)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                                aria-label="View on Solscan"
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            </div>
                           )}
                         </div>
-                      </div>
-                      <div className="text-right">
-                        <p className={`font-bold ${getTransactionColor(transaction.amount)}`}>
-                          {formatAmount(transaction)}
-                        </p>
-                        <p className="text-xs text-muted-foreground capitalize">{transaction.type}</p>
-                      </div>
-                    </motion.div>
-                  ))}
+                        <div className="text-right">
+                          <p className={`font-bold ${getTransactionColor(transaction.amount)}`}>
+                            {formatAmount(transaction)}
+                          </p>
+                          <p className="text-xs text-muted-foreground capitalize">{transaction.type}</p>
+                        </div>
+                      </motion.div>
+                    );
+                  })}
                 </div>
               </motion.div>
             ))}

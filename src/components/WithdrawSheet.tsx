@@ -21,24 +21,20 @@ interface WithdrawSheetProps {
   activeCurrency: Currency;
   kycLevel: KYCLevel;
   ngnBalance: number;
-  usdtBalance: number;
+  usdcBalance: number;
   ngnWithdrawalFees: WithdrawalFeeSettings;
   onWithdrawNGN: (amount: number, bankCode: string, accountNumber: string, accountName: string, pin: string) => Promise<void>;
-  onWithdrawUSDT: (amount: number, toAddress: string, network: string, provider: "blockradar" | "quidax", fee: number, pin: string) => Promise<void>;
+  onWithdrawUSDC: (amount: number, toAddress: string, network: string, provider: "blockradar" | "quidax", fee: number, pin: string) => Promise<void>;
   onPinNotSet?: () => void;
 }
 
-type WithdrawStep = "currency" | "amount" | "usdt-address" | "confirm" | "processing" | "success";
+type WithdrawStep = "currency" | "amount" | "usdc-address" | "confirm" | "processing" | "success";
 
 const NGN_QUICK_AMOUNTS = [5000, 10000, 20000, 50000, 100000];
-const USDT_QUICK_AMOUNTS = [5, 10, 25, 50, 100];
-const USDT_WITHDRAWAL_FEE = 1; // $1 flat fee
+const USDC_QUICK_AMOUNTS = [5, 10, 25, 50, 100];
+const USDC_WITHDRAWAL_FEE = 1; // $1 flat fee
 
-const USDT_NETWORKS = [
-  { id: "TRC20", name: "Tron (TRC20)", fee: "$1" },
-  { id: "BEP20", name: "BSC (BEP20)", fee: "$1" },
-  { id: "ERC20", name: "Ethereum (ERC20)", fee: "$5" },
-];
+const USDC_WITHDRAW_NETWORK = "SOLANA";
 
 export const WithdrawSheet = ({
   open,
@@ -48,10 +44,10 @@ export const WithdrawSheet = ({
   activeCurrency,
   kycLevel,
   ngnBalance,
-  usdtBalance,
+  usdcBalance,
   ngnWithdrawalFees,
   onWithdrawNGN,
-  onWithdrawUSDT,
+  onWithdrawUSDC,
   onPinNotSet,
 }: WithdrawSheetProps) => {
   const { accounts, getDefaultAccount } = useBankAccounts();
@@ -61,9 +57,9 @@ export const WithdrawSheet = ({
   const [selectedAccount, setSelectedAccount] = useState<BankAccount | null>(null);
   const [pin, setPin] = useState("");
   const [toAddress, setToAddress] = useState("");
-  const [selectedNetwork, setSelectedNetwork] = useState("TRC20");
+  const [selectedNetwork, setSelectedNetwork] = useState(USDC_WITHDRAW_NETWORK);
 
-  const balance = currency === "NGN" ? ngnBalance : usdtBalance;
+  const balance = currency === "NGN" ? ngnBalance : usdcBalance;
   const symbol = currency === "NGN" ? "₦" : "$";
   const numericAmount = parseFloat(amount) || 0;
   const ngnFeeBreakdown = currency === "NGN"
@@ -71,7 +67,7 @@ export const WithdrawSheet = ({
     : null;
   const fee = currency === "NGN"
     ? (ngnFeeBreakdown?.totalFeeNaira ?? 0)
-    : USDT_WITHDRAWAL_FEE;
+    : USDC_WITHDRAWAL_FEE;
   const totalDeduction = numericAmount + fee;
   const canWithdraw = currency === "NGN"
     ? numericAmount >= NGN_WITHDRAWAL_MIN_NAIRA && totalDeduction <= balance
@@ -119,8 +115,8 @@ export const WithdrawSheet = ({
             <h2 className="text-xl font-bold mb-2">Add a Bank Account</h2>
             <p className="text-muted-foreground mb-6">Link a bank account to withdraw NGN.</p>
             <div className="flex gap-3">
-              <Button variant="outline" onClick={() => setCurrency("USDT")}>
-                <Coins className="w-4 h-4 mr-2" /> Withdraw USDT
+              <Button variant="outline" onClick={() => setCurrency("USDC")}>
+                <Coins className="w-4 h-4 mr-2" /> Withdraw USDC
               </Button>
               <Button onClick={() => { onOpenChange(false); onOpenBankAccounts(); }}>
                 Add Bank
@@ -140,11 +136,11 @@ export const WithdrawSheet = ({
       }
       setStep("confirm");
     } else {
-      setStep("usdt-address");
+      setStep("usdc-address");
     }
   };
 
-  const handleUSDTProceed = () => {
+  const handleUSDCProceed = () => {
     if (!toAddress || toAddress.length < 20) {
       toast.error("Enter a valid wallet address");
       return;
@@ -169,8 +165,8 @@ export const WithdrawSheet = ({
     try {
       if (currency === "NGN" && account) {
         await onWithdrawNGN(numericAmount, account.bankCode, account.accountNumber, account.accountName, pin);
-      } else if (currency === "USDT") {
-        await onWithdrawUSDT(numericAmount, toAddress, selectedNetwork, "blockradar", fee, pin);
+      } else if (currency === "USDC") {
+        await onWithdrawUSDC(numericAmount, toAddress, selectedNetwork, "blockradar", fee, pin);
       }
       setStep("success");
     } catch (err) {
@@ -194,7 +190,7 @@ export const WithdrawSheet = ({
     onOpenChange(false);
   };
 
-  const quickAmounts = currency === "NGN" ? NGN_QUICK_AMOUNTS : USDT_QUICK_AMOUNTS;
+  const quickAmounts = currency === "NGN" ? NGN_QUICK_AMOUNTS : USDC_QUICK_AMOUNTS;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -208,7 +204,7 @@ export const WithdrawSheet = ({
             Withdraw {currency}
           </SheetTitle>
           <SheetDescription>
-            {currency === "NGN" ? "Transfer to your bank account" : "Send USDT externally (Blockradar)"}
+            {currency === "NGN" ? "Transfer to your bank account" : "Send USDC externally (Blockradar)"}
           </SheetDescription>
         </SheetHeader>
 
@@ -223,12 +219,12 @@ export const WithdrawSheet = ({
             🇳🇬 NGN
           </button>
           <button
-            onClick={() => setCurrency("USDT")}
+            onClick={() => setCurrency("USDC")}
             className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
-              currency === "USDT" ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"
+              currency === "USDC" ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"
             }`}
           >
-            💎 USDT
+            💎 USDC
           </button>
         </div>
 
@@ -240,7 +236,7 @@ export const WithdrawSheet = ({
                 <div className="p-4 rounded-2xl bg-gradient-to-r from-primary/20 to-accent/20 text-center">
                   <p className="text-sm text-muted-foreground">Available {currency} Balance</p>
                   <p className="text-3xl font-black">
-                    {symbol}{currency === "USDT" ? balance.toFixed(2) : balance.toLocaleString()}
+                    {symbol}{currency === "USDC" ? balance.toFixed(2) : balance.toLocaleString()}
                   </p>
                 </div>
 
@@ -339,33 +335,25 @@ export const WithdrawSheet = ({
               </motion.div>
             )}
 
-            {/* USDT Address */}
-            {step === "usdt-address" && (
-              <motion.div key="usdt-address" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
+            {/* USDC Address */}
+            {step === "usdc-address" && (
+              <motion.div key="usdc-address" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-6">
                 <div className="text-center py-4">
                   <Globe className="w-10 h-10 text-emerald-500 mx-auto mb-3" />
-                  <p className="font-bold text-lg">Send ${numericAmount} USDT</p>
+                  <p className="font-bold text-lg">Send ${numericAmount} USDC</p>
                 </div>
 
                 <div className="space-y-2">
                   <Label>Network</Label>
-                  <div className="flex gap-2">
-                    {USDT_NETWORKS.map((net) => (
-                      <button key={net.id} onClick={() => setSelectedNetwork(net.id)}
-                        className={`flex-1 p-3 rounded-xl border-2 text-center transition-all ${
-                          selectedNetwork === net.id ? "border-emerald-500 bg-emerald-500/10" : "border-border"
-                        }`}>
-                        <p className="text-xs font-bold">{net.id}</p>
-                        <p className="text-xs text-muted-foreground">{net.fee}</p>
-                      </button>
-                    ))}
-                  </div>
+                  <p className="text-sm font-medium rounded-xl border border-border p-3 bg-muted/30">
+                    Solana — USDC only
+                  </p>
                 </div>
 
                 <div className="space-y-2">
                   <Label>Recipient Wallet Address</Label>
                   <Input
-                    placeholder={selectedNetwork === "TRC20" ? "T..." : "0x..."}
+                    placeholder="T..."
                     value={toAddress}
                     onChange={(e) => setToAddress(e.target.value)}
                     className="font-mono text-sm"
@@ -374,7 +362,7 @@ export const WithdrawSheet = ({
 
                 <div className="flex gap-3">
                   <Button variant="outline" className="flex-1" onClick={() => setStep("amount")}>Back</Button>
-                  <Button className="flex-1" onClick={handleUSDTProceed} disabled={toAddress.length < 20}>Continue</Button>
+                  <Button className="flex-1" onClick={handleUSDCProceed} disabled={toAddress.length < 20}>Continue</Button>
                 </div>
               </motion.div>
             )}
@@ -388,7 +376,7 @@ export const WithdrawSheet = ({
                   </div>
                   <p className="text-muted-foreground">You're withdrawing</p>
                   <p className="text-4xl font-black">{symbol}{numericAmount.toLocaleString()}</p>
-                  {currency === "USDT" && (
+                  {currency === "USDC" && (
                     <p className="text-sm text-muted-foreground mt-2 font-mono">
                       To: {toAddress.slice(0, 10)}...{toAddress.slice(-6)}
                     </p>
@@ -403,7 +391,7 @@ export const WithdrawSheet = ({
                 <PinInput value={pin} onChange={setPin} label="Enter transaction PIN to confirm" />
 
                 <div className="flex gap-3">
-                  <Button variant="outline" className="flex-1" onClick={() => setStep(currency === "USDT" ? "usdt-address" : "amount")}>Back</Button>
+                  <Button variant="outline" className="flex-1" onClick={() => setStep(currency === "USDC" ? "usdc-address" : "amount")}>Back</Button>
                   <Button className="flex-1" onClick={handleConfirm} disabled={!isValidPin(pin)}>Confirm</Button>
                 </div>
               </motion.div>
@@ -434,7 +422,7 @@ export const WithdrawSheet = ({
                 <p className="text-muted-foreground mb-6">
                   {currency === "NGN"
                     ? `On its way to ${selectedAccount?.bankName}`
-                    : `USDT sent via ${selectedNetwork}`}
+                    : `USDC sent via ${selectedNetwork}`}
                 </p>
                 <Button onClick={resetAndClose}>Done</Button>
               </motion.div>

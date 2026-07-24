@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Building2, Copy, Check, ArrowLeft, Coins, QrCode, Globe } from "lucide-react";
+import { X, Building2, Copy, Check, ArrowLeft, Coins, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -10,7 +10,7 @@ interface FundWalletSheetProps {
   isOpen: boolean;
   onClose: () => void;
   onFundNGN: (amount: number, description: string) => void;
-  onFundUSDT: (amount: number, provider: "blockradar", description: string) => void;
+  onFundUSDC: (amount: number, provider: "blockradar", description: string) => void;
   activeCurrency: Currency;
   kycLevel: KYCLevel;
   onOpenKYC: () => void;
@@ -29,22 +29,26 @@ type Step =
   | "amount"
   | "monnify-bvn"
   | "bank"
-  | "usdt-network"
-  | "usdt-deposit";
+  | "usdc-network"
+  | "usdc-deposit";
 
 const NGN_QUICK_AMOUNTS = [5000, 10000, 20000, 50000, 100000];
-const USDT_QUICK_AMOUNTS = [10, 25, 50, 100, 500];
-const USDT_NETWORKS = [
-  { id: "TRC20", name: "Tron (TRC20)", fee: "~$1", speed: "Fast" },
-  { id: "BEP20", name: "BSC (BEP20)", fee: "~$0.3", speed: "Fast" },
-  { id: "ERC20", name: "Ethereum (ERC20)", fee: "~$5-20", speed: "Slower" },
-];
+const USDC_QUICK_AMOUNTS = [10, 25, 50, 100, 500];
+const USDC_NETWORK = { id: "SOLANA", name: "Solana", fee: "~$0.01", speed: "Fast" } as const;
+
+function networksMatch(stored: string, requested: string): boolean {
+  const a = stored.trim().toUpperCase();
+  const b = requested.trim().toUpperCase();
+  if (a === b) return true;
+  const solAliases = new Set(["SOLANA", "SOL", "SPL"]);
+  return solAliases.has(a) && solAliases.has(b);
+}
 
 export const FundWalletSheet = ({
   isOpen,
   onClose,
   onFundNGN,
-  onFundUSDT,
+  onFundUSDC: _onFundUSDC,
   activeCurrency,
   kycLevel,
   onOpenKYC,
@@ -52,7 +56,6 @@ export const FundWalletSheet = ({
   ngnReservedAccount,
   monnifyAccount,
   onCreateNgnAccount,
-  onCreateMonnifyAccount,
   blockradarAddresses,
   onCreateBlockradarAddress,
 }: FundWalletSheetProps) => {
@@ -65,6 +68,9 @@ export const FundWalletSheet = ({
   const [depositAddress, setDepositAddress] = useState<string>("");
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [monnifyBvn, setMonnifyBvn] = useState("");
+  const wasOpenRef = useRef(false);
+  const addressesRef = useRef(blockradarAddresses);
+  addressesRef.current = blockradarAddresses;
 
   const reservedAccount = ngnReservedAccount ?? monnifyAccount;
   const providerLabel =
@@ -82,6 +88,81 @@ export const FundWalletSheet = ({
     accountName: "DOINGS/User",
   };
 
+  const resetTransientState = useCallback(() => {
+    setAmount("");
+    setCopied(false);
+    setIsProcessing(false);
+    setIsCreatingAccount(false);
+    setMonnifyBvn("");
+    setSelectedNetwork("");
+    setDepositAddress("");
+  }, []);
+
+  const provisionUsdcAddress = useCallback(
+    async (networkId: string = USDC_NETWORK.id) => {
+      setSelectedNetwork(networkId);
+      setStep("usdc-network");
+      setIsProcessing(true);
+
+      const existing = addressesRef.current.find((a) => networksMatch(a.network, networkId));
+      if (existing) {
+        setDepositAddress(existing.address);
+        setIsProcessing(false);
+        setStep("usdc-deposit");
+        return;
+      }
+
+      try {
+        const addr = await onCreateBlockradarAddress(networkId);
+        if (!addr?.address) throw new Error("No address returned");
+        setDepositAddress(addr.address);
+        setSelectedNetwork(addr.network || networkId);
+        setStep("usdc-deposit");
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to generate address");
+        setStep("currency");
+      } finally {
+        setIsProcessing(false);
+      }
+    },
+    [onCreateBlockradarAddress]
+  );
+
+  const enterCurrencyFlow = useCallback(
+    (c: Currency) => {
+      if (c === "NGN" && kycLevel < KYC_GATES.FUND_NGN) {
+        toast.error("Complete Level 2 KYC to fund your NGN wallet");
+        onClose();
+        onOpenKYC();
+        return;
+      }
+      if (c === "USDC" && kycLevel < KYC_GATES.RECEIVE_USDC) {
+        toast.error("Complete Level 2 KYC to receive USDC");
+        onClose();
+        onOpenKYC();
+        return;
+      }
+
+      setCurrency(c);
+      if (c === "NGN") {
+        setStep("amount");
+        return;
+      }
+      void provisionUsdcAddress(USDC_NETWORK.id);
+    },
+    [kycLevel, onClose, onOpenKYC, provisionUsdcAddress]
+  );
+
+  // Open directly into the active wallet currency (NGN amount / USDC Blockradar)
+  useEffect(() => {
+    const justOpened = isOpen && !wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+    if (!justOpened) return;
+
+    resetTransientState();
+    enterCurrencyFlow(activeCurrency);
+  }, [isOpen, activeCurrency, enterCurrencyFlow, resetTransientState]);
+
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopied(true);
@@ -90,26 +171,7 @@ export const FundWalletSheet = ({
   };
 
   const handleSelectCurrency = (c: Currency) => {
-    // Check KYC gates
-    if (c === "NGN" && kycLevel < KYC_GATES.FUND_NGN) {
-      toast.error("Complete Level 2 KYC to fund your NGN wallet");
-      onClose();
-      onOpenKYC();
-      return;
-    }
-    if (c === "USDT" && kycLevel < KYC_GATES.RECEIVE_USDT) {
-      toast.error("Complete Level 2 KYC to receive USDT");
-      onClose();
-      onOpenKYC();
-      return;
-    }
-
-    setCurrency(c);
-    if (c === "NGN") {
-      setStep("amount");
-    } else {
-      setStep("usdt-network");
-    }
+    enterCurrencyFlow(c);
   };
 
   const handleAmountSelect = (value: number) => {
@@ -124,49 +186,25 @@ export const FundWalletSheet = ({
     }
 
     if (!reservedAccount) {
-        if (needsBvnForAccount) {
-          setStep("monnify-bvn");
-          return;
-        }
-        void (async () => {
-          setIsCreatingAccount(true);
-          try {
-            await onCreateNgnAccount();
-            toast.success("Funding account created.");
-            setStep("bank");
-          } catch (e) {
-            toast.error(e instanceof Error ? e.message : "Could not create funding account");
-          } finally {
-            setIsCreatingAccount(false);
-          }
-        })();
+      if (needsBvnForAccount) {
+        setStep("monnify-bvn");
         return;
       }
-      setStep("bank");
-  };
-
-  const handleSelectNetwork = async (networkId: string) => {
-    setSelectedNetwork(networkId);
-    setIsProcessing(true);
-
-    // Check if address exists for this network
-    const existing = blockradarAddresses.find((a) => a.network === networkId);
-    if (existing) {
-      setDepositAddress(existing.address);
-      setIsProcessing(false);
-      setStep("usdt-deposit");
+      void (async () => {
+        setIsCreatingAccount(true);
+        try {
+          await onCreateNgnAccount();
+          toast.success("Funding account created.");
+          setStep("bank");
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "Could not create funding account");
+        } finally {
+          setIsCreatingAccount(false);
+        }
+      })();
       return;
     }
-
-    try {
-      const addr = await onCreateBlockradarAddress(networkId);
-      setDepositAddress(addr.address);
-      setStep("usdt-deposit");
-    } catch {
-      toast.error("Failed to generate address");
-    } finally {
-      setIsProcessing(false);
-    }
+    setStep("bank");
   };
 
   const handleBankConfirm = () => {
@@ -197,27 +235,26 @@ export const FundWalletSheet = ({
   };
 
   const handleReset = () => {
-    setStep(activeCurrency === "USDT" ? "usdt-network" : "amount");
-    setAmount("");
-    setIsProcessing(false);
-    setIsCreatingAccount(false);
-    setMonnifyBvn("");
-    setSelectedNetwork("");
-    setDepositAddress("");
+    resetTransientState();
     setCurrency(activeCurrency);
+    setStep(activeCurrency === "USDC" ? "usdc-network" : "amount");
     onClose();
   };
 
   const handleBack = () => {
-    if (step === "usdt-network") setStep("currency");
-    else if (step === "amount") setStep("currency");
-    else if (step === "monnify-bvn") setStep("amount");
-    else if (step === "bank") setStep("amount");
-    else if (step === "usdt-deposit") setStep("usdt-network");
+    if (step === "usdc-network" || step === "usdc-deposit" || step === "amount") {
+      setStep("currency");
+      setIsProcessing(false);
+      return;
+    }
+    if (step === "monnify-bvn" || step === "bank") {
+      setStep("amount");
+    }
   };
 
-  const quickAmounts = currency === "NGN" ? NGN_QUICK_AMOUNTS : USDT_QUICK_AMOUNTS;
+  const quickAmounts = currency === "NGN" ? NGN_QUICK_AMOUNTS : USDC_QUICK_AMOUNTS;
   const symbol = currency === "NGN" ? "₦" : "$";
+  const showBack = step !== "currency";
 
   return (
     <AnimatePresence>
@@ -243,7 +280,7 @@ export const FundWalletSheet = ({
 
             <div className="flex shrink-0 items-center justify-between border-b border-border px-6 pb-4">
               <div className="flex items-center gap-3">
-                {step !== "currency" && step !== "amount" && (
+                {showBack && (
                   <button onClick={handleBack} className="p-2 hover:bg-muted rounded-full transition-colors">
                     <ArrowLeft className="w-5 h-5 text-muted-foreground" />
                   </button>
@@ -253,8 +290,8 @@ export const FundWalletSheet = ({
                   {step === "amount" && "Fund NGN Wallet"}
                   {step === "monnify-bvn" && "Verify BVN"}
                   {step === "bank" && "Bank Transfer"}
-                  {step === "usdt-network" && "Select Network"}
-                  {step === "usdt-deposit" && "Deposit USDT"}
+                  {step === "usdc-network" && "Deposit USDC"}
+                  {step === "usdc-deposit" && "Deposit USDC"}
                 </h2>
               </div>
               <button onClick={handleReset} className="p-2 hover:bg-muted rounded-full transition-colors">
@@ -264,7 +301,6 @@ export const FundWalletSheet = ({
 
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-6 [-webkit-overflow-scrolling:touch]">
               <AnimatePresence mode="sync">
-                {/* Currency Selection (shown when entering from multi-currency) */}
                 {step === "currency" && (
                   <motion.div key="currency" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
                     <p className="text-muted-foreground text-sm mb-4">Select wallet to fund</p>
@@ -284,20 +320,19 @@ export const FundWalletSheet = ({
                       className="w-full p-4 glass rounded-2xl flex items-center gap-4 hover:bg-card-elevated transition-colors"
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
-                      onClick={() => handleSelectCurrency("USDT")}
+                      onClick={() => handleSelectCurrency("USDC")}
                     >
                       <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 flex items-center justify-center">
                         <Coins className="w-7 h-7 text-emerald-500" />
                       </div>
                       <div className="text-left flex-1">
-                        <h3 className="font-bold text-foreground">USDT (Tether)</h3>
-                        <p className="text-sm text-muted-foreground">Crypto deposit (Blockradar)</p>
+                        <h3 className="font-bold text-foreground">USDC</h3>
+                        <p className="text-sm text-muted-foreground">Crypto deposit on Solana</p>
                       </div>
                     </motion.button>
                   </motion.div>
                 )}
 
-                {/* NGN amount */}
                 {step === "amount" && currency === "NGN" && (
                   <motion.div key="amount" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-6">
                     <p className="text-sm text-muted-foreground text-center">
@@ -336,13 +371,13 @@ export const FundWalletSheet = ({
                       size="lg"
                       className="w-full"
                       onClick={handleProceed}
-                      disabled={!amount || parseFloat(amount) < 100}
+                      disabled={!amount || parseFloat(amount) < 100 || isCreatingAccount}
                     >
                       Continue
                     </Button>
-                    <Button variant="ghost" className="w-full text-sm" onClick={() => setStep("currency")}>
+                    <Button variant="ghost" className="w-full text-sm" onClick={() => handleSelectCurrency("USDC")}>
                       <Coins className="w-4 h-4 mr-2" />
-                      Fund USDT instead
+                      Fund USDC instead
                     </Button>
                   </motion.div>
                 )}
@@ -390,7 +425,6 @@ export const FundWalletSheet = ({
                   </motion.div>
                 )}
 
-                {/* Bank Transfer Details */}
                 {step === "bank" && (
                   <motion.div key="bank" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-6">
                     <div className="text-center mb-6">
@@ -425,58 +459,30 @@ export const FundWalletSheet = ({
                   </motion.div>
                 )}
 
-                {/* USDT Network Selection */}
-                {step === "usdt-network" && (
-                  <motion.div key="usdt-network" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-4">
-                    <div className="text-center mb-4">
-                      <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                        <Globe className="w-8 h-8 text-emerald-500" />
-                      </div>
-                      <h3 className="font-bold">Select Network</h3>
-                      <p className="text-sm text-muted-foreground">Choose the blockchain network for your USDT deposit</p>
+                {step === "usdc-network" && (
+                  <motion.div key="usdc-network" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4 py-8 text-center">
+                    <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                      <Globe className="w-8 h-8 text-emerald-500" />
                     </div>
-                    {USDT_NETWORKS.map((net) => (
-                      <motion.button
-                        key={net.id}
-                        className="w-full p-4 glass rounded-2xl flex items-center gap-4 hover:bg-card-elevated transition-colors"
-                        whileHover={{ scale: 1.02 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={() => handleSelectNetwork(net.id)}
-                        disabled={isProcessing}
-                      >
-                        <div className="w-12 h-12 rounded-xl bg-emerald-500/10 flex items-center justify-center">
-                          <QrCode className="w-6 h-6 text-emerald-500" />
-                        </div>
-                        <div className="text-left flex-1">
-                          <h3 className="font-bold text-foreground">{net.name}</h3>
-                          <p className="text-xs text-muted-foreground">Fee: {net.fee} • {net.speed}</p>
-                        </div>
-                        {blockradarAddresses.find((a) => a.network === net.id) && (
-                          <span className="text-xs text-success font-medium">Active</span>
-                        )}
-                      </motion.button>
-                    ))}
-                    {isProcessing && (
-                      <div className="flex items-center justify-center py-4 gap-2">
-                        <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                        <span className="text-sm text-muted-foreground">Generating address via Blockradar...</span>
-                      </div>
-                    )}
-                    <Button variant="ghost" className="w-full text-sm" onClick={() => { setCurrency("NGN"); setStep("amount"); }}>
-                      Fund NGN instead
-                    </Button>
+                    <h3 className="font-bold">Preparing your USDC address</h3>
+                    <p className="text-sm text-muted-foreground">Solana deposit address via Blockradar</p>
+                    <div className="flex items-center justify-center py-4 gap-2">
+                      <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                      <span className="text-sm text-muted-foreground">
+                        {isProcessing ? "Generating address…" : "Connecting…"}
+                      </span>
+                    </div>
                   </motion.div>
                 )}
 
-                {/* USDT Deposit Address */}
-                {step === "usdt-deposit" && (
-                  <motion.div key="usdt-deposit" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-6">
+                {step === "usdc-deposit" && (
+                  <motion.div key="usdc-deposit" initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} className="space-y-6">
                     <div className="text-center">
                       <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-emerald-500/20 flex items-center justify-center">
                         <Coins className="w-8 h-8 text-emerald-500" />
                       </div>
-                      <h3 className="font-bold">Deposit USDT ({selectedNetwork})</h3>
-                      <p className="text-sm text-muted-foreground">Send USDT to this address</p>
+                      <h3 className="font-bold">Deposit USDC (Solana)</h3>
+                      <p className="text-sm text-muted-foreground">Send USDC on Solana only — other networks are not supported</p>
                     </div>
 
                     <div className="glass rounded-2xl p-4 space-y-3">
@@ -492,7 +498,7 @@ export const FundWalletSheet = ({
                     <div className="space-y-2">
                       <div className="glass rounded-xl p-3 border-l-4 border-emerald-500">
                         <p className="text-xs text-muted-foreground">
-                          ⚡ Only send <span className="font-bold text-foreground">USDT</span> on the <span className="font-bold text-foreground">{selectedNetwork}</span> network
+                          ⚡ Only send <span className="font-bold text-foreground">USDC</span> on <span className="font-bold text-foreground">Solana</span>
                         </p>
                       </div>
                       <div className="glass rounded-xl p-3 border-l-4 border-destructive">
@@ -510,6 +516,9 @@ export const FundWalletSheet = ({
 
                     <Button variant="outline" className="w-full" onClick={handleReset}>
                       Done
+                    </Button>
+                    <Button variant="ghost" className="w-full text-sm" onClick={() => handleSelectCurrency("NGN")}>
+                      Fund NGN instead
                     </Button>
                   </motion.div>
                 )}

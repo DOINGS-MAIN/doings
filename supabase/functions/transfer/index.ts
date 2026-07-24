@@ -11,7 +11,7 @@ const P2P_TRANSFER_FEE = 0;
 type TransferBody = {
   recipient_username: string;
   amount: number;
-  currency?: "NGN" | "USDT";
+  currency?: "NGN" | "USDC";
   description?: string;
   pin: string;
 };
@@ -56,11 +56,11 @@ Deno.serve(async (req) => {
   }
 
   const currency = body.currency ?? "NGN";
-  if (currency !== "NGN" && currency !== "USDT") {
-    return withCors({ error: "currency must be NGN or USDT" }, { status: 400 });
+  if (currency !== "NGN" && currency !== "USDC") {
+    return withCors({ error: "currency must be NGN or USDC" }, { status: 400 });
   }
 
-  /** Amount in major units (naira or USDT); converted to smallest unit server-side. */
+  /** Amount in major units (naira or USDC); converted to smallest unit server-side. */
   const smallestUnit = currency === "NGN"
     ? Math.round(body.amount * 100)
     : Math.round(body.amount * 1_000_000);
