@@ -15,6 +15,7 @@ import { BankAccountsSheet } from "@/components/BankAccountsSheet";
 import { KYCVerificationSheet } from "@/components/KYCVerificationSheet";
 import { WithdrawSheet } from "@/components/WithdrawSheet";
 import { SendMoneySheet } from "@/components/SendMoneySheet";
+import { ConvertSheet } from "@/components/ConvertSheet";
 import { TransactionPinSheet } from "@/components/TransactionPinSheet";
 import { CreateGiveawaySheet } from "@/components/CreateGiveawaySheet";
 import { GiveawayDetailsSheet } from "@/components/GiveawayDetailsSheet";
@@ -71,6 +72,7 @@ export function DashboardLayout() {
   const [showKYC, setShowKYC] = useState(false);
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [showSendMoney, setShowSendMoney] = useState(false);
+  const [showConvert, setShowConvert] = useState(false);
   const [showJoinEvent, setShowJoinEvent] = useState(false);
 
   const [showCreateGiveaway, setShowCreateGiveaway] = useState(false);
@@ -82,23 +84,24 @@ export function DashboardLayout() {
 
   const {
     ngnBalance,
-    usdtBalance,
+    usdcBalance,
     transactions,
     monnifyAccount,
     ngnReservedAccount,
     fundingProviderId,
     blockradarAddresses,
     withdrawNGN,
-    withdrawUSDT,
+    withdrawUSDC,
     createNgnAccount,
     createMonnifyAccount,
     createBlockradarAddress,
     refreshBalances,
     balanceRefreshing,
+    walletLoading,
     withdrawalFeeSettings,
   } = useMultiWallet();
 
-  const { currentLevel: kycLevel, verifyLevel1, verifyLevel2 } = useKYC();
+  const { currentLevel: kycLevel, kycLoading, verifyLevel1, verifyLevel2 } = useKYC();
 
   const {
     events,
@@ -254,8 +257,8 @@ export function DashboardLayout() {
     setShowFundSheet(false);
   };
 
-  const handleFundUSDT = (_amount: number, _provider: "blockradar", _description: string) => {
-    toast.info("Send USDT to your deposit address. Balance updates automatically.");
+  const handleFundUSDC = (_amount: number, _provider: "blockradar", _description: string) => {
+    toast.info("Send USDC to your deposit address. Balance updates automatically.");
     setShowFundSheet(false);
   };
 
@@ -268,8 +271,10 @@ export function DashboardLayout() {
     avatarData,
     setAvatarData,
     kycLevel,
+    kycLoading,
     ngnBalance,
-    usdtBalance,
+    usdcBalance,
+    walletLoading,
     balanceRefreshing,
     refreshBalances,
     activeCurrency,
@@ -283,7 +288,7 @@ export function DashboardLayout() {
     createMonnifyAccount,
     createBlockradarAddress,
     withdrawNGN,
-    withdrawUSDT,
+    withdrawUSDC,
     verifyLevel1,
     verifyLevel2,
     events,
@@ -310,6 +315,7 @@ export function DashboardLayout() {
     setShowKYC,
     setShowWithdraw,
     setShowSendMoney,
+    setShowConvert,
     setShowCreateGiveaway,
     setShowRedeemGiveaway,
     setShowAvatarCustomization,
@@ -354,7 +360,7 @@ export function DashboardLayout() {
           isOpen={showFundSheet}
           onClose={() => setShowFundSheet(false)}
           onFundNGN={handleFundNGN}
-          onFundUSDT={handleFundUSDT}
+          onFundUSDC={handleFundUSDC}
           activeCurrency={activeCurrency}
           kycLevel={kycLevel}
           onOpenKYC={() => {
@@ -457,18 +463,29 @@ export function DashboardLayout() {
           activeCurrency={activeCurrency}
           kycLevel={kycLevel}
           ngnBalance={ngnBalance}
-          usdtBalance={usdtBalance}
+          usdcBalance={usdcBalance}
           ngnWithdrawalFees={withdrawalFeeSettings}
           onWithdrawNGN={(amount, bankCode, accountNumber, accountName, pin) =>
             withdrawNGN(amount, bankCode, accountNumber, accountName, pin)
           }
-          onWithdrawUSDT={(amount, toAddress, network, provider, fee, pin) => {
-            void withdrawUSDT(amount, toAddress, network, provider, fee, pin);
-          }}
+          onWithdrawUSDC={(amount, toAddress, network, provider, fee, pin) =>
+            withdrawUSDC(amount, toAddress, network, provider, fee, pin)
+          }
           onPinNotSet={openPinSettings}
         />
 
         <SendMoneySheet open={showSendMoney} onOpenChange={setShowSendMoney} onPinNotSet={openPinSettings} />
+
+        <ConvertSheet
+          open={showConvert}
+          onOpenChange={setShowConvert}
+          onOpenKYC={() => setShowKYC(true)}
+          onPinNotSet={openPinSettings}
+          kycLevel={kycLevel}
+          ngnBalance={ngnBalance}
+          usdcBalance={usdcBalance}
+          onSuccess={() => void refreshBalances()}
+        />
 
         <CreateGiveawaySheet
           isOpen={showCreateGiveaway}

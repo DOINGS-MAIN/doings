@@ -1,7 +1,8 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { checkWithdrawalLimit } from "../_shared/limits.ts";
-import { sendUsdt } from "../_shared/blockradar.ts";
+import { sendUsdc } from "../_shared/blockradar.ts";
+import { toBlockradarNetwork } from "../_shared/blockradarNetwork.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
 
@@ -43,24 +44,24 @@ Deno.serve(async (req) => {
     return withCors({ error: "amount and address are required" }, { status: 400 });
   }
 
-  const network = body.network ?? "tron";
+  const network = toBlockradarNetwork(body.network);
   const amountMicro = Math.round(body.amount * 1_000_000);
-  if (amountMicro < 1_000_000) return withCors({ error: "Minimum withdrawal is 1 USDT" }, { status: 400 });
+  if (amountMicro < 1_000_000) return withCors({ error: "Minimum withdrawal is 1 USDC" }, { status: 400 });
 
-  const { allowed, reason } = await checkWithdrawalLimit(user.id, user.kyc_level, "USDT", amountMicro);
+  const { allowed, reason } = await checkWithdrawalLimit(user.id, user.kyc_level, "USDC", amountMicro);
   if (!allowed) return withCors({ error: reason }, { status: 403 });
 
-  const withdrawalFeeMicro = 1_000_000; // 1 USDT network fee
-  const reference = `DOINGS-USDT-WD-${crypto.randomUUID()}`;
+  const withdrawalFeeMicro = 1_000_000; // 1 USDC network fee
+  const reference = `DOINGS-USDC-WD-${crypto.randomUUID()}`;
 
   const { data: wallet } = await supabase
     .from("wallets")
     .select("id")
     .eq("user_id", user.id)
-    .eq("currency", "USDT")
+    .eq("currency", "USDC")
     .single();
 
-  if (!wallet) return withCors({ error: "USDT wallet not found" }, { status: 500 });
+  if (!wallet) return withCors({ error: "USDC wallet not found" }, { status: 500 });
 
   let txnId: string;
   try {
@@ -70,7 +71,7 @@ Deno.serve(async (req) => {
       p_amount: amountMicro,
       p_fee: withdrawalFeeMicro,
       p_type: "withdrawal",
-      p_description: `USDT withdrawal to ${body.address}`,
+      p_description: `USDC withdrawal to ${body.address}`,
       p_provider: "blockradar",
       p_provider_ref: reference,
       p_idempotency_key: reference,
@@ -91,7 +92,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const result = await sendUsdt({
+    const result = await sendUsdc({
       toAddress: body.address,
       amount: String(body.amount),
       network,
@@ -102,11 +103,14 @@ Deno.serve(async (req) => {
     await supabase
       .from("transactions")
       .update({
-        provider_ref: result.hash || reference,
+        // Keep DOINGS reference as provider_ref so withdraw webhooks can match.
+        // Store chain hash (when present) in metadata.
+        provider_ref: reference,
         metadata: {
           address: body.address,
           network,
-          tx_hash: result.hash,
+          reference,
+          tx_hash: result.hash || null,
         },
       })
       .eq("id", txnId);
@@ -119,7 +123,18 @@ Deno.serve(async (req) => {
       status: "pending",
     });
   } catch (err) {
+    const detail = String(err);
+    await supabase
+      .from("transactions")
+      .update({
+        metadata: {
+          address: body.address,
+          network,
+          error: detail.slice(0, 500),
+        },
+      })
+      .eq("id", txnId);
     await supabase.rpc("fail_withdrawal", { p_transaction_id: txnId });
-    return withCors({ error: "USDT send failed, funds released", detail: String(err) }, { status: 502 });
+    return withCors({ error: "USDC send failed, funds released", detail }, { status: 502 });
   }
 });

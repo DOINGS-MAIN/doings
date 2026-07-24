@@ -22,9 +22,12 @@ import {
 import { PspTimeline } from "@/components/admin/PspTimeline";
 import { useAdminMonitoring } from "@/hooks/useAdminMonitoring";
 import type { AdminTransactionDetail } from "@/types/admin";
+import { getCryptoTrackId, solanaExplorerTxUrl } from "@/lib/cryptoTx";
+import { toast } from "sonner";
+import { Copy } from "lucide-react";
 
 function formatMoney(amount: number, currency: string) {
-  if (currency === "USDT") {
+  if (currency === "USDC") {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Math.abs(amount));
   }
   return new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", minimumFractionDigits: 0 }).format(Math.abs(amount));
@@ -75,7 +78,7 @@ export const AdminTransactionDetail = () => {
   } | undefined;
 
   const formatKobo = (kobo: number, currency: string) =>
-    formatMoney(kobo / (currency === "USDT" ? 1_000_000 : 100), currency);
+    formatMoney(kobo / (currency === "USDC" ? 1_000_000 : 100), currency);
 
   return (
     <div className="p-8 space-y-6">
@@ -147,6 +150,43 @@ export const AdminTransactionDetail = () => {
               <p className="text-muted-foreground">Provider ref</p>
               <p className="font-mono text-xs break-all">{txn.providerRef ?? "—"}</p>
             </div>
+            {(() => {
+              const trackId = getCryptoTrackId({
+                providerRef: txn.providerRef,
+                metadata: txn.metadata,
+                currency: txn.currency,
+                provider: txn.provider,
+              });
+              if (!trackId) return null;
+              return (
+                <div className="sm:col-span-2">
+                  <p className="text-muted-foreground">On-chain transaction ID</p>
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <p className="font-mono text-xs break-all">{trackId}</p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(trackId).then(
+                          () => toast.success("Copied on-chain ID"),
+                          () => toast.error("Could not copy")
+                        );
+                      }}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" className="h-7 gap-1.5" asChild>
+                      <a href={solanaExplorerTxUrl(trackId)} target="_blank" rel="noopener noreferrer">
+                        <ExternalLink className="h-3.5 w-3.5" />
+                        Solscan
+                      </a>
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
             <div>
               <p className="text-muted-foreground">Transaction ID</p>
               <p className="font-mono text-xs break-all">{txn.id}</p>

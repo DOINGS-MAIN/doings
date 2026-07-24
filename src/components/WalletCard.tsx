@@ -1,42 +1,46 @@
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Plus, ArrowUpRight, ArrowDownLeft, History, Coins, RefreshCw } from "lucide-react";
+import { Eye, EyeOff, Plus, ArrowUpRight, ArrowDownLeft, History, Coins, RefreshCw, ArrowLeftRight } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Currency } from "@/types/finance";
 
 interface WalletCardProps {
   ngnBalance: number;
-  usdtBalance: number;
+  usdcBalance: number;
   onAddFunds: () => void;
   onViewHistory: () => void;
   onSend: () => void;
   onWithdraw: () => void;
+  onConvert?: () => void;
   activeCurrency: Currency;
   onCurrencyChange: (currency: Currency) => void;
   onRefreshBalance?: () => void;
   balanceRefreshing?: boolean;
+  loading?: boolean;
 }
 
 export const WalletCard = ({
   ngnBalance,
-  usdtBalance,
+  usdcBalance,
   onAddFunds,
   onViewHistory,
   onSend,
   onWithdraw,
+  onConvert,
   activeCurrency,
   onCurrencyChange,
   onRefreshBalance,
   balanceRefreshing = false,
+  loading = false,
 }: WalletCardProps) => {
   const [showBalance, setShowBalance] = useState(true);
 
-  const balance = activeCurrency === "NGN" ? ngnBalance : usdtBalance;
+  const balance = activeCurrency === "NGN" ? ngnBalance : usdcBalance;
   const symbol = activeCurrency === "NGN" ? "₦" : "$";
   const hiddenText = activeCurrency === "NGN" ? "₦•••,•••" : "$•••.••";
 
   const formatBalance = (val: number) => {
-    if (activeCurrency === "USDT") {
+    if (activeCurrency === "USDC") {
       return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
     return `₦${val.toLocaleString()}`;
@@ -82,14 +86,14 @@ export const WalletCard = ({
             🇳🇬 NGN
           </button>
           <button
-            onClick={() => onCurrencyChange("USDT")}
+            onClick={() => onCurrencyChange("USDC")}
             className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all flex items-center gap-1 ${
-              activeCurrency === "USDT"
+              activeCurrency === "USDC"
                 ? "bg-white/30 text-white"
                 : "bg-white/10 text-white/60 hover:bg-white/15"
             }`}
           >
-            <Coins className="w-3 h-3" /> USDT
+            <Coins className="w-3 h-3" /> USDC
           </button>
         </div>
 
@@ -97,20 +101,28 @@ export const WalletCard = ({
         <div className="flex items-center justify-between mb-6">
           <div>
             <p className="text-white/70 text-sm font-medium">
-              {activeCurrency === "NGN" ? "Naira Balance" : "USDT Balance"}
+              {activeCurrency === "NGN" ? "Naira Balance" : "USDC Balance"}
             </p>
             <div className="flex items-center gap-2 mt-1">
-              <motion.h2
-                key={activeCurrency}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="text-3xl font-black text-white"
-              >
-                {showBalance ? formatBalance(balance ?? 0) : hiddenText}
-              </motion.h2>
+              {loading ? (
+                <div
+                  className="h-9 w-40 rounded-lg bg-white/25 animate-pulse"
+                  aria-label="Loading balance"
+                />
+              ) : (
+                <motion.h2
+                  key={activeCurrency}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="text-3xl font-black text-white"
+                >
+                  {showBalance ? formatBalance(balance ?? 0) : hiddenText}
+                </motion.h2>
+              )}
               <button
                 onClick={() => setShowBalance(!showBalance)}
-                className="p-1 hover:bg-white/20 rounded-lg transition-colors"
+                disabled={loading}
+                className="p-1 hover:bg-white/20 rounded-lg transition-colors disabled:opacity-40"
                 aria-label={showBalance ? "Hide balance" : "Show balance"}
               >
                 {showBalance ? (
@@ -123,22 +135,26 @@ export const WalletCard = ({
                 <button
                   type="button"
                   onClick={onRefreshBalance}
-                  disabled={balanceRefreshing}
+                  disabled={balanceRefreshing || loading}
                   className="p-1 hover:bg-white/20 rounded-lg transition-colors disabled:opacity-50"
                   aria-label="Refresh balance"
                   title="Refresh balance"
                 >
-                  <RefreshCw className={`w-5 h-5 text-white/70 ${balanceRefreshing ? "animate-spin" : ""}`} />
+                  <RefreshCw className={`w-5 h-5 text-white/70 ${balanceRefreshing || loading ? "animate-spin" : ""}`} />
                 </button>
               )}
             </div>
             {/* Other currency hint */}
-            {showBalance && (
-              <p className="text-white/50 text-xs mt-1">
-                {activeCurrency === "NGN"
-                  ? `USDT: $${(usdtBalance ?? 0).toFixed(2)}`
-                  : `NGN: ₦${(ngnBalance ?? 0).toLocaleString()}`}
-              </p>
+            {loading ? (
+              <div className="h-3 w-24 rounded bg-white/15 animate-pulse mt-2" aria-hidden />
+            ) : (
+              showBalance && (
+                <p className="text-white/50 text-xs mt-1">
+                  {activeCurrency === "NGN"
+                    ? `USDC: $${(usdcBalance ?? 0).toFixed(2)}`
+                    : `NGN: ₦${(ngnBalance ?? 0).toLocaleString()}`}
+                </p>
+              )
             )}
           </div>
           <motion.div
@@ -151,42 +167,53 @@ export const WalletCard = ({
         </div>
 
         {/* Action buttons */}
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-5 gap-1.5">
           <Button
             variant="glass"
             size="sm"
-            className="bg-white/20 border-white/30 text-white hover:bg-white/30 flex-col h-auto py-3"
+            className="bg-white/20 border-white/30 text-white hover:bg-white/30 flex-col h-auto py-2.5 px-1"
             onClick={onAddFunds}
           >
-            <Plus className="w-5 h-5 mb-1" />
-            <span className="text-xs">Fund</span>
+            <Plus className="w-4 h-4 mb-0.5" />
+            <span className="text-[10px]">Fund</span>
           </Button>
           <Button
             variant="glass"
             size="sm"
-            className="bg-white/20 border-white/30 text-white hover:bg-white/30 flex-col h-auto py-3"
+            className="bg-white/20 border-white/30 text-white hover:bg-white/30 flex-col h-auto py-2.5 px-1"
             onClick={onSend}
           >
-            <ArrowUpRight className="w-5 h-5 mb-1" />
-            <span className="text-xs">Send</span>
+            <ArrowUpRight className="w-4 h-4 mb-0.5" />
+            <span className="text-[10px]">Send</span>
           </Button>
+          {onConvert && (
+            <Button
+              variant="glass"
+              size="sm"
+              className="bg-white/20 border-white/30 text-white hover:bg-white/30 flex-col h-auto py-2.5 px-1"
+              onClick={onConvert}
+            >
+              <ArrowLeftRight className="w-4 h-4 mb-0.5" />
+              <span className="text-[10px]">Convert</span>
+            </Button>
+          )}
           <Button
             variant="glass"
             size="sm"
-            className="bg-white/20 border-white/30 text-white hover:bg-white/30 flex-col h-auto py-3"
+            className="bg-white/20 border-white/30 text-white hover:bg-white/30 flex-col h-auto py-2.5 px-1"
             onClick={onWithdraw}
           >
-            <ArrowDownLeft className="w-5 h-5 mb-1" />
-            <span className="text-xs">Withdraw</span>
+            <ArrowDownLeft className="w-4 h-4 mb-0.5" />
+            <span className="text-[10px]">Withdraw</span>
           </Button>
           <Button
             variant="glass"
             size="sm"
-            className="bg-white/20 border-white/30 text-white hover:bg-white/30 flex-col h-auto py-3"
+            className="bg-white/20 border-white/30 text-white hover:bg-white/30 flex-col h-auto py-2.5 px-1"
             onClick={onViewHistory}
           >
-            <History className="w-5 h-5 mb-1" />
-            <span className="text-xs">History</span>
+            <History className="w-4 h-4 mb-0.5" />
+            <span className="text-[10px]">History</span>
           </Button>
         </div>
       </div>

@@ -9,8 +9,10 @@ import {
   Flag,
   FlagOff,
   Download,
-  AlertTriangle
+  AlertTriangle,
+  ExternalLink,
 } from "lucide-react";
+import { getCryptoTrackId, shortenCryptoId, solanaExplorerTxUrl } from "@/lib/cryptoTx";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -103,7 +105,7 @@ export const AdminTransactions = () => {
   }, [page, debouncedSearch, typeFilter, statusFilter, flagFilter, providerFilter, fetchTransactions]);
 
   const formatCurrency = (amount: number, currency: AdminTransaction["currency"] = "NGN") => {
-    if (currency === "USDT") {
+    if (currency === "USDC") {
       return new Intl.NumberFormat("en-US", {
         style: "currency",
         currency: "USD",
@@ -343,7 +345,41 @@ export const AdminTransactions = () => {
                 <TableCell>
                   <div className="flex items-center gap-2">
                     {txn.flagged && <Flag className="w-4 h-4 text-destructive" />}
-                    <span className="font-mono text-sm">{txn.reference}</span>
+                    <div className="min-w-0">
+                      {(() => {
+                        const trackId = getCryptoTrackId({
+                          providerRef: txn.providerRef,
+                          metadata: txn.metadata,
+                          currency: txn.currency,
+                          provider: txn.provider,
+                        });
+                        if (trackId) {
+                          return (
+                            <>
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono text-sm" title={trackId}>
+                                  {shortenCryptoId(trackId, 10, 8)}
+                                </span>
+                                <a
+                                  href={solanaExplorerTxUrl(trackId)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-muted-foreground hover:text-foreground"
+                                  onClick={(e) => e.stopPropagation()}
+                                  aria-label="Open on Solscan"
+                                >
+                                  <ExternalLink className="h-3.5 w-3.5" />
+                                </a>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground font-mono truncate max-w-[180px]" title={txn.reference}>
+                                {txn.reference}
+                              </p>
+                            </>
+                          );
+                        }
+                        return <span className="font-mono text-sm">{txn.reference}</span>;
+                      })()}
+                    </div>
                   </div>
                 </TableCell>
                 <TableCell>

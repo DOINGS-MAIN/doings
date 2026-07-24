@@ -3,7 +3,7 @@ import { getServiceClient } from "./db.ts";
 /**
  * Tier-based daily transaction limits (in smallest currency units).
  *
- * NGN limits are in kobo. USDT limits are in micro-USDT.
+ * NGN limits are in kobo. USDC limits are in micro-USDC.
  * Transfers (in-app) have separate, higher limits since funds stay on-platform.
  */
 
@@ -13,10 +13,10 @@ const WITHDRAWAL_LIMITS: Record<string, Record<number, number>> = {
     1: 0,
     2: 200_000_000, // ₦2,000,000/day at full verification
   },
-  USDT: {
+  USDC: {
     0: 0,
     1: 0,
-    2: 5_000_000_000, // 5,000 USDT/day
+    2: 5_000_000_000, // 5,000 USDC/day
   },
 };
 
@@ -26,10 +26,10 @@ const TRANSFER_LIMITS: Record<string, Record<number, number>> = {
     1: 0, // email-only tier: receive only, no outbound transfers
     2: 500_000_000, // ₦5,000,000/day
   },
-  USDT: {
+  USDC: {
     0: 0,
     1: 0,
-    2: 10_000_000_000, // 10,000 USDT/day
+    2: 10_000_000_000, // 10,000 USDC/day
   },
 };
 
@@ -78,7 +78,7 @@ export async function checkWithdrawalLimit(
   if (amountSmallestUnit > remaining) {
     const unit = currency === "NGN" ? 100 : 1_000_000;
     const symbol = currency === "NGN" ? "₦" : "";
-    const suffix = currency === "USDT" ? " USDT" : "";
+    const suffix = currency === "USDC" ? " USDC" : "";
     return {
       allowed: false,
       reason: `Daily withdrawal limit exceeded. Limit: ${symbol}${(dailyLimit / unit).toLocaleString()}${suffix}, remaining today: ${symbol}${(Math.max(0, remaining) / unit).toLocaleString()}${suffix}`,
@@ -108,7 +108,7 @@ export async function checkTransferLimit(
   if (amountSmallestUnit > remaining) {
     const unit = currency === "NGN" ? 100 : 1_000_000;
     const symbol = currency === "NGN" ? "₦" : "";
-    const suffix = currency === "USDT" ? " USDT" : "";
+    const suffix = currency === "USDC" ? " USDC" : "";
     return {
       allowed: false,
       reason: `Daily transfer limit exceeded. Limit: ${symbol}${(dailyLimit / unit).toLocaleString()}${suffix}, remaining today: ${symbol}${(Math.max(0, remaining) / unit).toLocaleString()}${suffix}`,

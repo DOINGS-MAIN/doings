@@ -31,8 +31,8 @@ interface AdminDataState {
 }
 
 function mapTransaction(t: Record<string, unknown>): AdminTransaction {
-  const currency = ((t.currency as string) ?? "NGN") as "NGN" | "USDT";
-  const divisor = currency === "USDT" ? 1_000_000 : 100;
+  const currency = ((t.currency as string) ?? "NGN") as "NGN" | "USDC";
+  const divisor = currency === "USDC" ? 1_000_000 : 100;
   const rawFee = Number(t.fee ?? 0);
   const rawAmount = Number(t.amount ?? 0);
   const rawNet = Number(t.net_amount ?? 0);
@@ -55,6 +55,7 @@ function mapTransaction(t: Record<string, unknown>): AdminTransaction {
     currency,
     status: (t.status as AdminTransaction["status"]) ?? "pending",
     provider: (t.provider as string) ?? undefined,
+    providerRef: (t.provider_ref as string) ?? undefined,
     reference: (t.idempotency_key as string) ?? (t.provider_ref as string) ?? (t.id as string),
     description: (t.description as string) ?? "",
     metadata,

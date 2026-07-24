@@ -44,19 +44,73 @@ export interface WithdrawalFeeSettings {
   transactionFeeNaira: number;
 }
 
+export interface FxPublicSettings {
+  enabled: boolean;
+  market_rate_kobo: number | null;
+  market_rate_naira: number | null;
+  market_rate_updated_at: string | null;
+  sell_rate_kobo: number | null;
+  buy_rate_kobo: number | null;
+  sell_rate_naira: number | null;
+  buy_rate_naira: number | null;
+  sell_platform_fee_percent: number;
+  buy_platform_fee_percent: number;
+  min_trade_usdc: number;
+  quote_ttl_seconds: number;
+}
+
+export interface FxQuote {
+  quote_id: string;
+  side: "sell" | "buy";
+  usdc_micro: number;
+  usdc: number;
+  ngn_gross_kobo: number;
+  fee_kobo: number;
+  ngn_net_kobo: number;
+  ngn_gross: number;
+  fee_naira: number;
+  ngn_net: number;
+  market_rate_kobo: number;
+  market_rate_naira: number;
+  effective_rate_kobo: number;
+  effective_rate_naira: number;
+  platform_fee_percent: number;
+  expires_at: string;
+  ttl_seconds: number;
+}
+
+export interface FxAdminSettings extends FxPublicSettings {
+  rate_source: "binance" | "paycrest";
+  sell_flat_kobo: number;
+  sell_flat_naira: number;
+  sell_percent: number;
+  buy_flat_kobo: number;
+  buy_flat_naira: number;
+  buy_percent: number;
+  daily_cap_usdc: number;
+}
+
+export interface TreasuryBalances {
+  ngn_balance: number;
+  ngn_balance_naira: number;
+  usdc_balance_micro: number;
+  usdc_balance: number;
+}
+
 // KYC level gates
 export const KYC_GATES = {
   VIEW_WALLET: 0 as KYCLevel,
   RECEIVE_IN_APP: 1 as KYCLevel,
   FUND_NGN: 2 as KYCLevel,
-  RECEIVE_USDT: 2 as KYCLevel,
+  RECEIVE_USDC: 2 as KYCLevel,
   SEND_IN_APP: 2 as KYCLevel,
   WITHDRAW_NGN: 2 as KYCLevel,
-  WITHDRAW_USDT: 2 as KYCLevel,
+  WITHDRAW_USDC: 2 as KYCLevel,
+  CONVERT: 2 as KYCLevel,
 } as const;
 
 // ---- Wallet ----
-export type Currency = "NGN" | "USDT";
+export type Currency = "NGN" | "USDC";
 
 export interface Wallet {
   id: string;

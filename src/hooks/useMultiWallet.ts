@@ -19,7 +19,7 @@ const toSmallest = (display: number, currency: Currency) =>
 
 export const useMultiWallet = () => {
   const [ngnBalance, setNgnBalance] = useState(0);
-  const [usdtBalance, setUsdtBalance] = useState(0);
+  const [usdcBalance, setUsdcBalance] = useState(0);
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
   const [ngnReservedAccount, setNgnReservedAccount] = useState<NgnReservedAccount | undefined>();
   const [fundingProviderId, setFundingProviderId] = useState<string>("monnify");
@@ -40,11 +40,11 @@ export const useMultiWallet = () => {
       .eq("user_id", appUserId);
 
     setNgnBalance(0);
-    setUsdtBalance(0);
+    setUsdcBalance(0);
     if (wallets) {
       for (const w of wallets) {
         if (w.currency === "NGN") setNgnBalance(toDisplay(w.balance, "NGN"));
-        if (w.currency === "USDT") setUsdtBalance(toDisplay(w.balance, "USDT"));
+        if (w.currency === "USDC") setUsdcBalance(toDisplay(w.balance, "USDC"));
       }
     }
   }, []);
@@ -75,6 +75,7 @@ export const useMultiWallet = () => {
           providerRef: t.provider_ref as string,
           idempotencyKey: t.idempotency_key as string,
           description: (t.description as string) ?? "",
+          metadata: (t.metadata as Record<string, unknown>) ?? undefined,
           createdAt: new Date(t.created_at as string),
           completedAt: t.completed_at ? new Date(t.completed_at as string) : undefined,
         }))
@@ -135,8 +136,8 @@ export const useMultiWallet = () => {
       setBlockradarAddresses(
         data.map((a: Record<string, unknown>) => ({
           address: a.address as string,
-          network: (a.network as string) ?? "TRC20",
-          blockchain: (a.blockchain as string) ?? "Tron",
+          network: (a.network as string) ?? "SOLANA",
+          blockchain: (a.blockchain as string) ?? "Solana",
           walletId: a.wallet_id as string,
         }))
       );
@@ -240,10 +241,22 @@ export const useMultiWallet = () => {
     [createNgnAccount]
   );
 
-  const createBlockradarAddress = useCallback(async (network: string = "TRC20") => {
-    const result = await wallet.createBlockradarAddress(network);
+  const createBlockradarAddress = useCallback(async (network: string = "SOLANA") => {
+    const result = (await wallet.createBlockradarAddress(network)) as {
+      address?: string;
+      network?: string;
+      error?: string;
+    };
+    if (!result?.address) {
+      throw new Error(result?.error || "Failed to generate USDC deposit address");
+    }
     await fetchBlockradarAddresses();
-    return result as unknown as BlockradarAddress;
+    return {
+      address: result.address,
+      network: result.network ?? network,
+      blockchain: "Solana",
+      walletId: "",
+    } satisfies BlockradarAddress;
   }, [fetchBlockradarAddresses]);
 
   const creditWallet = useCallback(
@@ -272,9 +285,16 @@ export const useMultiWallet = () => {
     [fetchWallets, fetchTransactions]
   );
 
-  const withdrawUSDT = useCallback(
-    async (amount: number, toAddress: string, network: string, pin: string) => {
-      await withdrawals.usdt(amount, toAddress, pin, network);
+  const withdrawUSDC = useCallback(
+    async (
+      amount: number,
+      toAddress: string,
+      network: string,
+      _provider: "blockradar" | "quidax",
+      _fee: number,
+      pin: string
+    ) => {
+      await withdrawals.usdc(amount, toAddress, pin, network);
       await fetchWallets();
       await fetchTransactions();
     },
@@ -300,23 +320,25 @@ export const useMultiWallet = () => {
 
   return {
     ngnBalance,
-    usdtBalance,
+    usdcBalance,
     transactions,
     ngnReservedAccount,
     monnifyAccount: ngnReservedAccount,
     fundingProviderId,
     blockradarAddresses,
     loading,
+    walletLoading: loading,
     refreshing,
-    getBalance: (c: Currency) => (c === "NGN" ? ngnBalance : usdtBalance),
-    getAvailableBalance: (c: Currency) => (c === "NGN" ? ngnBalance : usdtBalance),
+    balanceRefreshing: refreshing,
+    getBalance: (c: Currency) => (c === "NGN" ? ngnBalance : usdcBalance),
+    getAvailableBalance: (c: Currency) => (c === "NGN" ? ngnBalance : usdcBalance),
     createNgnAccount,
     createMonnifyAccount,
     createBlockradarAddress,
     creditWallet,
     debitWallet,
     withdrawNGN,
-    withdrawUSDT,
+    withdrawUSDC,
     getTransactions,
     refreshBalances,
     refreshWallets: fetchWallets,

@@ -12,6 +12,7 @@ import {
   BarChart3,
   ListTodo,
   Activity,
+  ArrowLeftRight,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,7 @@ const navItems = [
   { path: "/admin/psp-events", label: "PSP Activity", icon: Activity, permission: "psp_events" },
   { path: "/admin/webhooks", label: "Webhooks", icon: Webhook, permission: "webhooks" },
   { path: "/admin/payment-rails", label: "Payment Rails", icon: Route, permission: "payment_rails" },
+  { path: "/admin/fx", label: "FX & Convert", icon: ArrowLeftRight, permission: "payment_rails" },
   { path: "/admin/kyc", label: "KYC Review", icon: FileCheck, permission: "kyc" },
   { path: "/admin/events", label: "Event Moderation", icon: Calendar, permission: "events" },
 ];

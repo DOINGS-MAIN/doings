@@ -1,6 +1,7 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { generateDepositAddress } from "../_shared/blockradar.ts";
+import { toBlockradarNetwork, toStorageNetwork } from "../_shared/blockradarNetwork.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -23,23 +24,24 @@ Deno.serve(async (req) => {
   if (user.kyc_level < 2) return withCors({ error: "KYC level 2 required" }, { status: 403 });
 
   const body = await req.json().catch(() => ({})) as { network?: string };
-  const network = body.network ?? "tron";
+  const blockradarNetwork = toBlockradarNetwork(body.network);
+  const storageNetwork = toStorageNetwork(body.network);
 
-  const { data: usdtWallet } = await supabase
+  const { data: usdcWallet } = await supabase
     .from("wallets")
     .select("id")
     .eq("user_id", user.id)
-    .eq("currency", "USDT")
+    .eq("currency", "USDC")
     .single();
 
-  if (!usdtWallet) return withCors({ error: "USDT wallet not found" }, { status: 500 });
+  if (!usdcWallet) return withCors({ error: "USDC wallet not found" }, { status: 500 });
 
   const { data: existing } = await supabase
     .from("wallet_addresses")
     .select("id, address, network")
-    .eq("wallet_id", usdtWallet.id)
+    .eq("wallet_id", usdcWallet.id)
     .eq("provider", "blockradar")
-    .eq("network", network)
+    .eq("network", storageNetwork)
     .limit(1)
     .maybeSingle();
 
@@ -48,21 +50,21 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const result = await generateDepositAddress({ userId: user.id, network });
+    const result = await generateDepositAddress({ userId: user.id, network: blockradarNetwork });
 
     const { error: insertErr } = await supabase
       .from("wallet_addresses")
       .insert({
-        wallet_id: usdtWallet.id,
+        wallet_id: usdcWallet.id,
         provider: "blockradar",
         address: result.address,
-        network: result.network,
+        network: storageNetwork,
         label: `DOINGS-${user.id}`,
       });
 
     if (insertErr) throw insertErr;
 
-    return withCors({ ok: true, address: result.address, network: result.network });
+    return withCors({ ok: true, address: result.address, network: storageNetwork });
   } catch (error) {
     return withCors({ error: "Failed to generate address", detail: String(error) }, { status: 500 });
   }

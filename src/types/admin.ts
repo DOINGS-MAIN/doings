@@ -36,7 +36,7 @@ export interface AdminTransaction {
   userName: string;
   type: "deposit" | "withdrawal" | "spray" | "giveaway" | "refund";
   amount: number;
-  currency: "NGN" | "USDT";
+  currency: "NGN" | "USDC";
   status: "pending" | "processing" | "completed" | "failed" | "refunded";
   provider?: string;
   providerRef?: string;

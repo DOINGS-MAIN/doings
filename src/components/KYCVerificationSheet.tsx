@@ -45,7 +45,8 @@ export const KYCVerificationSheet = ({
     setIsProcessing(true);
     try {
       const r = await onVerifyLevel1("resend");
-      toast.info(r.message);
+      if (r.success) toast.success(r.message);
+      else toast.error(r.message);
     } finally {
       setIsProcessing(false);
     }
@@ -116,7 +117,7 @@ export const KYCVerificationSheet = ({
       title: "BVN + NIN",
       subtitle: "Dojah identity check & bank transfer account",
       icon: Fingerprint,
-      benefits: ["Fund NGN (transfer account)", "USDT deposit address", "Send, spray, withdraw"],
+      benefits: ["Fund NGN (transfer account)", "USDC deposit address", "Send, spray, withdraw"],
       color: "text-primary",
       bgColor: "bg-primary/20",
     },

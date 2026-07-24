@@ -3,6 +3,7 @@ import { supabase, kyc } from "@/lib/supabase";
 import { KYCLevel, KYCState, KYCVerification } from "@/types/finance";
 
 export const useKYC = () => {
+  const [loading, setLoading] = useState(true);
   const [state, setState] = useState<KYCState>({
     currentLevel: 0,
     verifications: [],
@@ -11,67 +12,72 @@ export const useKYC = () => {
   });
 
   const fetchKYCState = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    setLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
 
-    let { data: user } = await supabase
-      .from("users")
-      .select("id, kyc_level, full_name, phone, email")
-      .eq("auth_id", session.user.id)
-      .maybeSingle();
-
-    if (!user?.id) {
-      await supabase.rpc("ensure_auth_user_profile");
-      const again = await supabase
+      let { data: user } = await supabase
         .from("users")
         .select("id, kyc_level, full_name, phone, email")
         .eq("auth_id", session.user.id)
         .maybeSingle();
-      user = again.data;
-    }
 
-    if (!user?.id) {
+      if (!user?.id) {
+        await supabase.rpc("ensure_auth_user_profile");
+        const again = await supabase
+          .from("users")
+          .select("id, kyc_level, full_name, phone, email")
+          .eq("auth_id", session.user.id)
+          .maybeSingle();
+        user = again.data;
+      }
+
+      if (!user?.id) {
+        setState({
+          currentLevel: 0,
+          verifications: [],
+          bvnVerified: false,
+          ninVerified: false,
+        });
+        return;
+      }
+
+      const { data: verifications } = await supabase
+        .from("kyc_verifications")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: true });
+
+      const kycLevel = (user?.kyc_level ?? 0) as KYCLevel;
+      const bvnVerified = kycLevel >= 2;
+      const ninVerified = kycLevel >= 2;
+
+      const mapped: KYCVerification[] = (verifications ?? []).map((v: Record<string, unknown>) => ({
+        level: v.level as KYCLevel,
+        status: v.status as KYCVerification["status"],
+        provider: "dojah" as const,
+        providerRef: v.provider_ref as string,
+        verifiedAt: v.verified_at ? new Date(v.verified_at as string) : undefined,
+        submittedAt: v.created_at ? new Date(v.created_at as string) : undefined,
+      }));
+
       setState({
-        currentLevel: 0,
-        verifications: [],
-        bvnVerified: false,
-        ninVerified: false,
+        currentLevel: kycLevel,
+        verifications: mapped,
+        bvnVerified,
+        ninVerified,
+        personalInfo: user ? {
+          fullName: user.full_name ?? "",
+          phone: user.phone ?? "",
+          email: user.email ?? "",
+          dateOfBirth: "",
+          address: "",
+        } : undefined,
       });
-      return;
+    } finally {
+      setLoading(false);
     }
-
-    const { data: verifications } = await supabase
-      .from("kyc_verifications")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: true });
-
-    const kycLevel = (user?.kyc_level ?? 0) as KYCLevel;
-    const bvnVerified = kycLevel >= 2;
-    const ninVerified = kycLevel >= 2;
-
-    const mapped: KYCVerification[] = (verifications ?? []).map((v: Record<string, unknown>) => ({
-      level: v.level as KYCLevel,
-      status: v.status as KYCVerification["status"],
-      provider: "dojah" as const,
-      providerRef: v.provider_ref as string,
-      verifiedAt: v.verified_at ? new Date(v.verified_at as string) : undefined,
-      submittedAt: v.created_at ? new Date(v.created_at as string) : undefined,
-    }));
-
-    setState({
-      currentLevel: kycLevel,
-      verifications: mapped,
-      bvnVerified,
-      ninVerified,
-      personalInfo: user ? {
-        fullName: user.full_name ?? "",
-        phone: user.phone ?? "",
-        email: user.email ?? "",
-        dateOfBirth: "",
-        address: "",
-      } : undefined,
-    });
   }, []);
 
   useEffect(() => {
@@ -83,11 +89,33 @@ export const useKYC = () => {
     if (!user?.email) {
       return { success: false, message: "No email on file for this account." };
     }
-    if (action === "resend") {
-      const { error } = await supabase.auth.resend({ type: "signup", email: user.email });
-      if (error) return { success: false, message: error.message };
-      return { success: false, message: "We sent a confirmation link. Check your inbox." };
+
+    // Supabase auth.resend({ type: "signup" }) returns 200 and sends nothing when
+    // the address is already confirmed — don't claim we emailed in that case.
+    if (user.email_confirmed_at) {
+      await fetchKYCState();
+      return {
+        success: true,
+        message: "Your email is already verified. Tap “I’ve confirmed my email” if your level hasn’t updated yet.",
+      };
     }
+
+    if (action === "resend") {
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: user.email,
+        options: {
+          emailRedirectTo: origin ? `${origin}/auth/callback` : undefined,
+        },
+      });
+      if (error) return { success: false, message: error.message };
+      return {
+        success: true,
+        message: "Confirmation email sent. Check inbox and spam, then open the link.",
+      };
+    }
+
     await supabase.auth.refreshSession();
     await fetchKYCState();
     const { data: { session } } = await supabase.auth.getSession();
@@ -130,6 +158,8 @@ export const useKYC = () => {
 
   return {
     ...state,
+    loading,
+    kycLoading: loading,
     verifyLevel1,
     verifyLevel2,
     getVerificationForLevel,

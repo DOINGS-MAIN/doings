@@ -4,34 +4,75 @@ import { getServiceClient } from "../_shared/db.ts";
 import { insertWebhookLog, markWebhookProcessed } from "../_shared/webhook.ts";
 
 type BlockradarData = {
-  address?: string;
+  address?: unknown;
   amount?: string | number;
-  asset?: string;
-  network?: string;
+  asset?: unknown;
+  network?: unknown;
   hash?: string;
   reference?: string;
   status?: string;
+  metadata?: { reference?: string; userId?: string; network?: string };
 };
 
-function toMicroUsdt(amount: string | number | undefined): number {
+function toMicroUsdc(amount: string | number | undefined): number {
   const parsed = Number(amount ?? 0);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
   return Math.round(parsed * 1_000_000);
+}
+
+/** Solana payloads send nested objects; Tron often sent plain strings. */
+function normalizeAssetSymbol(asset: unknown): string {
+  if (typeof asset === "string") return asset.toUpperCase();
+  if (asset && typeof asset === "object") {
+    const o = asset as Record<string, unknown>;
+    const sym = o.symbol ?? o.ticker ?? o.name;
+    if (typeof sym === "string") return sym.toUpperCase();
+  }
+  return "";
+}
+
+function normalizeAddress(address: unknown): string {
+  if (typeof address === "string") return address;
+  if (address && typeof address === "object") {
+    const o = address as Record<string, unknown>;
+    const addr = o.address ?? o.value;
+    if (typeof addr === "string") return addr;
+  }
+  return "";
+}
+
+function normalizeNetwork(network: unknown): string | null {
+  if (typeof network === "string") return network;
+  if (network && typeof network === "object") {
+    const o = network as Record<string, unknown>;
+    const n = o.slug ?? o.name ?? o.symbol;
+    if (typeof n === "string") return n;
+  }
+  return null;
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return withCors({ error: "Method not allowed" }, { status: 405 });
 
-  const secret = Deno.env.get("BLOCKRADAR_WEBHOOK_SECRET") ?? "";
-  if (!secret) return withCors({ error: "BLOCKRADAR_WEBHOOK_SECRET not configured" }, { status: 500 });
+  // Blockradar docs: HMAC-SHA512 of raw body with API key (or dedicated webhook secret).
+  const secret =
+    (Deno.env.get("BLOCKRADAR_WEBHOOK_SECRET") ?? "").trim() ||
+    (Deno.env.get("BLOCKRADAR_API_KEY") ?? "").trim();
+  if (!secret) {
+    return withCors({ error: "BLOCKRADAR_WEBHOOK_SECRET / BLOCKRADAR_API_KEY not configured" }, { status: 500 });
+  }
 
   const signature = req.headers.get("x-blockradar-signature");
   if (!signature) return withCors({ error: "Missing x-blockradar-signature header" }, { status: 400 });
 
   const raw = await req.text();
-  const expected = await hmacHex("SHA-256", secret, raw);
-  const signatureValid = signature.toLowerCase() === expected.toLowerCase();
+  const expectedSha512 = await hmacHex("SHA-512", secret, raw);
+  // Legacy fallback if an older secret was verified with SHA-256
+  const expectedSha256 = await hmacHex("SHA-256", secret, raw);
+  const sig = signature.toLowerCase();
+  const signatureValid =
+    sig === expectedSha512.toLowerCase() || sig === expectedSha256.toLowerCase();
 
   let payload: Record<string, unknown>;
   try {
@@ -71,15 +112,15 @@ Deno.serve(async (req) => {
     const isWithdrawEvent = normalizedEvent.includes("withdraw");
 
     if (isDepositEvent) {
-      const asset = (data.asset ?? "").toUpperCase();
-      if (asset !== "USDT") {
+      const asset = normalizeAssetSymbol(data.asset);
+      if (asset !== "USDC") {
         await markWebhookProcessed(logId);
-        return withCors({ ok: true, skipped: true, reason: "unsupported asset" });
+        return withCors({ ok: true, skipped: true, reason: "unsupported asset", asset });
       }
 
-      const address = data.address;
+      const address = normalizeAddress(data.address);
       const txHash = data.hash;
-      const amountMicro = toMicroUsdt(data.amount);
+      const amountMicro = toMicroUsdc(data.amount);
       if (!address || !txHash || amountMicro <= 0) {
         await markWebhookProcessed(logId, "Missing address/hash/amount for deposit");
         return withCors({ error: "Invalid deposit payload" }, { status: 400 });
@@ -99,8 +140,8 @@ Deno.serve(async (req) => {
       }
 
       const walletData = (addrRow as unknown as { wallets: { user_id: string; currency: string } }).wallets;
-      if (walletData.currency !== "USDT") {
-        await markWebhookProcessed(logId, "Address maps to non-USDT wallet");
+      if (walletData.currency !== "USDC") {
+        await markWebhookProcessed(logId, "Address maps to non-USDC wallet");
         return withCors({ error: "Address currency mismatch" }, { status: 400 });
       }
 
@@ -110,13 +151,13 @@ Deno.serve(async (req) => {
         p_amount: amountMicro,
         p_fee: 0,
         p_type: "deposit",
-        p_description: "Blockradar USDT deposit",
+        p_description: "Blockradar USDC deposit",
         p_provider: "blockradar",
         p_provider_ref: txHash,
         p_idempotency_key: `blockradar:${txHash}`,
         p_metadata: {
           event_type: eventType,
-          network: data.network ?? null,
+          network: normalizeNetwork(data.network),
           address,
         },
       });
@@ -126,29 +167,81 @@ Deno.serve(async (req) => {
     }
 
     if (isWithdrawEvent) {
-      const txHash = data.hash ?? data.reference;
-      if (!txHash) {
+      // Prefer our DOINGS reference — provider_ref is set to that at lock time.
+      // Looking up by chain hash first fails when the withdraw API returns before a hash exists.
+      const ourRef = data.reference || data.metadata?.reference || null;
+      const chainHash = data.hash || null;
+      const lookupKeys = [ourRef, chainHash].filter((v): v is string => Boolean(v));
+      if (lookupKeys.length === 0) {
         await markWebhookProcessed(logId, "Missing withdrawal hash/reference");
         return withCors({ error: "Invalid withdrawal payload" }, { status: 400 });
       }
 
-      const isSuccess = normalizedStatus === "success" || normalizedStatus === "completed";
-      const isFailed = normalizedStatus === "failed";
+      const isSuccess =
+        normalizedEvent.includes("success") ||
+        normalizedStatus === "success" ||
+        normalizedStatus === "completed";
+      const isFailed =
+        normalizedEvent.includes("fail") ||
+        normalizedStatus === "failed";
 
       if (isSuccess || isFailed) {
         const supabase = getServiceClient();
-        const { data: txn } = await supabase
-          .from("transactions")
-          .select("id, status")
-          .eq("provider", "blockradar")
-          .eq("provider_ref", txHash)
-          .eq("status", "pending")
-          .maybeSingle();
+        let txn: { id: string; status: string } | null = null;
+
+        for (const key of lookupKeys) {
+          const { data: byRef } = await supabase
+            .from("transactions")
+            .select("id, status")
+            .eq("provider", "blockradar")
+            .eq("provider_ref", key)
+            .in("status", ["pending", "processing"])
+            .maybeSingle();
+          if (byRef?.id) {
+            txn = byRef;
+            break;
+          }
+        }
+
+        if (!txn && ourRef) {
+          const { data: byMeta } = await supabase
+            .from("transactions")
+            .select("id, status")
+            .eq("provider", "blockradar")
+            .eq("type", "withdrawal")
+            .in("status", ["pending", "processing"])
+            .contains("metadata", { reference: ourRef })
+            .maybeSingle();
+          if (byMeta?.id) txn = byMeta;
+        }
 
         if (txn?.id) {
           const rpcName = isSuccess ? "complete_withdrawal" : "fail_withdrawal";
           const { error: rpcErr } = await supabase.rpc(rpcName, { p_transaction_id: txn.id });
           if (rpcErr) throw rpcErr;
+
+          if (chainHash || ourRef) {
+            const { data: existing } = await supabase
+              .from("transactions")
+              .select("metadata")
+              .eq("id", txn.id)
+              .maybeSingle();
+            const prev =
+              existing?.metadata && typeof existing.metadata === "object"
+                ? (existing.metadata as Record<string, unknown>)
+                : {};
+            await supabase
+              .from("transactions")
+              .update({
+                provider_ref: chainHash || ourRef || txn.id,
+                metadata: {
+                  ...prev,
+                  ...(ourRef ? { reference: ourRef } : {}),
+                  ...(chainHash ? { tx_hash: chainHash } : {}),
+                },
+              })
+              .eq("id", txn.id);
+          }
         }
       }
 

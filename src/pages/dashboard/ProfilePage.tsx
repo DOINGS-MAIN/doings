@@ -10,7 +10,7 @@ export default function ProfilePage() {
       avatarData={d.avatarData}
       kycLevel={d.kycLevel}
       ngnBalance={d.ngnBalance}
-      usdtBalance={d.usdtBalance}
+      usdcBalance={d.usdcBalance}
       userName={d.profile?.full_name || ""}
       userUsername={d.profile?.username ?? null}
       userPhone={d.profile?.phone || d.profile?.email || d.user?.email || ""}

@@ -14,7 +14,7 @@ type QuidaxData = {
   address?: string;
 };
 
-function toMicroUsdt(amount: string | number | undefined): number {
+function toMicroUsdc(amount: string | number | undefined): number {
   const parsed = Number(amount ?? 0);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
   return Math.round(parsed * 1_000_000);
@@ -76,14 +76,14 @@ Deno.serve(async (req) => {
 
     if (isDepositEvent) {
       const asset = String(data.currency ?? data.asset ?? "").toUpperCase();
-      if (asset !== "USDT") {
+      if (asset !== "USDC") {
         await markWebhookProcessed(logId);
         return withCors({ ok: true, skipped: true, reason: "unsupported asset" });
       }
 
       // For Quidax callbacks we expect your service to set provider_ref/reference at initiation.
       const ref = data.reference ?? data.txid ?? idempotencyKey;
-      const amountMicro = toMicroUsdt(data.amount);
+      const amountMicro = toMicroUsdc(data.amount);
       if (!ref || amountMicro <= 0) {
         await markWebhookProcessed(logId, "Missing deposit reference or amount");
         return withCors({ error: "Invalid deposit payload" }, { status: 400 });
@@ -113,7 +113,7 @@ Deno.serve(async (req) => {
         p_amount: amountMicro,
         p_fee: 0,
         p_type: "deposit",
-        p_description: "Quidax USDT deposit",
+        p_description: "Quidax USDC deposit",
         p_provider: "quidax",
         p_provider_ref: ref,
         p_idempotency_key: `quidax:deposit:${ref}`,
