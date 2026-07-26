@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { FloatingMoney } from "@/components/FloatingMoney";
 import { BottomNav } from "@/components/BottomNav";
@@ -7,7 +7,8 @@ import { FundWalletSheet } from "@/components/FundWalletSheet";
 import { TransactionHistory } from "@/components/TransactionHistory";
 import { SpraySetupSheet } from "@/components/SpraySetupSheet";
 import { SprayAnimation } from "@/components/SprayAnimation";
-import { AvatarCustomization, AvatarData } from "@/components/AvatarCustomization";
+import { AvatarCustomization } from "@/components/AvatarCustomization";
+import { useAvatar } from "@/hooks/useAvatar";
 import { CreateEventSheet } from "@/components/CreateEventSheet";
 import { EventDetailsSheet } from "@/components/EventDetailsSheet";
 import { JoinEventSheet } from "@/components/JoinEventSheet";
@@ -33,8 +34,9 @@ import { useTransactionPin } from "@/hooks/useTransactionPin";
 import { DashboardShellContext, type DashboardShellValue } from "@/contexts/DashboardShellContext";
 
 export function DashboardLayout() {
-  const { user, profile, signOut, updateProfile, setUsername } = useAuth();
+  const { user, profile, signOut, updateProfile, setUsername, refreshProfile } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
 
   const { hasPin, loading: pinLoading } = useTransactionPin();
 
@@ -56,13 +58,37 @@ export function DashboardLayout() {
     }
   }, [hasPin, pinLoading]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const join = params.get("join")?.trim().toUpperCase();
+    const redeem = params.get("redeem")?.trim().toUpperCase();
+    if (!join && !redeem) return;
+
+    if (join) {
+      setJoinEventInitialCode(join);
+      setShowJoinEvent(true);
+    }
+    if (redeem) {
+      setRedeemGiveawayInitialCode(redeem);
+      setShowRedeemGiveaway(true);
+    }
+
+    params.delete("join");
+    params.delete("redeem");
+    const nextSearch = params.toString();
+    navigate(
+      { pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : "" },
+      { replace: true }
+    );
+  }, [location.pathname, location.search, navigate]);
+
   const [showAvatarCustomization, setShowAvatarCustomization] = useState(false);
-  const [avatarData, setAvatarData] = useState<AvatarData>({
-    photoUrl: null,
-    outfit: "agbada",
-    accessory: "none",
-    background: "gold-gradient",
-  });
+  const { avatarData, saveAvatarData, saving: savingAvatar } = useAvatar(
+    user?.id,
+    profile?.avatar_data,
+    profile?.avatar_url,
+    refreshProfile,
+  );
 
   const [showCreateEvent, setShowCreateEvent] = useState(false);
   const [showEventDetails, setShowEventDetails] = useState(false);
@@ -74,6 +100,8 @@ export function DashboardLayout() {
   const [showSendMoney, setShowSendMoney] = useState(false);
   const [showConvert, setShowConvert] = useState(false);
   const [showJoinEvent, setShowJoinEvent] = useState(false);
+  const [joinEventInitialCode, setJoinEventInitialCode] = useState<string | undefined>();
+  const [redeemGiveawayInitialCode, setRedeemGiveawayInitialCode] = useState<string | undefined>();
 
   const [showCreateGiveaway, setShowCreateGiveaway] = useState(false);
   const [showRedeemGiveaway, setShowRedeemGiveaway] = useState(false);
@@ -138,19 +166,53 @@ export function DashboardLayout() {
     gradient: event.gradient,
   }));
 
-  const handleJoinEvent = (event: EventData) => {
+  const openPinSettings = () => setShowTransactionPin(true);
+
+  const handleJoinEvent = async (event: EventData) => {
     if (event.status !== "live") {
       toast.info("This event hasn't started yet");
       return;
     }
+    if (profile?.id && event.hostId === profile.id) {
+      toast.info("You're hosting this event — share the code for guests to spray you");
+      setSelectedEventDetails(event);
+      setShowEventDetails(true);
+      return;
+    }
+    try {
+      await joinEvent(event.id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not join event");
+      return;
+    }
     setSelectedEvent(event);
     setShowSpraySetup(true);
-    joinEvent(event.id);
   };
 
-  const openPinSettings = () => setShowTransactionPin(true);
+  const handleSprayError = (err: unknown): never => {
+    const code = (err as Error & { code?: string }).code;
+    if (code === "PIN_NOT_SET") {
+      openPinSettings();
+    } else if (code === "KYC_REQUIRED") {
+      setShowKYC(true);
+    } else {
+      toast.error(err instanceof Error ? err.message : "Spray failed");
+    }
+    throw err;
+  };
 
-  const handleStartSpray = (amount: number, denomination: number, pin: string) => {
+  const handleStartSpray = async (amount: number, denomination: number, pin: string) => {
+    if (!selectedEvent) throw new Error("No event selected");
+    try {
+      await sprayApi.validate(
+        selectedEvent.id,
+        amount,
+        denomination as 200 | 500 | 1000,
+        pin,
+      );
+    } catch (err) {
+      handleSprayError(err);
+    }
     setSprayAmount(amount);
     setSprayDenomination(denomination);
     setSprayPin(pin);
@@ -166,6 +228,7 @@ export function DashboardLayout() {
       sprayDenomination as 200 | 500 | 1000,
       sprayPin,
     );
+    await refreshBalances();
   };
 
   const handleSprayComplete = async (sprayedAmount: number) => {
@@ -173,31 +236,31 @@ export function DashboardLayout() {
       await recordSpray(sprayedAmount);
       toast.success(`Successfully sprayed ₦${sprayedAmount.toLocaleString()}! 🎉`);
     } catch (err) {
-      const code = (err as Error & { code?: string }).code;
-      if (code === "PIN_NOT_SET") openPinSettings();
-      toast.error(err instanceof Error ? err.message : "Failed to complete spray");
+      handleSprayError(err);
+      throw err;
+    } finally {
+      setIsSprayActive(false);
+      setSelectedEvent(null);
+      setSprayPin("");
     }
-    setIsSprayActive(false);
-    setSelectedEvent(null);
-    setSprayPin("");
   };
 
   const handleSprayCancel = async (sprayedAmount: number) => {
-    if (sprayedAmount > 0) {
-      try {
+    try {
+      if (sprayedAmount > 0) {
         await recordSpray(sprayedAmount);
         toast.info(`Spray stopped. ₦${sprayedAmount.toLocaleString()} was sprayed.`);
-      } catch (err) {
-        const code = (err as Error & { code?: string }).code;
-        if (code === "PIN_NOT_SET") openPinSettings();
-        toast.error(err instanceof Error ? err.message : "Failed to record spray");
+      } else {
+        toast.info("Spray cancelled");
       }
-    } else {
-      toast.info("Spray cancelled");
+    } catch (err) {
+      handleSprayError(err);
+      throw err;
+    } finally {
+      setIsSprayActive(false);
+      setSelectedEvent(null);
+      setSprayPin("");
     }
-    setIsSprayActive(false);
-    setSelectedEvent(null);
-    setSprayPin("");
   };
 
   const handleGoLive = (eventId: string) => {
@@ -269,7 +332,6 @@ export function DashboardLayout() {
     user,
     profile,
     avatarData,
-    setAvatarData,
     kycLevel,
     kycLoading,
     ngnBalance,
@@ -395,6 +457,10 @@ export function DashboardLayout() {
           onStartSpray={handleStartSpray}
           balance={ngnBalance}
           eventName={selectedEvent?.title || ""}
+          kycLevel={kycLevel}
+          hasPin={hasPin}
+          isHost={Boolean(profile?.id && selectedEvent?.hostId === profile.id)}
+          onOpenKYC={() => setShowKYC(true)}
           onPinNotSet={openPinSettings}
         />
 
@@ -404,6 +470,7 @@ export function DashboardLayout() {
               isActive={isSprayActive}
               amount={sprayAmount}
               denomination={sprayDenomination}
+              avatarData={avatarData}
               onComplete={handleSprayComplete}
               onCancel={handleSprayCancel}
               eventName={selectedEvent?.title || "Event"}
@@ -414,8 +481,17 @@ export function DashboardLayout() {
         <AvatarCustomization
           isOpen={showAvatarCustomization}
           onClose={() => setShowAvatarCustomization(false)}
-          onSave={setAvatarData}
+          onSave={async (data) => {
+            try {
+              await saveAvatarData(data);
+              toast.success("Avatar saved! 🎉");
+              setShowAvatarCustomization(false);
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Could not save avatar");
+            }
+          }}
           currentAvatar={avatarData}
+          saving={savingAvatar}
         />
 
         <CreateEventSheet
@@ -439,10 +515,14 @@ export function DashboardLayout() {
 
         <JoinEventSheet
           isOpen={showJoinEvent}
-          onClose={() => setShowJoinEvent(false)}
+          onClose={() => {
+            setShowJoinEvent(false);
+            setJoinEventInitialCode(undefined);
+          }}
           onJoinEvent={handleJoinEvent}
           findEventByCode={findEventByCode}
           liveEvents={getLiveEvents()}
+          initialCode={joinEventInitialCode}
         />
 
         <BankAccountsSheet open={showBankAccounts} onOpenChange={setShowBankAccounts} />
@@ -511,9 +591,13 @@ export function DashboardLayout() {
 
         <RedeemGiveawaySheet
           isOpen={showRedeemGiveaway}
-          onClose={() => setShowRedeemGiveaway(false)}
+          onClose={() => {
+            setShowRedeemGiveaway(false);
+            setRedeemGiveawayInitialCode(undefined);
+          }}
           onRedeem={handleRedeemGiveaway}
           findGiveawayByCode={findGiveawayByCode}
+          initialCode={redeemGiveawayInitialCode}
         />
 
         <AnimatePresence>

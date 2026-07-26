@@ -12,6 +12,7 @@ interface RedeemGiveawaySheetProps {
   onClose: () => void;
   onRedeem: (code: string) => { success: boolean; message: string; amount?: number } | Promise<{ success: boolean; message: string; amount?: number }>;
   findGiveawayByCode: (code: string) => Giveaway | undefined;
+  initialCode?: string;
 }
 
 export const RedeemGiveawaySheet = ({
@@ -19,6 +20,7 @@ export const RedeemGiveawaySheet = ({
   onClose,
   onRedeem,
   findGiveawayByCode,
+  initialCode,
 }: RedeemGiveawaySheetProps) => {
   const [code, setCode] = useState("");
   const [mode, setMode] = useState<'input' | 'result'>('input');
@@ -57,6 +59,11 @@ export const RedeemGiveawaySheet = ({
       cancelled = true;
     };
   }, [code, findGiveawayByCode]);
+
+  useEffect(() => {
+    if (!isOpen || !initialCode) return;
+    handleCodeChange(initialCode);
+  }, [isOpen, initialCode]);
 
   const handleRedeem = async () => {
     const redeemResult = await onRedeem(code);

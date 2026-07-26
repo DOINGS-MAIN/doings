@@ -16,6 +16,8 @@ import NotFound from "./pages/NotFound";
 import EventScreenPage from "./pages/EventScreenPage";
 import AuthCallbackPage from "./pages/AuthCallbackPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import JoinEventLinkPage from "./pages/JoinEventLinkPage";
+import RedeemGiveawayLinkPage from "./pages/RedeemGiveawayLinkPage";
 
 import { AdminAuthShell } from "./components/admin/AdminAuthShell";
 import { AdminLayout } from "./components/admin/AdminLayout";
@@ -46,6 +48,8 @@ const App = () => (
         <Routes>
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/join/:eventCode" element={<JoinEventLinkPage />} />
+          <Route path="/redeem/:code" element={<RedeemGiveawayLinkPage />} />
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
 

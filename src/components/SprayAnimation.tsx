@@ -1,15 +1,18 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Pause, Play } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import heroAvatar from "@/assets/hero-avatar.png";
+import { Pause, Play, Loader2 } from "lucide-react";
+import { SprayAvatarCharacter } from "@/components/SprayAvatarCharacter";
+import { SprayMoneyBill } from "@/components/SprayMoneyBill";
+import type { AvatarData } from "@/types/avatar";
+import { DEFAULT_AVATAR_DATA } from "@/types/avatar";
 
 interface SprayAnimationProps {
   isActive: boolean;
   amount: number;
   denomination: number;
-  onComplete: (sprayedAmount: number) => void;
-  onCancel: (sprayedAmount: number) => void;
+  avatarData?: AvatarData;
+  onComplete: (sprayedAmount: number) => Promise<void>;
+  onCancel: (sprayedAmount: number) => Promise<void>;
   eventName: string;
 }
 
@@ -17,7 +20,6 @@ interface MoneyNote {
   id: number;
   x: number;
   rotation: number;
-  delay: number;
   scale: number;
 }
 
@@ -25,38 +27,46 @@ export const SprayAnimation = ({
   isActive,
   amount,
   denomination,
+  avatarData = DEFAULT_AVATAR_DATA,
   onComplete,
   onCancel,
-  eventName,
+  eventName: _eventName,
 }: SprayAnimationProps) => {
   const [sprayedAmount, setSprayedAmount] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [notes, setNotes] = useState<MoneyNote[]>([]);
   const [showCelebration, setShowCelebration] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [counterPulse, setCounterPulse] = useState(false);
   const noteIdRef = useRef(0);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const recordingRef = useRef(false);
+  const prevAmountRef = useRef(0);
 
-  const totalNotes = Math.floor(amount / denomination);
-  const progress = (sprayedAmount / amount) * 100;
+  const progress = amount > 0 ? (sprayedAmount / amount) * 100 : 0;
 
-  const sprayNote = useCallback(() => {
-    if (sprayedAmount >= amount) return;
-
-    // Create new note
-    const newNote: MoneyNote = {
-      id: noteIdRef.current++,
-      x: Math.random() * 200 - 100,
-      rotation: Math.random() * 360 - 180,
-      delay: 0,
-      scale: 0.8 + Math.random() * 0.4,
-    };
-
-    setNotes((prev) => [...prev.slice(-20), newNote]); // Keep last 20 notes
-    setSprayedAmount((prev) => Math.min(prev + denomination, amount));
-  }, [sprayedAmount, amount, denomination]);
+  const resetLocal = useCallback(() => {
+    setSprayedAmount(0);
+    setNotes([]);
+    setShowCelebration(false);
+    setIsRecording(false);
+    setIsPaused(false);
+    recordingRef.current = false;
+    prevAmountRef.current = 0;
+  }, []);
 
   useEffect(() => {
-    if (!isActive || isPaused) {
+    if (sprayedAmount > prevAmountRef.current) {
+      setCounterPulse(true);
+      const t = window.setTimeout(() => setCounterPulse(false), 280);
+      prevAmountRef.current = sprayedAmount;
+      return () => window.clearTimeout(t);
+    }
+    prevAmountRef.current = sprayedAmount;
+  }, [sprayedAmount]);
+
+  useEffect(() => {
+    if (!isActive || isPaused || isRecording) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
@@ -64,285 +74,229 @@ export const SprayAnimation = ({
       return;
     }
 
-    // Spray 1 note per second
     intervalRef.current = setInterval(() => {
-      if (sprayedAmount < amount) {
-        sprayNote();
-      }
+      setSprayedAmount((prev) => {
+        if (prev >= amount) return prev;
+        const newNote: MoneyNote = {
+          id: noteIdRef.current++,
+          x: Math.random() * 280 - 140,
+          rotation: Math.random() * 360 - 180,
+          scale: 0.85 + Math.random() * 0.35,
+        };
+        setNotes((notePrev) => [...notePrev.slice(-24), newNote]);
+        return Math.min(prev + denomination, amount);
+      });
     }, 1000);
 
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
+      if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isActive, isPaused, sprayNote, sprayedAmount, amount]);
+  }, [isActive, isPaused, isRecording, amount, denomination]);
 
   useEffect(() => {
-    if (sprayedAmount >= amount && isActive) {
-      setShowCelebration(true);
-      setTimeout(() => {
-        onComplete(sprayedAmount);
-        setSprayedAmount(0);
-        setNotes([]);
-        setShowCelebration(false);
-      }, 2000);
-    }
-  }, [sprayedAmount, amount, isActive, onComplete]);
+    if (sprayedAmount < amount || !isActive || recordingRef.current) return;
 
-  const handleCancel = () => {
+    recordingRef.current = true;
+    setIsRecording(true);
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
-    onCancel(sprayedAmount);
-    setSprayedAmount(0);
-    setNotes([]);
-    setIsPaused(false);
-  };
 
-  const getDenominationEmoji = () => {
-    switch (denomination) {
-      case 200: return "💵";
-      case 500: return "💴";
-      case 1000: return "💰";
-      default: return "💵";
-    }
+    void (async () => {
+      try {
+        await onComplete(sprayedAmount);
+        setShowCelebration(true);
+        window.setTimeout(() => {
+          resetLocal();
+        }, 2000);
+      } catch {
+        recordingRef.current = false;
+        setIsRecording(false);
+      }
+    })();
+  }, [sprayedAmount, amount, isActive, onComplete, resetLocal]);
+
+  const handleStop = () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    if (recordingRef.current) return;
+
+    void (async () => {
+      recordingRef.current = true;
+      setIsRecording(true);
+      try {
+        await onCancel(sprayedAmount);
+      } finally {
+        resetLocal();
+      }
+    })();
   };
 
   if (!isActive) return null;
 
+  const controlsLocked = isRecording;
+  const showStopHint = sprayedAmount > 0 && !controlsLocked;
+
   return (
     <motion.div
-      className="fixed inset-0 z-[100] bg-background"
+      className="fixed inset-0 z-[100] overflow-hidden bg-black"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
     >
-      {/* Background gradient */}
-      <div className="absolute inset-0 bg-gradient-to-b from-primary/20 via-background to-background" />
-
-      {/* Celebration overlay */}
-      <AnimatePresence>
-        {showCelebration && (
-          <motion.div
-            className="absolute inset-0 z-20 flex items-center justify-center bg-black/50"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <motion.div
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              className="text-center"
-            >
-              <motion.div
-                className="text-8xl mb-4"
-                animate={{ 
-                  rotate: [0, 10, -10, 10, 0],
-                  scale: [1, 1.2, 1],
-                }}
-                transition={{ duration: 0.5, repeat: 3 }}
-              >
-                🎉
-              </motion.div>
-              <h2 className="text-3xl font-black text-primary">Spray Complete!</h2>
-              <p className="text-xl text-foreground mt-2">
-                You sprayed ₦{amount.toLocaleString()}
-              </p>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Header */}
-      <div className="relative z-10 flex items-center justify-between px-6 pt-12 pb-4">
-        <div>
-          <h2 className="text-xl font-bold text-foreground">Spraying 💸</h2>
-          <p className="text-sm text-muted-foreground">{eventName}</p>
-        </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={handleCancel}
-          className="text-muted-foreground hover:text-foreground"
-        >
-          <X className="w-6 h-6" />
-        </Button>
-      </div>
-
-      {/* Stats bar */}
-      <div className="relative z-10 px-6 mb-8">
-        <div className="glass rounded-2xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <p className="text-sm text-muted-foreground">Sprayed</p>
-              <p className="text-2xl font-black text-primary">
-                ₦{sprayedAmount.toLocaleString()}
-              </p>
-            </div>
-            <div className="text-right">
-              <p className="text-sm text-muted-foreground">Remaining</p>
-              <p className="text-2xl font-bold text-foreground">
-                ₦{(amount - sprayedAmount).toLocaleString()}
-              </p>
-            </div>
-          </div>
-          
-          {/* Progress bar */}
-          <div className="h-3 bg-muted rounded-full overflow-hidden">
-            <motion.div
-              className="h-full bg-gradient-to-r from-primary to-accent rounded-full"
-              initial={{ width: 0 }}
-              animate={{ width: `${progress}%` }}
-              transition={{ duration: 0.3 }}
-            />
-          </div>
-          
-          <div className="flex items-center justify-between mt-2 text-sm text-muted-foreground">
-            <span>{Math.floor(sprayedAmount / denomination)} / {totalNotes} notes</span>
-            <span>{denomination === 1000 ? "₦1K" : `₦${denomination}`} each</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Avatar and spray area */}
-      <div className="relative z-10 flex-1 flex flex-col items-center justify-center px-6">
-        {/* Money notes animation */}
-        <div className="relative w-full h-64 flex items-end justify-center overflow-hidden">
+      {/* Ambient spray — felt, not read */}
+      <div className="pointer-events-none absolute inset-0 spray-scene-dim opacity-50">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_35%,hsl(43_96%_56%/0.12),transparent_55%)]" />
+        <div className="absolute inset-0 flex items-center justify-center pt-8">
           <AnimatePresence>
             {notes.map((note) => (
               <motion.div
                 key={note.id}
-                className="absolute text-4xl"
-                initial={{ 
-                  y: 0, 
-                  x: 0, 
-                  opacity: 1, 
-                  scale: 0,
-                  rotate: 0 
-                }}
-                animate={{ 
-                  y: -300 - Math.random() * 100, 
-                  x: note.x, 
+                className="absolute"
+                initial={{ y: 80, x: 0, opacity: 0.9, scale: 0, rotate: 0 }}
+                animate={{
+                  y: -320 - Math.random() * 120,
+                  x: note.x,
                   opacity: 0,
                   scale: note.scale,
                   rotate: note.rotation,
                 }}
                 exit={{ opacity: 0 }}
-                transition={{ 
-                  duration: 1.5 + Math.random() * 0.5,
-                  ease: "easeOut",
-                }}
-                style={{ bottom: 80 }}
+                transition={{ duration: 1.6 + Math.random() * 0.5, ease: "easeOut" }}
+                style={{ bottom: "38%" }}
               >
-                {getDenominationEmoji()}
+                <SprayMoneyBill denomination={denomination} size="md" />
               </motion.div>
             ))}
           </AnimatePresence>
 
-          {/* Avatar */}
           <motion.div
-            className="relative z-10"
-            animate={!isPaused ? { 
-              y: [0, -5, 0],
-              rotate: [-2, 2, -2],
-            } : {}}
-            transition={{ 
-              duration: 0.5, 
-              repeat: Infinity,
-              ease: "easeInOut",
-            }}
+            animate={!isPaused && !isRecording ? { y: [0, -8, 0], rotate: [-3, 3, -3] } : { scale: 0.96 }}
+            transition={{ duration: 0.55, repeat: Infinity, ease: "easeInOut" }}
           >
-            <motion.div
-              className="w-32 h-32 rounded-full overflow-hidden border-4 border-primary shadow-lg"
-              style={{ boxShadow: "0 0 40px hsl(43 96% 56% / 0.5)" }}
-            >
-              <img 
-                src={heroAvatar} 
-                alt="Your avatar" 
-                className="w-full h-full object-cover"
-              />
-            </motion.div>
-            
-            {/* Spray effect from hands */}
-            {!isPaused && (
-              <>
-                <motion.div
-                  className="absolute -left-8 top-1/2 text-2xl"
-                  animate={{ 
-                    y: [-10, 10, -10],
-                    rotate: [-20, 0, -20],
-                    scale: [1, 1.2, 1],
-                  }}
-                  transition={{ duration: 0.3, repeat: Infinity }}
-                >
-                  🤚
-                </motion.div>
-                <motion.div
-                  className="absolute -right-8 top-1/2 text-2xl"
-                  animate={{ 
-                    y: [10, -10, 10],
-                    rotate: [20, 0, 20],
-                    scale: [1, 1.2, 1],
-                  }}
-                  transition={{ duration: 0.3, repeat: Infinity }}
-                >
-                  🤚
-                </motion.div>
-              </>
-            )}
+            <SprayAvatarCharacter
+              avatar={avatarData}
+              size="hero"
+              dancing={!isPaused && !isRecording}
+              danceStyle="spray"
+              showGlow
+            />
           </motion.div>
         </div>
-
-        {/* Current spray indicator */}
-        <motion.div
-          className="mt-8 text-center"
-          animate={!isPaused ? { scale: [1, 1.05, 1] } : {}}
-          transition={{ duration: 1, repeat: Infinity }}
-        >
-          <p className="text-6xl mb-2">{getDenominationEmoji()}</p>
-          <p className="text-lg font-bold text-foreground">
-            ₦{denomination.toLocaleString()} per note
-          </p>
-        </motion.div>
       </div>
 
-      {/* Controls */}
-      <div className="relative z-10 px-6 pb-12">
-        <div className="flex gap-4">
-          <Button
-            variant={isPaused ? "gold" : "outline"}
-            size="lg"
-            className="flex-1"
-            onClick={() => setIsPaused(!isPaused)}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/30 via-black/55 to-black/90" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[42%] bg-gradient-to-t from-black via-black/80 to-transparent" />
+
+      <AnimatePresence>
+        {showCelebration && (
+          <motion.div
+            className="absolute inset-0 z-30 flex items-center justify-center bg-black/70"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
           >
-            {isPaused ? (
-              <>
-                <Play className="w-5 h-5 mr-2" />
-                Resume
-              </>
-            ) : (
-              <>
-                <Pause className="w-5 h-5 mr-2" />
-                Pause
-              </>
-            )}
-          </Button>
-          <Button
-            variant="destructive"
-            size="lg"
-            className="flex-1"
-            onClick={handleCancel}
-          >
-            Stop Spray
-          </Button>
-        </div>
-        {sprayedAmount > 0 && (
-          <p className="text-center text-sm text-muted-foreground mt-3">
-            ⚠️ Stopping will keep ₦{sprayedAmount.toLocaleString()} already sprayed
-          </p>
+            <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} className="text-center px-6">
+              <p className="text-7xl mb-4">🎉</p>
+              <h2 className="text-3xl font-black text-gradient-gold spray-counter-neon">Spray sent!</h2>
+              <p className="text-2xl font-bold text-white mt-3">₦{sprayedAmount.toLocaleString()}</p>
+            </motion.div>
+          </motion.div>
         )}
+      </AnimatePresence>
+
+      {isRecording && !showCelebration && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/75">
+          <div className="text-center">
+            <Loader2 className="mx-auto mb-4 h-12 w-12 animate-spin text-primary" />
+            <p className="text-lg font-semibold text-white">Locking in your spray…</p>
+          </div>
+        </div>
+      )}
+
+      {/* Control deck — only foreground UI while spraying */}
+      <div className="relative z-20 flex h-full flex-col items-center justify-between px-6 pb-12 pt-16">
+        <div className="flex flex-col items-center text-center">
+          <motion.p
+            className="mb-2 text-xs font-bold uppercase tracking-[0.45em] text-white/45"
+            animate={!isPaused && !isRecording ? { opacity: [0.35, 0.7, 0.35] } : { opacity: 0.5 }}
+            transition={{ duration: 1.8, repeat: Infinity }}
+          >
+            {isPaused ? "Paused" : "Spraying"}
+          </motion.p>
+
+          <motion.p
+            key={sprayedAmount}
+            className={`text-6xl font-black tabular-nums text-gradient-gold spray-counter-neon md:text-8xl ${
+              counterPulse ? "scale-110" : "scale-100"
+            } transition-transform duration-200`}
+          >
+            ₦{sprayedAmount.toLocaleString()}
+          </motion.p>
+
+          <div className="mt-5 h-1.5 w-48 overflow-hidden rounded-full bg-white/10 md:w-56">
+            <motion.div
+              className="h-full rounded-full bg-gradient-to-r from-primary via-yellow-300 to-primary"
+              animate={{ width: `${progress}%` }}
+              transition={{ duration: 0.35, ease: "easeOut" }}
+              style={{ boxShadow: "0 0 16px hsl(43 96% 56% / 0.65)" }}
+            />
+          </div>
+        </div>
+
+        <div className="w-full max-w-lg space-y-4">
+          {showStopHint && (
+            <p className="text-center text-xs font-medium text-white/50">
+              Stop keeps ₦{sprayedAmount.toLocaleString()} · close app keeps nothing
+            </p>
+          )}
+
+          <div className="grid grid-cols-2 gap-4">
+            <motion.button
+              type="button"
+              disabled={controlsLocked}
+              onClick={() => setIsPaused((p) => !p)}
+              className={`flex min-h-[4.5rem] flex-col items-center justify-center rounded-2xl px-4 py-4 text-center font-black uppercase tracking-wide text-cyan-300 transition-transform active:scale-[0.97] disabled:opacity-40 spray-neon-pause ${
+                isPaused ? "spray-neon-pause-active" : ""
+              }`}
+              whileTap={{ scale: 0.97 }}
+            >
+              {isPaused ? (
+                <>
+                  <Play className="mb-1 h-8 w-8" strokeWidth={2.5} />
+                  <span className="text-lg md:text-xl">Resume</span>
+                </>
+              ) : (
+                <>
+                  <Pause className="mb-1 h-8 w-8" strokeWidth={2.5} />
+                  <span className="text-lg md:text-xl">Pause</span>
+                </>
+              )}
+            </motion.button>
+
+            <motion.button
+              type="button"
+              disabled={controlsLocked}
+              onClick={handleStop}
+              className={`flex min-h-[4.5rem] flex-col items-center justify-center rounded-2xl px-4 py-4 text-center font-black uppercase tracking-wide text-red-300 transition-transform active:scale-[0.97] disabled:opacity-40 spray-neon-stop ${
+                !isPaused && !controlsLocked ? "spray-neon-stop-idle" : ""
+              }`}
+              whileTap={{ scale: 0.97 }}
+            >
+              <SquareStopIcon />
+              <span className="mt-1 text-lg md:text-xl">Stop</span>
+            </motion.button>
+          </div>
+        </div>
       </div>
     </motion.div>
   );
 };
+
+function SquareStopIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-7 w-7 fill-current" aria-hidden>
+      <rect x="6" y="6" width="12" height="12" rx="1.5" />
+    </svg>
+  );
+}

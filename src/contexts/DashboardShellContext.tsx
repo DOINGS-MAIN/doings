@@ -1,7 +1,7 @@
 import { createContext, useContext, type Dispatch, type SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
 import type { UserProfile } from "@/hooks/useAuth";
-import type { AvatarData } from "@/components/AvatarCustomization";
+import type { AvatarData } from "@/types/avatar";
 import type { EventData } from "@/hooks/useEvents";
 import type { Giveaway } from "@/hooks/useGiveaways";
 import type { Currency, FinanceTransaction, MonnifyReservedAccount, BlockradarAddress } from "@/types/finance";
@@ -38,7 +38,6 @@ export interface DashboardShellValue {
   user: User | null;
   profile: UserProfile | null;
   avatarData: AvatarData;
-  setAvatarData: Dispatch<SetStateAction<AvatarData>>;
   kycLevel: number;
   kycLoading: boolean;
   ngnBalance: number;

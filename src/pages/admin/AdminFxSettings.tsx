@@ -41,12 +41,13 @@ export const AdminFxSettings = () => {
     refreshingRate,
     saveSettings,
     refreshMarketRate,
+    setManualMarketRate,
     recordTopup,
     refresh,
   } = useFxSettings();
 
   const [enabled, setEnabled] = useState(false);
-  const [rateSource, setRateSource] = useState<"binance" | "paycrest">("binance");
+  const [rateSource, setRateSource] = useState<"binance" | "bybit" | "paycrest" | "manual">("binance");
   const [sellFlat, setSellFlat] = useState("0");
   const [sellPercent, setSellPercent] = useState("0");
   const [buyFlat, setBuyFlat] = useState("0");
@@ -56,6 +57,7 @@ export const AdminFxSettings = () => {
   const [dailyCap, setDailyCap] = useState("10000");
   const [minTrade, setMinTrade] = useState("5");
   const [quoteTtl, setQuoteTtl] = useState("60");
+  const [manualRate, setManualRate] = useState("");
 
   const [topupCurrency, setTopupCurrency] = useState<"NGN" | "USDC">("NGN");
   const [topupAmount, setTopupAmount] = useState("");
@@ -75,6 +77,7 @@ export const AdminFxSettings = () => {
     setDailyCap(String(settings.daily_cap_usdc ?? 10000));
     setMinTrade(String(settings.min_trade_usdc ?? 5));
     setQuoteTtl(String(settings.quote_ttl_seconds ?? 60));
+    if (settings.market_rate_naira) setManualRate(String(settings.market_rate_naira));
   }, [settings]);
 
   if (!currentAccount || !canAccessFx(currentAccount.role)) {
@@ -105,9 +108,24 @@ export const AdminFxSettings = () => {
   const handleRefreshRate = async () => {
     try {
       await refreshMarketRate();
-      toast.success("Market rate refreshed from Binance");
+      toast.success("Market rate refreshed from P2P (Binance → Bybit fallback)");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Rate refresh failed");
+    }
+  };
+
+  const handleSetManualRate = async () => {
+    const naira = parseFloat(manualRate);
+    if (!naira || naira <= 0) {
+      toast.error("Enter a positive ₦/USDC market rate");
+      return;
+    }
+    try {
+      await setManualMarketRate(naira);
+      setRateSource("manual");
+      toast.success(`Manual market rate set to ₦${naira.toLocaleString()}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to set rate");
     }
   };
 
@@ -158,10 +176,11 @@ export const AdminFxSettings = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="w-5 h-5" />
-            Market rate (Binance P2P)
+            Market rate
           </CardTitle>
           <CardDescription>
-            Base rate before sell/buy adjustments. Refreshed on quote requests or manually below.
+            Base ₦ per USDC before spreads. Auto refresh tries Binance P2P, then Bybit USDT/NGN
+            (Binance NGN P2P has been suspended). Or set a manual rate.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -177,6 +196,9 @@ export const AdminFxSettings = () => {
                 <p className="text-xs text-muted-foreground mt-1">
                   {formatDistanceToNow(new Date(settings.market_rate_updated_at), { addSuffix: true })}
                 </p>
+              )}
+              {settings?.rate_source && (
+                <p className="text-xs text-muted-foreground mt-0.5 capitalize">Source: {settings.rate_source}</p>
               )}
             </div>
             <div className="rounded-xl bg-muted/50 p-4">
@@ -196,14 +218,29 @@ export const AdminFxSettings = () => {
               </p>
             </div>
           </div>
-          <Button onClick={() => void handleRefreshRate()} disabled={refreshingRate}>
-            {refreshingRate ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <RefreshCw className="w-4 h-4 mr-2" />
-            )}
-            Refresh from Binance
-          </Button>
+          <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
+            <Button onClick={() => void handleRefreshRate()} disabled={refreshingRate}>
+              {refreshingRate ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4 mr-2" />
+              )}
+              Refresh from P2P
+            </Button>
+            <div className="flex-1 space-y-1">
+              <Label className="text-xs">Manual ₦ / USDC</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={manualRate}
+                  onChange={(e) => setManualRate(e.target.value.replace(/[^0-9.]/g, ""))}
+                  placeholder="e.g. 1580"
+                />
+                <Button variant="secondary" onClick={() => void handleSetManualRate()} disabled={refreshingRate}>
+                  Set manual
+                </Button>
+              </div>
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -223,12 +260,14 @@ export const AdminFxSettings = () => {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <Label>Rate source</Label>
-              <Select value={rateSource} onValueChange={(v) => setRateSource(v as "binance" | "paycrest")}>
+              <Select value={rateSource} onValueChange={(v) => setRateSource(v as typeof rateSource)}>
                 <SelectTrigger className="mt-1">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="binance">Binance P2P</SelectItem>
+                  <SelectItem value="binance">Auto P2P (Binance → Bybit)</SelectItem>
+                  <SelectItem value="bybit">Bybit P2P</SelectItem>
+                  <SelectItem value="manual">Manual</SelectItem>
                   <SelectItem value="paycrest" disabled>Paycrest (coming soon)</SelectItem>
                 </SelectContent>
               </Select>

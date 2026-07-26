@@ -263,6 +263,8 @@ export const events = {
 
 // ── Spray ──
 export const spray = {
+  validate: (eventId: string, amount: number, denomination: 200 | 500 | 1000, pin: string) =>
+    invoke("spray", { body: { event_id: eventId, amount, denomination, pin, validate_only: true } }),
   send: (eventId: string, amount: number, denomination: 200 | 500 | 1000, pin: string) =>
     invoke("spray", { body: { event_id: eventId, amount, denomination, pin } }),
 };
@@ -392,7 +394,7 @@ export const admin = {
     getSettings: () => supabase.rpc("get_fx_admin_settings"),
     setSettings: (payload: {
       enabled: boolean;
-      rateSource: "binance" | "paycrest";
+      rateSource: "binance" | "bybit" | "paycrest" | "manual";
       sellFlatNaira: number;
       sellPercent: number;
       buyFlatNaira: number;
@@ -427,5 +429,7 @@ export const admin = {
       });
     },
     refreshRate: () => invoke("fx-rates", { method: "POST" }),
+    setManualRate: (marketRateNaira: number) =>
+      supabase.rpc("set_fx_market_rate_manual", { p_market_rate_naira: marketRateNaira }),
   },
 };

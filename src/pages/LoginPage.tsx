@@ -57,6 +57,14 @@ export default function LoginPage() {
   }
 
   if (isAuthenticated) {
+    const join = searchParams.get("join");
+    const redeem = searchParams.get("redeem");
+    if (join) {
+      return <Navigate to={`/events?join=${encodeURIComponent(join.toUpperCase())}`} replace />;
+    }
+    if (redeem) {
+      return <Navigate to={`/gifts?redeem=${encodeURIComponent(redeem.toUpperCase())}`} replace />;
+    }
     return <Navigate to="/home" replace />;
   }
 
