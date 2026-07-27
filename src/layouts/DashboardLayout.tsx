@@ -24,6 +24,7 @@ import { RedeemGiveawaySheet } from "@/components/RedeemGiveawaySheet";
 import { NotificationsScreen } from "@/components/NotificationsScreen";
 import { useAuth } from "@/hooks/useAuth";
 import { spray as sprayApi, isSupabaseConfigured } from "@/lib/supabase";
+import type { SprayTheatrePlan } from "@/lib/sprayTheatrePlan";
 import { useMultiWallet } from "@/hooks/useMultiWallet";
 import { useKYC } from "@/hooks/useKYC";
 import { useEvents, EventData } from "@/hooks/useEvents";
@@ -51,6 +52,18 @@ export function DashboardLayout() {
   const [sprayAmount, setSprayAmount] = useState(0);
   const [sprayDenomination, setSprayDenomination] = useState(0);
   const [sprayPin, setSprayPin] = useState("");
+  const [sprayTheatrePlan, setSprayTheatrePlan] = useState<SprayTheatrePlan | null>(null);
+  const [sprayHoldId, setSprayHoldId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isSprayActive) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isSprayActive]);
 
   useEffect(() => {
     if (!pinLoading && hasPin === false) {
@@ -203,38 +216,47 @@ export function DashboardLayout() {
 
   const handleStartSpray = async (amount: number, denomination: number, pin: string) => {
     if (!selectedEvent) throw new Error("No event selected");
+    let theatrePlan: SprayTheatrePlan | null = null;
+    let holdId: string | null = null;
     try {
-      await sprayApi.validate(
+      const result = await sprayApi.validate(
         selectedEvent.id,
         amount,
         denomination as 200 | 500 | 1000,
         pin,
       );
+      theatrePlan = result.theatre_plan;
+      holdId = result.hold_id;
     } catch (err) {
       handleSprayError(err);
     }
     setSprayAmount(amount);
     setSprayDenomination(denomination);
     setSprayPin(pin);
+    setSprayTheatrePlan(theatrePlan);
+    setSprayHoldId(holdId);
     setShowSpraySetup(false);
     setIsSprayActive(true);
   };
 
-  const recordSpray = async (sprayedAmount: number) => {
-    if (!selectedEvent || sprayedAmount <= 0) return;
-    await sprayApi.send(
-      selectedEvent.id,
-      sprayedAmount,
-      sprayDenomination as 200 | 500 | 1000,
-      sprayPin,
+  const settleSpray = async (
+    settlement: "partial" | "full" | "cancelled",
+    sprayedAmount?: number,
+  ) => {
+    if (!sprayHoldId) throw new Error("No active spray hold");
+    const result = await sprayApi.settle(
+      sprayHoldId,
+      settlement,
+      settlement === "partial" ? sprayedAmount : undefined,
     );
     await refreshBalances();
+    return result;
   };
 
-  const handleSprayComplete = async (sprayedAmount: number) => {
+  const handleSprayComplete = async (_sprayedAmount: number) => {
     try {
-      await recordSpray(sprayedAmount);
-      toast.success(`Successfully sprayed ₦${sprayedAmount.toLocaleString()}! 🎉`);
+      const result = await settleSpray("full");
+      toast.success(`Successfully sprayed ₦${result.charged_amount.toLocaleString()}! 🎉`);
     } catch (err) {
       handleSprayError(err);
       throw err;
@@ -242,16 +264,38 @@ export function DashboardLayout() {
       setIsSprayActive(false);
       setSelectedEvent(null);
       setSprayPin("");
+      setSprayTheatrePlan(null);
+      setSprayHoldId(null);
+    }
+  };
+
+  const handleSprayAutoStop = async () => {
+    try {
+      const result = await settleSpray("full");
+      toast.success(`Time's up! Full spray sent — ₦${result.charged_amount.toLocaleString()} 🎉`);
+    } catch (err) {
+      handleSprayError(err);
+      throw err;
+    } finally {
+      setIsSprayActive(false);
+      setSelectedEvent(null);
+      setSprayPin("");
+      setSprayTheatrePlan(null);
+      setSprayHoldId(null);
     }
   };
 
   const handleSprayCancel = async (sprayedAmount: number) => {
     try {
-      if (sprayedAmount > 0) {
-        await recordSpray(sprayedAmount);
-        toast.info(`Spray stopped. ₦${sprayedAmount.toLocaleString()} was sprayed.`);
+      if (sprayedAmount >= sprayAmount) {
+        const result = await settleSpray("full");
+        toast.success(`Successfully sprayed ₦${result.charged_amount.toLocaleString()}! 🎉`);
+      } else if (sprayedAmount > 0) {
+        const result = await settleSpray("partial", sprayedAmount);
+        toast.info(`Spray stopped. ₦${result.charged_amount.toLocaleString()} was sprayed.`);
       } else {
-        toast.info("Spray cancelled");
+        await settleSpray("cancelled");
+        toast.info("Spray cancelled — hold released");
       }
     } catch (err) {
       handleSprayError(err);
@@ -260,6 +304,8 @@ export function DashboardLayout() {
       setIsSprayActive(false);
       setSelectedEvent(null);
       setSprayPin("");
+      setSprayTheatrePlan(null);
+      setSprayHoldId(null);
     }
   };
 
@@ -470,8 +516,11 @@ export function DashboardLayout() {
               isActive={isSprayActive}
               amount={sprayAmount}
               denomination={sprayDenomination}
+              noteIntervalSec={sprayTheatrePlan?.note_interval_sec ?? 1}
+              sessionDurationSec={sprayTheatrePlan?.session_duration_sec ?? sprayAmount}
               avatarData={avatarData}
               onComplete={handleSprayComplete}
+              onAutoStop={handleSprayAutoStop}
               onCancel={handleSprayCancel}
               eventName={selectedEvent?.title || "Event"}
             />

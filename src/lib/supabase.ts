@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import type { SprayTheatrePlan, QueueCompressionTier } from "@/lib/sprayTheatrePlan";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? "").trim();
@@ -262,11 +263,42 @@ export const events = {
 };
 
 // ── Spray ──
+export type SpraySettlement = "partial" | "full" | "cancelled";
+
+export interface SprayValidateResult {
+  ok: true;
+  validated: true;
+  hold_id: string;
+  theatre_plan: SprayTheatrePlan;
+}
+
+export interface SpraySettleResult {
+  ok: true;
+  settlement: SpraySettlement;
+  transfer_id: string | null;
+  charged_amount: number;
+  theatre_plan: SprayTheatrePlan | Record<string, unknown> | null;
+}
+
 export const spray = {
   validate: (eventId: string, amount: number, denomination: 200 | 500 | 1000, pin: string) =>
-    invoke("spray", { body: { event_id: eventId, amount, denomination, pin, validate_only: true } }),
-  send: (eventId: string, amount: number, denomination: 200 | 500 | 1000, pin: string) =>
-    invoke("spray", { body: { event_id: eventId, amount, denomination, pin } }),
+    invoke<SprayValidateResult>("spray", {
+      body: { event_id: eventId, amount, denomination, pin, validate_only: true },
+    }),
+  settle: (
+    holdId: string,
+    settlement: SpraySettlement,
+    sprayedAmount?: number,
+  ) =>
+    invoke<SpraySettleResult>("spray", {
+      body: {
+        hold_id: holdId,
+        settlement,
+        ...(settlement === "partial" && sprayedAmount != null
+          ? { sprayed_amount: sprayedAmount }
+          : {}),
+      },
+    }),
 };
 
 // ── Giveaways ──
@@ -431,5 +463,28 @@ export const admin = {
     refreshRate: () => invoke("fx-rates", { method: "POST" }),
     setManualRate: (marketRateNaira: number) =>
       supabase.rpc("set_fx_market_rate_manual", { p_market_rate_naira: marketRateNaira }),
+  },
+  sprayTheatre: {
+    getSettings: () => supabase.rpc("get_spray_theatre_admin_settings"),
+    setSettings: (payload: {
+      stageMinPer100kDenom200: number;
+      stageMinPer100kDenom500: number;
+      stageMinPer100kDenom1000: number;
+      stageMinPer100Usdc: number;
+      maxSingleSprayNgn: number;
+      guestSessionCapSec: number;
+      maxStageSec: number;
+      queueCompressionTiers: QueueCompressionTier[];
+    }) =>
+      supabase.rpc("set_spray_theatre_settings", {
+        p_stage_min_per_100k_denom_200: payload.stageMinPer100kDenom200,
+        p_stage_min_per_100k_denom_500: payload.stageMinPer100kDenom500,
+        p_stage_min_per_100k_denom_1000: payload.stageMinPer100kDenom1000,
+        p_stage_min_per_100_usdc: payload.stageMinPer100Usdc,
+        p_max_single_spray_ngn_kobo: Math.round(payload.maxSingleSprayNgn * 100),
+        p_guest_session_cap_sec: payload.guestSessionCapSec,
+        p_max_stage_sec: payload.maxStageSec,
+        p_queue_compression_tiers: payload.queueCompressionTiers,
+      }),
   },
 };

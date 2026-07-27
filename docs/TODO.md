@@ -12,7 +12,7 @@ Items deferred for a later pass. Not scheduled.
 
 ### Options (pick one or combine)
 
-- [ ] **Hold upfront** — When spray starts, reserve the full planned amount in the wallet. On Stop, charge the partial sprayed amount and release the remainder. On full complete, capture full hold. On bail (close with no settle), define policy: release hold vs auto-charge partial.
+- [x] **Hold upfront** — Full planned amount locked at spray start (`spray_holds` + `create_spray_hold`). Stop early = partial charge + release remainder. Auto-stop / complete = full charge. Bail (close app) = hold expires via `release_expired_spray_holds` (wire to cron).
 - [ ] **Auto-settle on leave** — On `beforeunload` / page hide / app background: if `sprayedAmount > 0`, call spray API for that amount before teardown. Pair with UX warning (“Leaving will record ₦X”).
 - [ ] **Live projector preview (future)** — If we ever show sprayers on the projector *while* the animation runs, must pair with hold-upfront or auto-settle. Never show on screen without a server-confirmed payment.
 
@@ -62,3 +62,16 @@ Items deferred for a later pass. Not scheduled.
 - `src/components/SprayAvatarCharacter.tsx`, `src/components/AvatarCustomization.tsx`
 - `src/hooks/useAvatar.ts`, `src/lib/avatarStorage.ts`
 - `src/components/EventScreenSprayStage.tsx`, `src/components/SprayAnimation.tsx`
+
+---
+
+## Spray theatre algorithm (timing, queue, USDC)
+
+**Design doc:** [`docs/SPRAY_THEATRE_ALGORITHM.md`](./SPRAY_THEATRE_ALGORITHM.md) — **product locked**
+
+Locked: auto-stop charges **full** planned amount; host gets **USDC as USDC**; default max spray **₦1M**; stage time = admin **minutes per ₦100k (per denom) / per 100 USDC** × amount multiple; queue tiers at **10 / 50 / 100** waiting (configurable % reduction).
+
+- [x] Implement shared `SprayTheatrePlan` + admin settings + hold upfront
+- [x] Adaptive guest animation + auto-stop full capture
+- [ ] Dynamic stage duration + live queue compression
+- [ ] USDC spray path (host credited USDC)
