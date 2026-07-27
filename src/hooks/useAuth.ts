@@ -26,6 +26,8 @@ export interface UserProfile {
   email: string | null;
   username: string | null;
   full_name: string | null;
+  avatar_url: string | null;
+  avatar_data: Record<string, unknown> | null;
   kyc_level: number;
   status: string;
 }
@@ -50,7 +52,7 @@ export const useAuth = () => {
   const fetchProfile = useCallback(async (authUserId: string) => {
     const { data, error } = await supabase
       .from("users")
-      .select("id, phone, email, username, full_name, kyc_level, status")
+      .select("id, phone, email, username, full_name, avatar_url, avatar_data, kyc_level, status")
       .eq("auth_id", authUserId)
       .maybeSingle();
     if (error) {

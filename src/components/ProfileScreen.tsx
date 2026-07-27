@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { AvatarData } from "@/components/AvatarCustomization";
+import type { AvatarData } from "@/types/avatar";
+import { backgrounds } from "@/lib/avatarConfig";
 import { formatUsername, normalizeUsernameInput, USERNAME_RE, usernameRpcError } from "@/lib/username";
 
 interface ProfileScreenProps {
@@ -115,16 +116,7 @@ export const ProfileScreen = ({
     }
   };
 
-  const backgrounds = {
-    "gold-gradient": "from-amber-500 via-yellow-400 to-amber-600",
-    "purple-gradient": "from-purple-600 via-violet-500 to-purple-700",
-    "green-gradient": "from-green-600 via-emerald-500 to-green-700",
-    "cyan-gradient": "from-cyan-500 via-blue-400 to-cyan-600",
-    "red-gradient": "from-red-500 via-orange-400 to-red-600",
-    "dark-gradient": "from-slate-800 via-slate-700 to-slate-900",
-  };
-
-  const bgGradient = backgrounds[avatarData.background as keyof typeof backgrounds] || backgrounds["gold-gradient"];
+  const bgGradient = backgrounds[avatarData.background] || backgrounds["gold-gradient"];
 
   const menuSections = [
     {

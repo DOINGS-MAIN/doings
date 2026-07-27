@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   Plus,
@@ -11,9 +12,12 @@ import {
   Settings,
   TrendingUp,
   Loader2,
+  Tv,
 } from "lucide-react";
 import { EventData } from "@/hooks/useEvents";
 import { toast } from "sonner";
+import { shareEventLink } from "@/lib/shareLinks";
+import { getEventScreenPath } from "@/lib/eventScreenLink";
 
 interface MyEventsScreenProps {
   events: EventData[];
@@ -40,18 +44,16 @@ export const MyEventsScreen = ({
   onEndEvent,
   onManageEvent,
 }: MyEventsScreenProps) => {
-  const handleShare = (event: EventData) => {
-    const shareText = `Join my event "${event.title}" on Doings! 🎉\nEvent Code: ${event.eventCode}`;
-    
-    if (navigator.share) {
-      navigator.share({
-        title: event.title,
-        text: shareText,
-        url: window.location.href,
-      });
-    } else {
-      navigator.clipboard.writeText(shareText);
-      toast.success("Event details copied to clipboard!");
+  const navigate = useNavigate();
+
+  const handleShare = async (event: EventData) => {
+    try {
+      const result = await shareEventLink(event);
+      toast.success(result === "shared" ? "Event shared!" : "Event link copied!");
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        toast.error("Could not share event");
+      }
     }
   };
 
@@ -118,7 +120,7 @@ export const MyEventsScreen = ({
           </div>
           <div className="glass rounded-xl p-3 text-center">
             <p className="text-2xl font-bold text-primary">
-              ₦{(events.reduce((acc, e) => acc + e.totalSprayed, 0) / 1000).toFixed(0)}K
+              ₦{events.reduce((acc, e) => acc + e.totalSprayed, 0).toLocaleString()}
             </p>
             <p className="text-xs text-muted-foreground">Total Sprayed</p>
           </div>
@@ -200,7 +202,7 @@ export const MyEventsScreen = ({
                 <div className="bg-white/5 rounded-lg p-2 text-center">
                   <p className="text-sm font-bold text-primary flex items-center justify-center gap-1">
                     <TrendingUp className="w-3 h-3" />
-                    ₦{(event.totalSprayed / 1000).toFixed(0)}K
+                    ₦{event.totalSprayed.toLocaleString()}
                   </p>
                   <p className="text-xs text-muted-foreground">Sprayed</p>
                 </div>
@@ -226,15 +228,26 @@ export const MyEventsScreen = ({
                     Go Live
                   </motion.button>
                 ) : event.status === 'live' ? (
-                  <motion.button
-                    onClick={() => onEndEvent(event.id)}
-                    className="flex-1 flex items-center justify-center gap-2 bg-red-500/20 text-red-400 py-2.5 rounded-xl font-semibold text-sm"
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                  >
-                    <Square className="w-4 h-4" />
-                    End Event
-                  </motion.button>
+                  <>
+                    <motion.button
+                      onClick={() => navigate(getEventScreenPath(event.id))}
+                      className="flex flex-1 items-center justify-center gap-2 bg-primary/20 text-primary py-2.5 rounded-xl font-semibold text-sm"
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      <Tv className="w-4 h-4" />
+                      Projector
+                    </motion.button>
+                    <motion.button
+                      onClick={() => onEndEvent(event.id)}
+                      className="flex flex-1 items-center justify-center gap-2 bg-red-500/20 text-red-400 py-2.5 rounded-xl font-semibold text-sm"
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                    >
+                      <Square className="w-4 h-4" />
+                      End Event
+                    </motion.button>
+                  </>
                 ) : null}
                 
                 <motion.button

@@ -30,7 +30,7 @@ export function useFxSettings() {
   const saveSettings = useCallback(
     async (payload: {
       enabled: boolean;
-      rateSource: "binance" | "paycrest";
+      rateSource: "binance" | "bybit" | "paycrest" | "manual";
       sellFlatNaira: number;
       sellPercent: number;
       buyFlatNaira: number;
@@ -63,6 +63,17 @@ export function useFxSettings() {
     }
   }, [refresh]);
 
+  const setManualMarketRate = useCallback(async (marketRateNaira: number) => {
+    setRefreshingRate(true);
+    try {
+      const { error } = await adminApi.fx.setManualRate(marketRateNaira);
+      if (error) throw error;
+      await refresh();
+    } finally {
+      setRefreshingRate(false);
+    }
+  }, [refresh]);
+
   const recordTopup = useCallback(
     async (currency: "NGN" | "USDC", amount: number, reference?: string, note?: string) => {
       setSaving(true);
@@ -86,6 +97,7 @@ export function useFxSettings() {
     refresh,
     saveSettings,
     refreshMarketRate,
+    setManualMarketRate,
     recordTopup,
   };
 }

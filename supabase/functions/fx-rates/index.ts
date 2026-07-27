@@ -34,7 +34,7 @@ Deno.serve(async (req) => {
 
     const { data, error } = await supabase.rpc("update_fx_market_rate", {
       p_market_rate_kobo: marketRateKobo,
-      p_source: "binance",
+      p_source: typeof raw.provider === "string" ? raw.provider : "binance",
       p_raw_payload: raw,
     });
 
@@ -44,6 +44,8 @@ Deno.serve(async (req) => {
       ok: true,
       market_rate_kobo: marketRateKobo,
       market_rate_naira: marketRateKobo / 100,
+      provider: raw.provider ?? null,
+      note: raw.note ?? null,
       ...(data as Record<string, unknown> ?? {}),
     });
   } catch (err) {

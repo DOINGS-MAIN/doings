@@ -80,7 +80,7 @@ export interface FxQuote {
 }
 
 export interface FxAdminSettings extends FxPublicSettings {
-  rate_source: "binance" | "paycrest";
+  rate_source: "binance" | "bybit" | "paycrest" | "manual";
   sell_flat_kobo: number;
   sell_flat_naira: number;
   sell_percent: number;
@@ -107,6 +107,7 @@ export const KYC_GATES = {
   WITHDRAW_NGN: 2 as KYCLevel,
   WITHDRAW_USDC: 2 as KYCLevel,
   CONVERT: 2 as KYCLevel,
+  SPRAY: 2 as KYCLevel,
 } as const;
 
 // ---- Wallet ----
@@ -173,7 +174,7 @@ export interface BankAccountInfo {
   createdAt: Date;
 }
 
-// ---- Provider Configs (mocked) ----
+// ---- Provider Configs ----
 export interface MonnifyReservedAccount {
   accountReference: string;
   accountName: string;

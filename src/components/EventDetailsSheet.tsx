@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   Calendar,
@@ -13,16 +12,17 @@ import {
   Trash2,
   TrendingUp,
   ChevronRight,
-  Tv,
   Settings,
   Loader2,
 } from "lucide-react";
+import { EventProjectorLink } from "@/components/EventProjectorLink";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { EventData } from "@/hooks/useEvents";
 import { toast } from "sonner";
+import { shareEventLink } from "@/lib/shareLinks";
 
 interface EventDetailsSheetProps {
   event: EventData | null;
@@ -60,7 +60,6 @@ export const EventDetailsSheet = ({
   onEndEvent,
   onDelete,
 }: EventDetailsSheetProps) => {
-  const navigate = useNavigate();
   const [isEditing, setIsEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [title, setTitle] = useState("");
@@ -101,18 +100,14 @@ export const EventDetailsSheet = ({
     toast.success("Event code copied!");
   };
 
-  const handleShare = () => {
-    const shareText = `Join my event "${event.title}" on Doings! 🎉\nEvent Code: ${event.eventCode}`;
-
-    if (navigator.share) {
-      navigator.share({
-        title: event.title,
-        text: shareText,
-        url: window.location.href,
-      });
-    } else {
-      navigator.clipboard.writeText(shareText);
-      toast.success("Event details copied!");
+  const handleShare = async () => {
+    try {
+      const result = await shareEventLink(event);
+      toast.success(result === "shared" ? "Event shared!" : "Event link copied!");
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") {
+        toast.error("Could not share event");
+      }
     }
   };
 
@@ -489,22 +484,7 @@ export const EventDetailsSheet = ({
 
           {event.status === "live" && (
             <div className="mb-2">
-              <button
-                type="button"
-                onClick={() => navigate(`/events/${event.id}/screen`)}
-                className="glass flex w-full items-center justify-between rounded-2xl p-4 text-left transition-colors hover:bg-white/10 active:bg-white/15"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-accent">
-                    <Tv className="h-6 w-6 text-primary-foreground" />
-                  </div>
-                  <div className="min-w-0 text-left">
-                    <p className="font-bold text-foreground">Event Screen</p>
-                    <p className="text-sm text-muted-foreground">Display on TV/Projector</p>
-                  </div>
-                </div>
-                <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground" />
-              </button>
+              <EventProjectorLink eventId={event.id} />
             </div>
           )}
 

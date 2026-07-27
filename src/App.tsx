@@ -16,6 +16,8 @@ import NotFound from "./pages/NotFound";
 import EventScreenPage from "./pages/EventScreenPage";
 import AuthCallbackPage from "./pages/AuthCallbackPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
+import JoinEventLinkPage from "./pages/JoinEventLinkPage";
+import RedeemGiveawayLinkPage from "./pages/RedeemGiveawayLinkPage";
 
 import { AdminAuthShell } from "./components/admin/AdminAuthShell";
 import { AdminLayout } from "./components/admin/AdminLayout";
@@ -29,6 +31,7 @@ import { AdminChangePassword } from "./pages/admin/AdminChangePassword";
 import { AdminSettings } from "./pages/admin/AdminSettings";
 import { AdminPaymentRails } from "./pages/admin/AdminPaymentRails";
 import { AdminFxSettings } from "./pages/admin/AdminFxSettings";
+import { AdminSprayTheatreSettings } from "./pages/admin/AdminSprayTheatreSettings";
 import { AdminPaymentsOverview } from "./pages/admin/AdminPaymentsOverview";
 import { AdminWebhooks } from "./pages/admin/AdminWebhooks";
 import { AdminTransactionDetail } from "./pages/admin/AdminTransactionDetail";
@@ -46,6 +49,8 @@ const App = () => (
         <Routes>
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/join/:eventCode" element={<JoinEventLinkPage />} />
+          <Route path="/redeem/:code" element={<RedeemGiveawayLinkPage />} />
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
 
@@ -75,6 +80,7 @@ const App = () => (
               <Route path="webhooks" element={<AdminWebhooks />} />
               <Route path="payment-rails" element={<AdminPaymentRails />} />
               <Route path="fx" element={<AdminFxSettings />} />
+              <Route path="spray-theatre" element={<AdminSprayTheatreSettings />} />
               <Route path="kyc" element={<AdminKYC />} />
               <Route path="events" element={<AdminEvents />} />
               <Route path="settings" element={<AdminSettings />} />

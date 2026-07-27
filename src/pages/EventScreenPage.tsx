@@ -5,7 +5,7 @@ import { EventScreenView } from "@/components/EventScreenView";
 import { useAuth } from "@/hooks/useAuth";
 import { mapDbEvent, type EventData } from "@/hooks/useEvents";
 import { useGiveaways } from "@/hooks/useGiveaways";
-import { events as eventsApi } from "@/lib/supabase";
+import { events as eventsApi, supabase } from "@/lib/supabase";
 import { toast } from "sonner";
 
 /**
@@ -17,7 +17,7 @@ export default function EventScreenPage() {
   const { profile } = useAuth();
   const { getMyGiveaways } = useGiveaways();
 
-  const [candidate, setCandidate] = useState<EventData | null>(null);
+  const [event, setEvent] = useState<EventData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,7 +38,7 @@ export default function EventScreenPage() {
         if (cancelled) return;
         if (!res.event?.id) {
           setError("Event not found");
-          setCandidate(null);
+          setEvent(null);
           return;
         }
         const mapped = mapDbEvent(res.event);
@@ -47,7 +47,7 @@ export default function EventScreenPage() {
           navigate("/events", { replace: true });
           return;
         }
-        setCandidate(mapped);
+        setEvent(mapped);
       } catch {
         if (!cancelled) setError("Could not load this event.");
       } finally {
@@ -60,6 +60,40 @@ export default function EventScreenPage() {
     };
   }, [eventId, navigate]);
 
+  useEffect(() => {
+    if (!eventId || !event || event.status !== "live") return;
+
+    const channel = supabase
+      .channel(`event-screen-${eventId}`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "events", filter: `id=eq.${eventId}` },
+        (payload) => {
+          const row = payload.new as Record<string, unknown>;
+          if ((row.status as string) !== "live") {
+            toast.info("This event has ended.");
+            navigate("/events", { replace: true });
+            return;
+          }
+          setEvent((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  participants: Number(row.participant_count ?? prev.participants),
+                  totalSprayed: Number(row.total_sprayed ?? 0) / 100,
+                  status: row.status as EventData["status"],
+                }
+              : prev,
+          );
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [eventId, event, navigate]);
+
   const giveaways = getMyGiveaways();
 
   if (loading) {
@@ -71,7 +105,7 @@ export default function EventScreenPage() {
     );
   }
 
-  if (error || !candidate) {
+  if (error || !event) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-background px-6 text-center">
         <p className="text-lg font-semibold text-foreground">{error ?? "Event not found"}</p>
@@ -95,7 +129,7 @@ export default function EventScreenPage() {
     );
   }
 
-  if (candidate.hostId !== profile.id) {
+  if (event.hostId !== profile.id) {
     return (
       <div className="flex min-h-dvh flex-col items-center justify-center gap-4 bg-background px-6 text-center">
         <p className="text-lg font-semibold text-foreground">Only the event host can open this screen.</p>
@@ -110,7 +144,5 @@ export default function EventScreenPage() {
     );
   }
 
-  return (
-    <EventScreenView event={candidate} giveaways={giveaways} onBack={() => navigate("/events")} />
-  );
+  return <EventScreenView event={event} giveaways={giveaways} onBack={() => navigate("/events")} />;
 }

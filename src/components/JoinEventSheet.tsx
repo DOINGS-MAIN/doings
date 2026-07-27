@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Search, Hash, ChevronRight, MapPin, Users, Zap } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -12,6 +12,7 @@ interface JoinEventSheetProps {
   onJoinEvent: (event: EventData) => void;
   findEventByCode: (code: string) => Promise<EventData | undefined>;
   liveEvents: EventData[];
+  initialCode?: string;
 }
 
 export const JoinEventSheet = ({ 
@@ -19,21 +20,22 @@ export const JoinEventSheet = ({
   onClose, 
   onJoinEvent, 
   findEventByCode,
-  liveEvents 
+  liveEvents,
+  initialCode,
 }: JoinEventSheetProps) => {
   const [eventCode, setEventCode] = useState("");
   const [searchedEvent, setSearchedEvent] = useState<EventData | null>(null);
   const [isSearching, setIsSearching] = useState(false);
 
-  const handleSearchByCode = async () => {
-    if (eventCode.length < 4) {
+  const searchByCode = async (code: string) => {
+    if (code.length < 4) {
       toast.error("Please enter a valid event code");
       return;
     }
 
     setIsSearching(true);
     try {
-      const event = await findEventByCode(eventCode);
+      const event = await findEventByCode(code);
       if (event) {
         setSearchedEvent(event);
         if (event.status !== "live") {
@@ -47,6 +49,16 @@ export const JoinEventSheet = ({
       setIsSearching(false);
     }
   };
+
+  useEffect(() => {
+    if (!isOpen || !initialCode) return;
+    const code = initialCode.toUpperCase();
+    setEventCode(code);
+    void searchByCode(code);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only prefill when opened via deep link
+  }, [isOpen, initialCode]);
+
+  const handleSearchByCode = () => void searchByCode(eventCode);
 
   const handleJoin = (event: EventData) => {
     if (event.status !== 'live') {

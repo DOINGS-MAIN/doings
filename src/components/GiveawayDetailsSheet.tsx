@@ -3,6 +3,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Button } from "@/components/ui/button";
 import { Gift, Users, Copy, Share2, StopCircle, Clock, CheckCircle, XCircle, QrCode } from "lucide-react";
 import { Giveaway } from "@/hooks/useGiveaways";
+import { buildGiveawayRedeemLink } from "@/lib/shareLinks";
 import QRCode from "react-qr-code";
 import { toast } from "sonner";
 import { useState } from "react";
@@ -29,7 +30,7 @@ export const GiveawayDetailsSheet = ({
 
   if (!giveaway) return null;
 
-  const redeemLink = `https://doings.app/redeem/${giveaway.code}`;
+  const redeemLink = buildGiveawayRedeemLink(giveaway.code);
   const percentUsed =
     giveaway.totalAmount > 0
       ? ((giveaway.totalAmount - giveaway.remainingAmount) / giveaway.totalAmount) * 100

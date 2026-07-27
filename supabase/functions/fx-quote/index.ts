@@ -8,7 +8,10 @@ type QuoteBody = {
   usdc_amount: number;
 };
 
-async function ensureFreshMarketRate(supabase: ReturnType<typeof getServiceClient>): Promise<void> {
+async function ensureFreshMarketRate(supabase: ReturnType<typeof getServiceClient>): Promise<{
+  refreshed: boolean;
+  error?: string;
+}> {
   const { data: settings } = await supabase
     .from("platform_settings")
     .select("fx_market_rate_kobo, fx_market_rate_updated_at, fx_rate_source")
@@ -19,19 +22,25 @@ async function ensureFreshMarketRate(supabase: ReturnType<typeof getServiceClien
     ? new Date(settings.fx_market_rate_updated_at).getTime()
     : 0;
   const staleMs = 5 * 60 * 1000;
-  const isStale = !settings?.fx_market_rate_kobo || Date.now() - updatedAt > staleMs;
+  const missing = !settings?.fx_market_rate_kobo;
+  const isStale = missing || Date.now() - updatedAt > staleMs;
 
-  if (!isStale || settings?.fx_rate_source !== "binance") return;
+  // Auto-refresh for binance (multi-source fetcher) when missing/stale.
+  // Manual rates are left alone unless missing.
+  const source = settings?.fx_rate_source ?? "binance";
+  if (!isStale) return { refreshed: false };
+  if (source === "manual" && !missing) return { refreshed: false };
 
   try {
     const { marketRateKobo, raw } = await fetchBinanceUsdcNgnRateKobo();
     await supabase.rpc("update_fx_market_rate", {
       p_market_rate_kobo: marketRateKobo,
-      p_source: "binance",
+      p_source: typeof raw.provider === "string" ? raw.provider : "binance",
       p_raw_payload: raw,
     });
-  } catch {
-    // Use cached rate if refresh fails
+    return { refreshed: true };
+  } catch (err) {
+    return { refreshed: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -60,10 +69,10 @@ Deno.serve(async (req) => {
   }
 
   if (req.method === "GET") {
-    await ensureFreshMarketRate(supabase);
+    const refresh = await ensureFreshMarketRate(supabase);
     const { data, error } = await supabase.rpc("get_fx_public_settings");
     if (error) return withCors({ error: error.message }, { status: 500 });
-    return withCors({ ok: true, settings: data });
+    return withCors({ ok: true, settings: data, rate_refresh: refresh });
   }
 
   if (req.method !== "POST") return withCors({ error: "Method not allowed" }, { status: 405 });
@@ -79,7 +88,7 @@ Deno.serve(async (req) => {
   const usdcMicro = Math.round(body.usdc_amount * 1_000_000);
   if (usdcMicro <= 0) return withCors({ error: "usdc_amount must be positive" }, { status: 400 });
 
-  await ensureFreshMarketRate(supabase);
+  const refresh = await ensureFreshMarketRate(supabase);
 
   const { data: quote, error } = await supabase.rpc("create_fx_quote", {
     p_user_id: userId,
@@ -93,7 +102,12 @@ Deno.serve(async (req) => {
       return withCors({ error: msg, code: "QUOTE_REJECTED" }, { status: 400 });
     }
     if (msg.includes("unavailable")) {
-      return withCors({ error: msg, code: "RATE_UNAVAILABLE" }, { status: 503 });
+      return withCors({
+        error: refresh.error
+          ? `Market rate unavailable. ${refresh.error}`
+          : msg,
+        code: "RATE_UNAVAILABLE",
+      }, { status: 503 });
     }
     return withCors({ error: msg }, { status: 500 });
   }
