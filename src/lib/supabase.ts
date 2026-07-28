@@ -308,6 +308,11 @@ export const spray = {
           : {}),
       },
     }),
+  /** Legacy finish path — settles the pending hold for event_id + amount. */
+  send: (eventId: string, amount: number, denomination: 200 | 500 | 1000, pin: string) =>
+    invoke<SpraySettleResult>("spray", {
+      body: { event_id: eventId, amount, denomination, pin },
+    }),
 };
 
 // ── Giveaways ──
