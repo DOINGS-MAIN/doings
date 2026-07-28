@@ -105,6 +105,7 @@ export function DashboardLayout() {
   const {
     ngnBalance,
     ngnAvailableBalance,
+    ngnLockedBalance,
     usdcBalance,
     transactions,
     monnifyAccount,
@@ -117,10 +118,23 @@ export function DashboardLayout() {
     createMonnifyAccount,
     createBlockradarAddress,
     refreshBalances,
+    applySpraySettlement,
     balanceRefreshing,
     walletLoading,
     withdrawalFeeSettings,
   } = useMultiWallet();
+
+  const wasSprayActiveRef = useRef(false);
+  useEffect(() => {
+    if (wasSprayActiveRef.current && !isSprayActive) {
+      void refreshBalances();
+    }
+    wasSprayActiveRef.current = isSprayActive;
+  }, [isSprayActive, refreshBalances]);
+
+  useEffect(() => {
+    if (showSpraySetup) void refreshBalances();
+  }, [showSpraySetup, refreshBalances]);
 
   const { currentLevel: kycLevel, kycLoading, verifyLevel1, verifyLevel2 } = useKYC();
 
@@ -282,6 +296,7 @@ export function DashboardLayout() {
         sprayPin,
       );
       sprayHoldIdRef.current = null;
+      applySpraySettlement(result.charged_amount);
       await refreshBalances();
       return result;
     };
@@ -299,6 +314,10 @@ export function DashboardLayout() {
         settlement === "partial" ? sprayedAmount : undefined,
       );
       sprayHoldIdRef.current = null;
+      applySpraySettlement(
+        result.charged_amount,
+        settlement === "cancelled",
+      );
       await refreshBalances();
       return result;
     } catch (err) {
@@ -439,6 +458,8 @@ export function DashboardLayout() {
     kycLevel,
     kycLoading,
     ngnBalance,
+    ngnAvailableBalance,
+    ngnLockedBalance,
     usdcBalance,
     walletLoading,
     balanceRefreshing,

@@ -17,6 +17,8 @@ export interface SprayStageEntry {
 function promoteAndComplete(entries: SprayStageEntry[]): SprayStageEntry[] {
   const now = Date.now();
   let next = entries.map((entry) => {
+    if (entry.spray.isLive) return entry;
+
     if (
       entry.status === "active" &&
       entry.activatedAt &&
@@ -55,10 +57,37 @@ function promoteAndComplete(entries: SprayStageEntry[]): SprayStageEntry[] {
   return next;
 }
 
+function mergeLiveSprays(
+  prev: SprayStageEntry[],
+  liveActivities: EventSprayActivity[],
+): SprayStageEntry[] {
+  const liveIds = new Set(liveActivities.map((spray) => spray.id));
+  let next = prev.filter((entry) => !entry.id.startsWith("live-") || liveIds.has(entry.id));
+
+  for (const spray of liveActivities) {
+    const existingIdx = next.findIndex((entry) => entry.id === spray.id);
+    if (existingIdx >= 0) {
+      next[existingIdx] = { ...next[existingIdx], spray };
+      continue;
+    }
+    next.push({ id: spray.id, spray, status: "queued" });
+  }
+
+  const active = next.filter((entry) => entry.status === "active");
+  const queued = next.filter((entry) => entry.status === "queued");
+  const liveQueued = queued.filter((entry) => entry.id.startsWith("live-"));
+  const otherQueued = queued.filter((entry) => !entry.id.startsWith("live-"));
+  next = [...active, ...liveQueued, ...otherQueued];
+
+  return promoteAndComplete(next);
+}
+
 export function useSprayStage(
   eventId: string | undefined,
   activities: EventSprayActivity[],
   enabled = true,
+  feedReady = false,
+  liveActivities: EventSprayActivity[] = [],
 ) {
   const [entries, setEntries] = useState<SprayStageEntry[]>([]);
   const seenIdsRef = useRef<Set<string>>(new Set());
@@ -72,6 +101,11 @@ export function useSprayStage(
 
   useEffect(() => {
     if (!enabled) return;
+    setEntries((prev) => mergeLiveSprays(prev, liveActivities));
+  }, [liveActivities, enabled]);
+
+  useEffect(() => {
+    if (!enabled || !feedReady) return;
 
     if (!primedRef.current) {
       activities.forEach((activity) => seenIdsRef.current.add(activity.id));
@@ -88,17 +122,34 @@ export function useSprayStage(
     newSprays.forEach((activity) => seenIdsRef.current.add(activity.id));
 
     setEntries((prev) => {
-      const merged = [
-        ...prev,
-        ...newSprays.map((spray) => ({
+      let next = [...prev];
+
+      for (const spray of newSprays) {
+        const liveEntryIdx = spray.holdId
+          ? next.findIndex((entry) => entry.id === `live-${spray.holdId}`)
+          : -1;
+
+        if (liveEntryIdx >= 0) {
+          const liveEntry = next[liveEntryIdx];
+          next[liveEntryIdx] = {
+            ...liveEntry,
+            id: spray.id,
+            spray: { ...spray, isLive: false },
+            activatedAt: liveEntry.status === "active" ? Date.now() : liveEntry.activatedAt,
+          };
+          continue;
+        }
+
+        next.push({
           id: spray.id,
           spray,
-          status: "queued" as const,
-        })),
-      ];
-      return promoteAndComplete(merged);
+          status: "queued",
+        });
+      }
+
+      return promoteAndComplete(next);
     });
-  }, [activities, enabled]);
+  }, [activities, enabled, feedReady]);
 
   useEffect(() => {
     if (!enabled) return;

@@ -14,6 +14,7 @@ import { formatDistanceToNow } from "date-fns";
 import { EventData } from "@/hooks/useEvents";
 import { Giveaway } from "@/hooks/useGiveaways";
 import { useEventSprayFeed } from "@/hooks/useEventSprayFeed";
+import { useLiveSprayHolds } from "@/hooks/useLiveSprayHolds";
 import { useSprayStage } from "@/hooks/useSprayStage";
 import { buildEventJoinLink, buildGiveawayRedeemLink } from "@/lib/shareLinks";
 import { EventScreenSprayStage } from "@/components/EventScreenSprayStage";
@@ -31,14 +32,17 @@ export interface EventScreenViewProps {
 
 export const EventScreenView = ({ event, giveaways, onBack }: EventScreenViewProps) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const { activities, topGifters, loading, error } = useEventSprayFeed(
+  const { activities, topGifters, loading, feedReady, error } = useEventSprayFeed(
     event.id,
     event.status === "live",
   );
+  const { liveSprays } = useLiveSprayHolds(event.id, event.status === "live");
   const { slots, queuedSprays, waitingCount } = useSprayStage(
     event.id,
     activities,
     event.status === "live",
+    feedReady,
+    liveSprays,
   );
 
   const activeGiveaways = giveaways.filter(
@@ -48,6 +52,7 @@ export const EventScreenView = ({ event, giveaways, onBack }: EventScreenViewPro
 
   const isProjectorIdle =
     !loading &&
+    liveSprays.length === 0 &&
     slots.every((slot) => slot == null) &&
     queuedSprays.length === 0;
 

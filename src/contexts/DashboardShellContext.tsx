@@ -41,6 +41,8 @@ export interface DashboardShellValue {
   kycLevel: number;
   kycLoading: boolean;
   ngnBalance: number;
+  ngnAvailableBalance: number;
+  ngnLockedBalance: number;
   usdcBalance: number;
   walletLoading: boolean;
   balanceRefreshing: boolean;
