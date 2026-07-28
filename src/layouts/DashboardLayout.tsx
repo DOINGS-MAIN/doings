@@ -54,6 +54,7 @@ export function DashboardLayout() {
   const [sprayPin, setSprayPin] = useState("");
   const [sprayTheatrePlan, setSprayTheatrePlan] = useState<SprayTheatrePlan | null>(null);
   const [sprayHoldId, setSprayHoldId] = useState<string | null>(null);
+  const sprayHoldIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isSprayActive) return;
@@ -103,6 +104,7 @@ export function DashboardLayout() {
 
   const {
     ngnBalance,
+    ngnAvailableBalance,
     usdcBalance,
     transactions,
     monnifyAccount,
@@ -250,6 +252,11 @@ export function DashboardLayout() {
     } catch (err) {
       handleSprayError(err);
     }
+    if (!holdId) {
+      toast.error("Could not reserve spray funds. Try again.");
+      return;
+    }
+    sprayHoldIdRef.current = holdId;
     setSprayAmount(amount);
     setSprayDenomination(denomination);
     setSprayPin(pin);
@@ -263,14 +270,42 @@ export function DashboardLayout() {
     settlement: "partial" | "full" | "cancelled",
     sprayedAmount?: number,
   ) => {
-    if (!sprayHoldId) throw new Error("No active spray hold");
-    const result = await sprayApi.settle(
-      sprayHoldId,
-      settlement,
-      settlement === "partial" ? sprayedAmount : undefined,
-    );
-    await refreshBalances();
-    return result;
+    const holdId = sprayHoldIdRef.current ?? sprayHoldId;
+    const finishWithLegacySend = async (amountMajor: number) => {
+      if (!selectedEvent || !sprayPin || amountMajor <= 0) {
+        throw new Error("No active spray hold");
+      }
+      const result = await sprayApi.send(
+        selectedEvent.id,
+        amountMajor,
+        sprayDenomination as 200 | 500 | 1000,
+        sprayPin,
+      );
+      sprayHoldIdRef.current = null;
+      await refreshBalances();
+      return result;
+    };
+
+    if (!holdId) {
+      if (settlement === "cancelled") throw new Error("No active spray hold");
+      const amountMajor = settlement === "full" ? sprayAmount : (sprayedAmount ?? 0);
+      return finishWithLegacySend(amountMajor);
+    }
+
+    try {
+      const result = await sprayApi.settle(
+        holdId,
+        settlement,
+        settlement === "partial" ? sprayedAmount : undefined,
+      );
+      sprayHoldIdRef.current = null;
+      await refreshBalances();
+      return result;
+    } catch (err) {
+      if (settlement === "cancelled") throw err;
+      const amountMajor = settlement === "full" ? sprayAmount : (sprayedAmount ?? 0);
+      return finishWithLegacySend(amountMajor);
+    }
   };
 
   const handleSprayComplete = async (_sprayedAmount: number) => {
@@ -286,6 +321,7 @@ export function DashboardLayout() {
       setSprayPin("");
       setSprayTheatrePlan(null);
       setSprayHoldId(null);
+      sprayHoldIdRef.current = null;
     }
   };
 
@@ -302,6 +338,7 @@ export function DashboardLayout() {
       setSprayPin("");
       setSprayTheatrePlan(null);
       setSprayHoldId(null);
+      sprayHoldIdRef.current = null;
     }
   };
 
@@ -326,6 +363,7 @@ export function DashboardLayout() {
       setSprayPin("");
       setSprayTheatrePlan(null);
       setSprayHoldId(null);
+      sprayHoldIdRef.current = null;
     }
   };
 
@@ -521,7 +559,7 @@ export function DashboardLayout() {
             setSelectedEvent(null);
           }}
           onStartSpray={handleStartSpray}
-          balance={ngnBalance}
+          balance={ngnAvailableBalance}
           eventName={selectedEvent?.title || ""}
           kycLevel={kycLevel}
           hasPin={hasPin}

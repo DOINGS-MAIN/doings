@@ -19,6 +19,7 @@ const toSmallest = (display: number, currency: Currency) =>
 
 export const useMultiWallet = () => {
   const [ngnBalance, setNgnBalance] = useState(0);
+  const [ngnLockedBalance, setNgnLockedBalance] = useState(0);
   const [usdcBalance, setUsdcBalance] = useState(0);
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
   const [ngnReservedAccount, setNgnReservedAccount] = useState<NgnReservedAccount | undefined>();
@@ -40,10 +41,14 @@ export const useMultiWallet = () => {
       .eq("user_id", appUserId);
 
     setNgnBalance(0);
+    setNgnLockedBalance(0);
     setUsdcBalance(0);
     if (wallets) {
       for (const w of wallets) {
-        if (w.currency === "NGN") setNgnBalance(toDisplay(w.balance, "NGN"));
+        if (w.currency === "NGN") {
+          setNgnBalance(toDisplay(w.balance, "NGN"));
+          setNgnLockedBalance(toDisplay(w.locked_balance ?? 0, "NGN"));
+        }
         if (w.currency === "USDC") setUsdcBalance(toDisplay(w.balance, "USDC"));
       }
     }
@@ -320,6 +325,8 @@ export const useMultiWallet = () => {
 
   return {
     ngnBalance,
+    ngnLockedBalance,
+    ngnAvailableBalance: Math.max(0, ngnBalance - ngnLockedBalance),
     usdcBalance,
     transactions,
     ngnReservedAccount,
@@ -331,7 +338,8 @@ export const useMultiWallet = () => {
     refreshing,
     balanceRefreshing: refreshing,
     getBalance: (c: Currency) => (c === "NGN" ? ngnBalance : usdcBalance),
-    getAvailableBalance: (c: Currency) => (c === "NGN" ? ngnBalance : usdcBalance),
+    getAvailableBalance: (c: Currency) =>
+      c === "NGN" ? Math.max(0, ngnBalance - ngnLockedBalance) : usdcBalance,
     createNgnAccount,
     createMonnifyAccount,
     createBlockradarAddress,

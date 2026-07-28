@@ -99,6 +99,41 @@ function mapSettleError(msg: string) {
   return withCors({ error: "Spray settlement failed", detail: msg }, { status: 500 });
 }
 
+async function settleHoldAndRespond(
+  supabase: ReturnType<typeof getServiceClient>,
+  sprayerId: string,
+  holdId: string,
+  settlement: SpraySettlement,
+  sprayedKobo: number,
+) {
+  const { data: transferId, error: settleErr } = await supabase.rpc("settle_spray_hold", {
+    p_hold_id: holdId,
+    p_sprayer_id: sprayerId,
+    p_settlement: settlement,
+    p_sprayed_amount_kobo: sprayedKobo,
+  });
+
+  if (settleErr) throw settleErr;
+
+  const { data: holdRow } = await supabase
+    .from("spray_holds")
+    .select("planned_amount_kobo, charged_amount_kobo, metadata")
+    .eq("id", holdId)
+    .single();
+
+  const chargedKobo = settlement === "cancelled"
+    ? 0
+    : Number(holdRow?.charged_amount_kobo ?? holdRow?.planned_amount_kobo ?? 0);
+
+  return withCors({
+    ok: true,
+    settlement,
+    transfer_id: transferId ?? null,
+    charged_amount: chargedKobo / 100,
+    theatre_plan: holdRow?.metadata ?? null,
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return withCors({ error: "Method not allowed" }, { status: 405 });
@@ -136,32 +171,67 @@ Deno.serve(async (req) => {
     }
 
     try {
-      const { data: transferId, error: settleErr } = await supabase.rpc("settle_spray_hold", {
-        p_hold_id: body.hold_id,
-        p_sprayer_id: sprayer.id,
-        p_settlement: body.settlement,
-        p_sprayed_amount_kobo: sprayedKobo,
-      });
+      return await settleHoldAndRespond(
+        supabase,
+        sprayer.id,
+        body.hold_id,
+        body.settlement,
+        sprayedKobo,
+      );
+    } catch (error) {
+      return mapSettleError(String(error));
+    }
+  }
 
-      if (settleErr) throw settleErr;
+  // Legacy finish: older clients call send(event_id, amount, denomination, pin) after validate.
+  if (
+    body.event_id &&
+    body.amount &&
+    body.denomination &&
+    body.pin &&
+    !body.validate_only &&
+    !body.hold_id &&
+    !body.settlement
+  ) {
+    const pinCheck = await requireTransactionPin(supabase, sprayer.id, body.pin);
+    if (pinCheck) return pinCheck;
 
-      const { data: holdRow } = await supabase
-        .from("spray_holds")
-        .select("planned_amount_kobo, charged_amount_kobo, metadata")
-        .eq("id", body.hold_id)
-        .single();
+    const legacyParsed = parseSprayBody(body);
+    if ("error" in legacyParsed && legacyParsed.error) return legacyParsed.error;
+    const { amountKobo: legacyAmountKobo } = legacyParsed;
 
-      const chargedKobo = body.settlement === "cancelled"
-        ? 0
-        : Number(holdRow?.charged_amount_kobo ?? holdRow?.planned_amount_kobo ?? 0);
+    const rl = await checkRateLimit(RATE_LIMITS.spray(sprayer.id));
+    if (!rl.allowed) {
+      return withCors({ error: "Too many spray attempts. Try again shortly." }, { status: 429 });
+    }
 
-      return withCors({
-        ok: true,
-        settlement: body.settlement,
-        transfer_id: transferId ?? null,
-        charged_amount: chargedKobo / 100,
-        theatre_plan: holdRow?.metadata ?? null,
-      });
+    const { data: hold } = await supabase
+      .from("spray_holds")
+      .select("id, planned_amount_kobo, metadata")
+      .eq("sprayer_id", sprayer.id)
+      .eq("event_id", body.event_id)
+      .eq("denomination", body.denomination)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!hold) {
+      return withCors({ error: "No active spray session found. Start spray again." }, { status: 400 });
+    }
+
+    const plannedKobo = Number(hold.planned_amount_kobo);
+    const settlement: SpraySettlement = legacyAmountKobo >= plannedKobo ? "full" : "partial";
+    const sprayedKobo = settlement === "partial" ? legacyAmountKobo : 0;
+
+    try {
+      return await settleHoldAndRespond(
+        supabase,
+        sprayer.id,
+        hold.id,
+        settlement,
+        sprayedKobo,
+      );
     } catch (error) {
       return mapSettleError(String(error));
     }
@@ -220,6 +290,8 @@ Deno.serve(async (req) => {
     const holdExpiresSec = theatrePlan.session_duration_sec + 600;
 
     try {
+      await supabase.rpc("release_expired_spray_holds");
+
       const { data: holdId, error: holdErr } = await supabase.rpc("create_spray_hold", {
         p_event_id: body.event_id,
         p_sprayer_id: sprayer.id,
