@@ -6,6 +6,7 @@ import { avatarDataFromProfile } from "@/types/avatar";
 
 export type EventSprayActivity = {
   id: string;
+  holdId?: string;
   name: string;
   username: string | null;
   avatarUrl: string | null;
@@ -14,6 +15,8 @@ export type EventSprayActivity = {
   amount: number;
   denomination: number;
   timestamp: Date;
+  /** Guest is actively spraying — projector preview before settlement. */
+  isLive?: boolean;
 };
 
 export type EventTopGifter = {
@@ -38,6 +41,7 @@ function mapFeedRow(row: Record<string, unknown>): EventSprayActivity {
   const avatarData = avatarDataFromProfile(row.sprayer_avatar_data, avatarUrl);
   return {
     id: String(row.id),
+    holdId: row.hold_id ? String(row.hold_id) : undefined,
     name,
     username: (row.sprayer_username as string | null) ?? null,
     avatarUrl,
@@ -68,6 +72,7 @@ export function useEventSprayFeed(eventId: string | undefined, enabled = true) {
   const [activities, setActivities] = useState<EventSprayActivity[]>([]);
   const [topGifters, setTopGifters] = useState<EventTopGifter[]>([]);
   const [loading, setLoading] = useState(false);
+  const [feedReady, setFeedReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -85,12 +90,17 @@ export function useEventSprayFeed(eventId: string | undefined, enabled = true) {
 
       setActivities(((feedRes.data as Record<string, unknown>[]) ?? []).map(mapFeedRow));
       setTopGifters(((topRes.data as Record<string, unknown>[]) ?? []).map(mapTopGifterRow));
+      setFeedReady(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load spray activity");
     } finally {
       setLoading(false);
     }
   }, [eventId, enabled]);
+
+  useEffect(() => {
+    setFeedReady(false);
+  }, [eventId]);
 
   useEffect(() => {
     void refresh();
@@ -124,5 +134,5 @@ export function useEventSprayFeed(eventId: string | undefined, enabled = true) {
     };
   }, [eventId, enabled, refresh]);
 
-  return { activities, topGifters, loading, error, refresh };
+  return { activities, topGifters, loading, feedReady, error, refresh };
 }

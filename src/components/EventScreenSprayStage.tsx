@@ -61,8 +61,13 @@ function SprayStageSlot({ spray, slotIndex }: SprayStageSlotProps) {
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.92 }}
     >
-      <div className="absolute inset-x-0 top-0 z-10 bg-black/35 px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-widest text-white/70 md:text-xs">
-        Stage {slotIndex + 1}
+      <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-center gap-2 bg-black/35 px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-widest text-white/70 md:text-xs">
+        <span>Stage {slotIndex + 1}</span>
+        {spray.isLive && (
+          <span className="rounded-full bg-green-500/90 px-2 py-0.5 text-[9px] font-bold text-white md:text-[10px]">
+            Spraying now
+          </span>
+        )}
       </div>
 
       {spray ? (
@@ -120,7 +125,10 @@ function QueuedSprayerChip({ spray, position }: QueuedSprayerChipProps) {
       </span>
       <SprayAvatarCharacter avatar={spray.avatarData} name={spray.name} size="xs" dancing danceStyle="bounce" />
       <div className="min-w-0">
-        <p className="max-w-[7rem] truncate text-sm font-bold text-white">{spray.name}</p>
+        <p className="max-w-[7rem] truncate text-sm font-bold text-white">
+          {spray.name}
+          {spray.isLive && <span className="ml-1 text-[10px] text-green-400">LIVE</span>}
+        </p>
         <p className="text-xs text-white/70">
           ₦{spray.amount.toLocaleString()} · {formatSprayDenomination(spray.denomination)}
         </p>

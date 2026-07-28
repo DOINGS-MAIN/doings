@@ -73,6 +73,8 @@ export default function HomePage() {
 
       <WalletCard
         ngnBalance={d.ngnBalance}
+        ngnAvailableBalance={d.ngnAvailableBalance}
+        ngnLockedBalance={d.ngnLockedBalance}
         usdcBalance={d.usdcBalance}
         onAddFunds={() => d.setShowFundSheet(true)}
         onViewHistory={() => d.setShowHistory(true)}

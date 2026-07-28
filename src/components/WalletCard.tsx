@@ -6,6 +6,8 @@ import { Currency } from "@/types/finance";
 
 interface WalletCardProps {
   ngnBalance: number;
+  ngnAvailableBalance?: number;
+  ngnLockedBalance?: number;
   usdcBalance: number;
   onAddFunds: () => void;
   onViewHistory: () => void;
@@ -21,6 +23,8 @@ interface WalletCardProps {
 
 export const WalletCard = ({
   ngnBalance,
+  ngnAvailableBalance,
+  ngnLockedBalance = 0,
   usdcBalance,
   onAddFunds,
   onViewHistory,
@@ -35,7 +39,9 @@ export const WalletCard = ({
 }: WalletCardProps) => {
   const [showBalance, setShowBalance] = useState(true);
 
-  const balance = activeCurrency === "NGN" ? ngnBalance : usdcBalance;
+  const balance = activeCurrency === "NGN"
+    ? (ngnAvailableBalance ?? ngnBalance)
+    : usdcBalance;
   const symbol = activeCurrency === "NGN" ? "₦" : "$";
   const hiddenText = activeCurrency === "NGN" ? "₦•••,•••" : "$•••.••";
 
@@ -150,9 +156,16 @@ export const WalletCard = ({
             ) : (
               showBalance && (
                 <p className="text-white/50 text-xs mt-1">
-                  {activeCurrency === "NGN"
-                    ? `USDC: $${(usdcBalance ?? 0).toFixed(2)}`
-                    : `NGN: ₦${(ngnBalance ?? 0).toLocaleString()}`}
+                  {activeCurrency === "NGN" ? (
+                    <>
+                      {ngnLockedBalance > 0 && (
+                        <>₦{ngnLockedBalance.toLocaleString()} held for spray · </>
+                      )}
+                      {`USDC: $${(usdcBalance ?? 0).toFixed(2)}`}
+                    </>
+                  ) : (
+                    `NGN: ₦${(ngnAvailableBalance ?? ngnBalance ?? 0).toLocaleString()}`
+                  )}
                 </p>
               )
             )}

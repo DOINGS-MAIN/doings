@@ -323,6 +323,14 @@ export const useMultiWallet = () => {
     }
   }, [fetchWallets, fetchTransactions]);
 
+  /** Optimistic wallet update after spray settle — refresh still runs to confirm server state. */
+  const applySpraySettlement = useCallback((chargedMajor: number, cancelled = false) => {
+    if (!cancelled && chargedMajor > 0) {
+      setNgnBalance((prev) => Math.max(0, prev - chargedMajor));
+    }
+    setNgnLockedBalance(0);
+  }, []);
+
   return {
     ngnBalance,
     ngnLockedBalance,
@@ -349,6 +357,7 @@ export const useMultiWallet = () => {
     withdrawUSDC,
     getTransactions,
     refreshBalances,
+    applySpraySettlement,
     refreshWallets: fetchWallets,
     refreshTransactions: fetchTransactions,
     withdrawalFeeSettings,
