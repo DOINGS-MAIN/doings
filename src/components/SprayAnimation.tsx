@@ -6,6 +6,8 @@ import { SprayMoneyBill } from "@/components/SprayMoneyBill";
 import type { AvatarData } from "@/types/avatar";
 import { DEFAULT_AVATAR_DATA } from "@/types/avatar";
 import { useSprayQueuePosition } from "@/hooks/useSprayQueuePosition";
+import { spray } from "@/lib/supabase";
+import { toast } from "sonner";
 
 interface SprayAnimationProps {
   isActive: boolean;
@@ -44,10 +46,15 @@ export const SprayAnimation = ({
   holdId,
 }: SprayAnimationProps) => {
   const effectiveSessionSec = sessionDurationSec ?? Math.min(amount / denomination, 180);
-  const { position, totalPending, onProjector } = useSprayQueuePosition(eventId, holdId, isActive);
 
   const [sprayedAmount, setSprayedAmount] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const { position, totalActive, onProjector } = useSprayQueuePosition(
+    eventId,
+    holdId,
+    isActive,
+    isPaused,
+  );
   const [notes, setNotes] = useState<MoneyNote[]>([]);
   const [showCelebration, setShowCelebration] = useState(false);
   const [celebrationAmount, setCelebrationAmount] = useState(0);
@@ -210,6 +217,17 @@ export const SprayAnimation = ({
     void finalizeRecording("cancel", sprayedAmount);
   };
 
+  const handleTogglePause = async () => {
+    if (!holdId || recordingRef.current) return;
+    const nextPaused = !isPaused;
+    setIsPaused(nextPaused);
+    const { error } = await spray.setPaused(holdId, nextPaused);
+    if (error) {
+      setIsPaused(!nextPaused);
+      toast.error("Could not update pause — try again");
+    }
+  };
+
   if (!isActive) return null;
 
   const controlsLocked = isRecording;
@@ -301,7 +319,17 @@ export const SprayAnimation = ({
             {isPaused ? "Paused" : "Spraying"}
           </motion.p>
 
-          {position != null && !isRecording && (
+          {isPaused && !isRecording && (
+            <motion.p
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-3 rounded-full border border-amber-400/30 bg-amber-500/15 px-4 py-1.5 text-sm font-semibold text-amber-100"
+            >
+              Paused — off the projector. Resume to rejoin the queue.
+            </motion.p>
+          )}
+
+          {!isPaused && position != null && !isRecording && (
             <motion.p
               initial={{ opacity: 0, y: -4 }}
               animate={{ opacity: 1, y: 0 }}
@@ -309,7 +337,7 @@ export const SprayAnimation = ({
             >
               {onProjector
                 ? "You're on the projector ✨"
-                : `Projector queue · #${position}${totalPending > 1 ? ` of ${totalPending}` : ""}`}
+                : `Projector queue · #${position}${totalActive > 1 ? ` of ${totalActive}` : ""}`}
             </motion.p>
           )}
 
@@ -347,7 +375,7 @@ export const SprayAnimation = ({
             <motion.button
               type="button"
               disabled={controlsLocked}
-              onClick={() => setIsPaused((p) => !p)}
+              onClick={() => void handleTogglePause()}
               className={`flex min-h-[4.5rem] flex-col items-center justify-center rounded-2xl px-4 py-4 text-center font-black uppercase tracking-wide text-cyan-300 transition-transform active:scale-[0.97] disabled:opacity-40 spray-neon-pause ${
                 isPaused ? "spray-neon-pause-active" : ""
               }`}
