@@ -17,6 +17,7 @@ import { useEventSprayFeed } from "@/hooks/useEventSprayFeed";
 import { useSprayStage } from "@/hooks/useSprayStage";
 import { buildEventJoinLink, buildGiveawayRedeemLink } from "@/lib/shareLinks";
 import { EventScreenSprayStage } from "@/components/EventScreenSprayStage";
+import { EventScreenIdleView } from "@/components/EventScreenIdleView";
 import { SprayAvatarCharacter } from "@/components/SprayAvatarCharacter";
 import QRCode from "react-qr-code";
 import { useEffect, useState } from "react";
@@ -45,6 +46,11 @@ export const EventScreenView = ({ event, giveaways, onBack }: EventScreenViewPro
   );
   const joinLink = buildEventJoinLink(event.eventCode);
 
+  const isProjectorIdle =
+    !loading &&
+    slots.every((slot) => slot == null) &&
+    queuedSprays.length === 0;
+
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
       void document.documentElement.requestFullscreen();
@@ -60,6 +66,18 @@ export const EventScreenView = ({ event, giveaways, onBack }: EventScreenViewPro
     document.addEventListener("fullscreenchange", onFsChange);
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
+
+  if (isProjectorIdle) {
+    return (
+      <EventScreenIdleView
+        event={event}
+        joinLink={joinLink}
+        isFullscreen={isFullscreen}
+        onToggleFullscreen={toggleFullscreen}
+        onBack={onBack}
+      />
+    );
+  }
 
   return (
     <div className="relative flex min-h-dvh max-h-dvh flex-col overflow-hidden bg-gradient-to-br from-background via-background to-primary/10">
@@ -125,73 +143,65 @@ export const EventScreenView = ({ event, giveaways, onBack }: EventScreenViewPro
         <div className="space-y-4 md:col-span-2">
           <EventScreenSprayStage slots={slots} queuedSprays={queuedSprays} waitingCount={waitingCount} />
 
-          <div className="mb-2 flex items-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary" />
-            <h3 className="font-bold text-foreground">All Sprays</h3>
-          </div>
+          {activities.length > 0 && (
+            <>
+              <div className="mb-2 flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-primary" />
+                <h3 className="font-bold text-foreground">Recent Sprays</h3>
+              </div>
 
-          {loading && activities.length === 0 ? (
+              {error ? (
+                <div className="glass rounded-2xl p-6 text-center text-sm text-destructive">{error}</div>
+              ) : (
+                <div className="space-y-3">
+                  <AnimatePresence initial={false}>
+                    {activities.slice(0, 8).map((activity, index) => (
+                      <motion.div
+                        key={activity.id}
+                        initial={{ opacity: 0, x: -80, scale: 0.85 }}
+                        animate={{ opacity: 1, x: 0, scale: 1 }}
+                        exit={{ opacity: 0, x: 50 }}
+                        transition={{ type: "spring", stiffness: 320, damping: 24, delay: index * 0.03 }}
+                        className="glass flex items-center gap-4 rounded-2xl p-4"
+                      >
+                        <SprayAvatarCharacter
+                          avatar={activity.avatarData}
+                          name={activity.name}
+                          size="md"
+                          dancing={index === 0}
+                          danceStyle={index === 0 ? "celebrate" : "bounce"}
+                          showGlow={index === 0}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-lg font-bold text-foreground">{activity.name}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatDistanceToNow(activity.timestamp, { addSuffix: true })}
+                            {activity.denomination > 0 && (
+                              <> · {formatSprayDenomination(activity.denomination)} notes</>
+                            )}
+                          </p>
+                        </div>
+                        <motion.div
+                          initial={{ scale: 0, rotate: -12 }}
+                          animate={{ scale: 1, rotate: 0 }}
+                          className="shrink-0 rounded-xl bg-gradient-to-r from-primary to-accent px-4 py-2 shadow-lg shadow-primary/20"
+                        >
+                          <p className="text-lg font-black text-primary-foreground">
+                            ₦{activity.amount.toLocaleString()}
+                          </p>
+                        </motion.div>
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                </div>
+              )}
+            </>
+          )}
+
+          {loading && activities.length === 0 && (
             <div className="glass flex items-center justify-center gap-2 rounded-2xl p-8 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
               Loading sprays…
-            </div>
-          ) : error ? (
-            <div className="glass rounded-2xl p-6 text-center text-sm text-destructive">{error}</div>
-          ) : activities.length === 0 ? (
-            <div className="glass rounded-2xl p-8 text-center">
-              <motion.div
-                animate={{ y: [0, -8, 0], rotate: [-5, 5, -5] }}
-                transition={{ duration: 2, repeat: Infinity }}
-                className="mx-auto mb-4 w-fit"
-              >
-                <SprayAvatarCharacter size="lg" dancing danceStyle="sway" showGlow />
-              </motion.div>
-              <p className="font-semibold text-foreground">Waiting for the first spray</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Share the event code — dancing avatars appear here when guests spray.
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <AnimatePresence initial={false}>
-                {activities.map((activity, index) => (
-                  <motion.div
-                    key={activity.id}
-                    initial={{ opacity: 0, x: -80, scale: 0.85 }}
-                    animate={{ opacity: 1, x: 0, scale: 1 }}
-                    exit={{ opacity: 0, x: 50 }}
-                    transition={{ type: "spring", stiffness: 320, damping: 24, delay: index * 0.03 }}
-                    className="glass flex items-center gap-4 rounded-2xl p-4"
-                  >
-                    <SprayAvatarCharacter
-                      avatar={activity.avatarData}
-                      name={activity.name}
-                      size="md"
-                      dancing={index === 0}
-                      danceStyle={index === 0 ? "celebrate" : "bounce"}
-                      showGlow={index === 0}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-lg font-bold text-foreground">{activity.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {formatDistanceToNow(activity.timestamp, { addSuffix: true })}
-                        {activity.denomination > 0 && (
-                          <> · {formatSprayDenomination(activity.denomination)} notes</>
-                        )}
-                      </p>
-                    </div>
-                    <motion.div
-                      initial={{ scale: 0, rotate: -12 }}
-                      animate={{ scale: 1, rotate: 0 }}
-                      className="shrink-0 rounded-xl bg-gradient-to-r from-primary to-accent px-4 py-2 shadow-lg shadow-primary/20"
-                    >
-                      <p className="text-lg font-black text-primary-foreground">
-                        ₦{activity.amount.toLocaleString()}
-                      </p>
-                    </motion.div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
             </div>
           )}
 
@@ -214,15 +224,13 @@ export const EventScreenView = ({ event, giveaways, onBack }: EventScreenViewPro
         </div>
 
         <div className="space-y-4">
-          <div className="glass rounded-2xl p-4">
-            <div className="mb-4 flex items-center gap-2">
-              <Trophy className="h-5 w-5 text-yellow-500" />
-              <h3 className="font-bold text-foreground">Top Gifters</h3>
-            </div>
+          {topGifters.length > 0 && (
+            <div className="glass rounded-2xl p-4">
+              <div className="mb-4 flex items-center gap-2">
+                <Trophy className="h-5 w-5 text-yellow-500" />
+                <h3 className="font-bold text-foreground">Top Gifters</h3>
+              </div>
 
-            {topGifters.length === 0 ? (
-              <p className="py-4 text-center text-sm text-muted-foreground">No gifters yet</p>
-            ) : (
               <div className="space-y-3">
                 {topGifters.map((gifter, index) => (
                   <motion.div
@@ -251,8 +259,8 @@ export const EventScreenView = ({ event, giveaways, onBack }: EventScreenViewPro
                   </motion.div>
                 ))}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {activeGiveaways.length > 0 && (
             <div className="glass rounded-2xl p-4">

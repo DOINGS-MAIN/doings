@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { FloatingMoney } from "@/components/FloatingMoney";
@@ -71,29 +71,6 @@ export function DashboardLayout() {
     }
   }, [hasPin, pinLoading]);
 
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const join = params.get("join")?.trim().toUpperCase();
-    const redeem = params.get("redeem")?.trim().toUpperCase();
-    if (!join && !redeem) return;
-
-    if (join) {
-      setJoinEventInitialCode(join);
-      setShowJoinEvent(true);
-    }
-    if (redeem) {
-      setRedeemGiveawayInitialCode(redeem);
-      setShowRedeemGiveaway(true);
-    }
-
-    params.delete("join");
-    params.delete("redeem");
-    const nextSearch = params.toString();
-    navigate(
-      { pathname: location.pathname, search: nextSearch ? `?${nextSearch}` : "" },
-      { replace: true }
-    );
-  }, [location.pathname, location.search, navigate]);
 
   const [showAvatarCustomization, setShowAvatarCustomization] = useState(false);
   const { avatarData, saveAvatarData, saving: savingAvatar } = useAvatar(
@@ -122,6 +99,7 @@ export function DashboardLayout() {
   const [selectedGiveaway, setSelectedGiveaway] = useState<Giveaway | null>(null);
 
   const [showNotifications, setShowNotifications] = useState(false);
+  const processedJoinCodeRef = useRef<string | null>(null);
 
   const {
     ngnBalance,
@@ -201,6 +179,48 @@ export function DashboardLayout() {
     setSelectedEvent(event);
     setShowSpraySetup(true);
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const join = params.get("join")?.trim().toUpperCase();
+    const redeem = params.get("redeem")?.trim().toUpperCase();
+
+    if (redeem) {
+      params.delete("redeem");
+      navigate(
+        { pathname: location.pathname, search: params.toString() ? `?${params.toString()}` : "" },
+        { replace: true },
+      );
+      setRedeemGiveawayInitialCode(redeem);
+      setShowRedeemGiveaway(true);
+      return;
+    }
+
+    if (!join) return;
+    if (!profile?.id) return;
+
+    if (processedJoinCodeRef.current === join) return;
+    processedJoinCodeRef.current = join;
+
+    params.delete("join");
+    navigate(
+      { pathname: "/events", search: params.toString() ? `?${params.toString()}` : "" },
+      { replace: true },
+    );
+
+    void (async () => {
+      const event = await findEventByCode(join);
+      if (!event) {
+        toast.error("Event not found. Check the code and try again.");
+        setJoinEventInitialCode(join);
+        setShowJoinEvent(true);
+        return;
+      }
+      await handleJoinEvent(event);
+    })();
+    // handleJoinEvent is stable enough for one-shot deep links; omit to avoid re-firing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- join query consumed once via processedJoinCodeRef
+  }, [location.search, profile?.id, findEventByCode, navigate]);
 
   const handleSprayError = (err: unknown): never => {
     const code = (err as Error & { code?: string }).code;

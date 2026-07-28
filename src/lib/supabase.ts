@@ -32,6 +32,15 @@ async function authHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
+function readApiField(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (value && typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    if (typeof obj.message === "string" && obj.message.trim()) return obj.message.trim();
+  }
+  return null;
+}
+
 async function invoke<T = unknown>(fnName: string, options?: {
   method?: string;
   body?: unknown;
@@ -66,11 +75,11 @@ async function invoke<T = unknown>(fnName: string, options?: {
     throw new Error(`Request failed: ${res.status}`);
   }
   if (!res.ok) {
-    const detail = typeof data.detail === "string" ? data.detail : "";
+    const detail = readApiField(data.detail) ?? "";
     const msg =
-      (typeof data.error === "string" && data.error) ||
-      (typeof data.message === "string" && data.message) ||
-      (typeof data.msg === "string" && data.msg) ||
+      readApiField(data.error) ??
+      readApiField(data.message) ??
+      readApiField(data.msg) ??
       `Request failed: ${res.status}`;
     const err = new Error(detail ? `${msg}: ${detail}` : msg) as Error & { code?: string };
     if (typeof data.code === "string") err.code = data.code;

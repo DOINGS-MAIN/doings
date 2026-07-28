@@ -168,7 +168,11 @@ export const useAuth = () => {
   }, []);
 
   const signInWithGoogle = useCallback(async () => {
-    const redirectTo = `${window.location.origin}/home`;
+    const params = new URLSearchParams(window.location.search);
+    const join = params.get("join")?.trim().toUpperCase();
+    const redirectTo = join
+      ? `${window.location.origin}/events?join=${encodeURIComponent(join)}`
+      : `${window.location.origin}/home`;
     const { data, error } = await auth.signInWithGoogle(redirectTo);
     if (error) throw error;
     return data;
