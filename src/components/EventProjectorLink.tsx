@@ -60,7 +60,7 @@ export function EventProjectorLink({ eventId, variant = "card" }: EventProjector
         <div className="min-w-0 flex-1">
           <p className="font-bold text-foreground">Projector screen</p>
           <p className="text-sm text-muted-foreground">
-            Open on a TV or projector — shows up to 3 sprayers at once with the full queue visible.
+            Open on a TV or projector — live sprayers on the dance floor with a compact join QR.
           </p>
         </div>
       </div>

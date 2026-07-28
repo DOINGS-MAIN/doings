@@ -1,8 +1,8 @@
 import { motion } from "framer-motion";
 import { Maximize2, X } from "lucide-react";
-import QRCode from "react-qr-code";
 import type { EventData } from "@/hooks/useEvents";
 import { SprayAvatarCharacter } from "@/components/SprayAvatarCharacter";
+import { EventScreenJoinQr } from "@/components/EventScreenJoinQr";
 
 interface EventScreenIdleViewProps {
   event: EventData;
@@ -72,26 +72,14 @@ export function EventScreenIdleView({
           <p className="mt-2 max-w-xs text-sm text-white/55 md:text-base">
             Be the first to spray — or scan the code to join from your phone.
           </p>
-          {event.totalSprayed > 0 && (
-            <p className="mt-4 text-sm font-semibold text-primary">
-              ₦{event.totalSprayed.toLocaleString()} sprayed so far
-            </p>
-          )}
         </motion.div>
 
         <motion.div
-          className="flex flex-col items-center text-center"
           initial={{ opacity: 0, scale: 0.92 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.5, delay: 0.1 }}
         >
-          <div className="rounded-3xl bg-white p-4 shadow-2xl shadow-primary/20 md:p-5">
-            <QRCode value={joinLink} size={200} level="M" />
-          </div>
-          <p className="mt-5 text-sm font-bold uppercase tracking-[0.2em] text-white/70">Scan to join & spray</p>
-          <p className="mt-4 font-mono text-3xl font-black tracking-[0.35em] text-primary md:text-4xl">
-            {event.eventCode}
-          </p>
+          <EventScreenJoinQr joinLink={joinLink} eventCode={event.eventCode} compact={false} />
         </motion.div>
       </div>
     </div>

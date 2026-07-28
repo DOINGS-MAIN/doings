@@ -32,23 +32,34 @@ function mapHoldRow(row: Record<string, unknown>): EventSprayActivity {
 
 export function useLiveSprayHolds(eventId: string | undefined, enabled = true) {
   const [liveSprays, setLiveSprays] = useState<EventSprayActivity[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (!eventId || !enabled) {
       setLiveSprays([]);
+      setLoading(false);
+      setError(null);
       return;
     }
 
-    const { data, error } = await supabase.rpc("get_event_live_spray_holds", {
-      p_event_id: eventId,
-    });
+    setLoading(true);
+    setError(null);
+    try {
+      const { data, error: rpcError } = await supabase.rpc("get_event_live_spray_holds", {
+        p_event_id: eventId,
+      });
 
-    if (error) {
-      console.warn("Could not load live spray holds:", error.message);
-      return;
+      if (rpcError) {
+        console.warn("Could not load live spray holds:", rpcError.message);
+        setError(rpcError.message);
+        return;
+      }
+
+      setLiveSprays(((data as Record<string, unknown>[]) ?? []).map(mapHoldRow));
+    } finally {
+      setLoading(false);
     }
-
-    setLiveSprays(((data as Record<string, unknown>[]) ?? []).map(mapHoldRow));
   }, [eventId, enabled]);
 
   useEffect(() => {
@@ -100,5 +111,5 @@ export function useLiveSprayHolds(eventId: string | undefined, enabled = true) {
     };
   }, [eventId, enabled, refresh]);
 
-  return { liveSprays, refresh };
+  return { liveSprays, loading, error, refresh };
 }

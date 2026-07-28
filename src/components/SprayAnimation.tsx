@@ -5,6 +5,7 @@ import { SprayAvatarCharacter } from "@/components/SprayAvatarCharacter";
 import { SprayMoneyBill } from "@/components/SprayMoneyBill";
 import type { AvatarData } from "@/types/avatar";
 import { DEFAULT_AVATAR_DATA } from "@/types/avatar";
+import { useSprayQueuePosition } from "@/hooks/useSprayQueuePosition";
 
 interface SprayAnimationProps {
   isActive: boolean;
@@ -13,6 +14,8 @@ interface SprayAnimationProps {
   noteIntervalSec?: number;
   sessionDurationSec?: number;
   avatarData?: AvatarData;
+  eventId?: string;
+  holdId?: string | null;
   onComplete: (sprayedAmount: number) => Promise<void>;
   onAutoStop: () => Promise<void>;
   onCancel: (sprayedAmount: number) => Promise<void>;
@@ -37,8 +40,11 @@ export const SprayAnimation = ({
   onAutoStop,
   onCancel,
   eventName: _eventName,
+  eventId,
+  holdId,
 }: SprayAnimationProps) => {
   const effectiveSessionSec = sessionDurationSec ?? Math.min(amount / denomination, 180);
+  const { position, totalPending, onProjector } = useSprayQueuePosition(eventId, holdId, isActive);
 
   const [sprayedAmount, setSprayedAmount] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
@@ -294,6 +300,18 @@ export const SprayAnimation = ({
           >
             {isPaused ? "Paused" : "Spraying"}
           </motion.p>
+
+          {position != null && !isRecording && (
+            <motion.p
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-3 rounded-full border border-white/15 bg-white/10 px-4 py-1.5 text-sm font-semibold text-white/85"
+            >
+              {onProjector
+                ? "You're on the projector ✨"
+                : `Projector queue · #${position}${totalPending > 1 ? ` of ${totalPending}` : ""}`}
+            </motion.p>
+          )}
 
           <motion.p
             key={sprayedAmount}
