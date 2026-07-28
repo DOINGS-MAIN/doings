@@ -313,6 +313,8 @@ export const spray = {
     invoke<SpraySettleResult>("spray", {
       body: { event_id: eventId, amount, denomination, pin },
     }),
+  setPaused: (holdId: string, paused: boolean) =>
+    supabase.rpc("set_spray_hold_paused", { p_hold_id: holdId, p_paused: paused }),
 };
 
 // ── Giveaways ──
