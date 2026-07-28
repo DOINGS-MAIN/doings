@@ -63,7 +63,7 @@ function SprayStageSlot({ spray, slotIndex }: SprayStageSlotProps) {
     >
       <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-center gap-2 bg-black/35 px-3 py-1.5 text-center text-[10px] font-semibold uppercase tracking-widest text-white/70 md:text-xs">
         <span>Stage {slotIndex + 1}</span>
-        {spray.isLive && (
+        {spray?.isLive && (
           <span className="rounded-full bg-green-500/90 px-2 py-0.5 text-[9px] font-bold text-white md:text-[10px]">
             Spraying now
           </span>
