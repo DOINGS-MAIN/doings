@@ -1,5 +1,6 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
+import { formatDbError, isUniqueViolation } from "../_shared/errors.ts";
 
 /** Path after the function name (e.g. `uuid`, `code/ABC`, `uuid/join`). Gateway uses `/functions/v1/events/...`. */
 function eventsPathTail(reqUrl: string): string {
@@ -75,7 +76,7 @@ Deno.serve(async (req) => {
       .select()
       .single();
 
-    if (error) return withCors({ error: "Failed to create event", detail: String(error) }, { status: 500 });
+    if (error) return withCors({ error: "Failed to create event", detail: formatDbError(error) }, { status: 500 });
 
     await supabase.from("event_participants").insert({
       event_id: event.id,
@@ -146,8 +147,8 @@ Deno.serve(async (req) => {
     });
 
     if (error) {
-      if (String(error).includes("duplicate")) return withCors({ ok: true, already_joined: true });
-      return withCors({ error: "Failed to join", detail: String(error) }, { status: 500 });
+      if (isUniqueViolation(error)) return withCors({ ok: true, already_joined: true });
+      return withCors({ error: "Failed to join", detail: formatDbError(error) }, { status: 500 });
     }
     return withCors({ ok: true });
   }
@@ -225,7 +226,7 @@ Deno.serve(async (req) => {
     }
 
     const { data: updated, error } = await supabase.from("events").update(patch).eq("id", eventId).select().single();
-    if (error) return withCors({ error: "Update failed", detail: String(error) }, { status: 500 });
+    if (error) return withCors({ error: "Update failed", detail: formatDbError(error) }, { status: 500 });
     return withCors({ ok: true, event: updated });
   }
 
