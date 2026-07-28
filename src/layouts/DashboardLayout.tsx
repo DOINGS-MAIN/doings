@@ -598,6 +598,8 @@ export function DashboardLayout() {
               noteIntervalSec={sprayTheatrePlan?.note_interval_sec ?? 1}
               sessionDurationSec={sprayTheatrePlan?.session_duration_sec ?? sprayAmount}
               avatarData={avatarData}
+              eventId={selectedEvent?.id}
+              holdId={sprayHoldIdRef.current ?? sprayHoldId}
               onComplete={handleSprayComplete}
               onAutoStop={handleSprayAutoStop}
               onCancel={handleSprayCancel}
