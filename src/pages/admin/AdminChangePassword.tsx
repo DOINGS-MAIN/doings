@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, Lock, Eye, EyeOff } from "lucide-react";
+import { Shield, Lock } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/PasswordInput";
 import { Button } from "@/components/ui/button";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { useToast } from "@/hooks/use-toast";
@@ -11,7 +11,6 @@ export const AdminChangePassword = () => {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPasswords, setShowPasswords] = useState(false);
   const { currentAccount, changePassword } = useAdminAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -51,9 +50,8 @@ export const AdminChangePassword = () => {
             <div>
               <label className="text-sm font-medium text-muted-foreground mb-2 block">Current Password</label>
               <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  type={showPasswords ? "text" : "password"}
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none z-10" />
+                <PasswordInput
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
                   className="pl-11"
@@ -64,9 +62,8 @@ export const AdminChangePassword = () => {
             <div>
               <label className="text-sm font-medium text-muted-foreground mb-2 block">New Password</label>
               <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  type={showPasswords ? "text" : "password"}
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none z-10" />
+                <PasswordInput
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   className="pl-11"
@@ -78,9 +75,8 @@ export const AdminChangePassword = () => {
             <div>
               <label className="text-sm font-medium text-muted-foreground mb-2 block">Confirm New Password</label>
               <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  type={showPasswords ? "text" : "password"}
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none z-10" />
+                <PasswordInput
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="pl-11"
@@ -89,10 +85,6 @@ export const AdminChangePassword = () => {
                 />
               </div>
             </div>
-            <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-              <input type="checkbox" checked={showPasswords} onChange={() => setShowPasswords(!showPasswords)} className="rounded" />
-              Show passwords
-            </label>
             <Button type="submit" className="w-full h-12 font-semibold">
               Update Password
             </Button>

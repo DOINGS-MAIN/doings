@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import gsap from "gsap";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/PasswordInput";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { ArrowRight, Mail, Loader2 } from "lucide-react";
@@ -382,9 +383,8 @@ export const AuthFlow = ({
 
               <div className="space-y-2">
                 <Label htmlFor="auth-password">Password</Label>
-                <Input
+                <PasswordInput
                   id="auth-password"
-                  type="password"
                   placeholder={mode === "login" ? "Your password" : `At least ${MIN_PASSWORD} characters`}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -410,9 +410,8 @@ export const AuthFlow = ({
               {mode === "signup" ? (
                 <div className="space-y-2">
                   <Label htmlFor="auth-confirm">Confirm password</Label>
-                  <Input
+                  <PasswordInput
                     id="auth-confirm"
-                    type="password"
                     placeholder="Repeat password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
