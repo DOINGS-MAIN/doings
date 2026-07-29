@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { SprayTheatrePlan, QueueCompressionTier } from "@/lib/sprayTheatrePlan";
-import { getCachedSession } from "@/lib/authSession";
+import { getValidSession } from "@/lib/authSession";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? "").trim();
@@ -14,15 +14,7 @@ export const supabase = createClient(
 );
 
 async function authHeaders(): Promise<Record<string, string>> {
-  let session = await getCachedSession();
-  const nowSec = Math.floor(Date.now() / 1000);
-  if (session?.refresh_token) {
-    const exp = session.expires_at ?? 0;
-    if (exp <= nowSec + 600) {
-      const { data, error } = await supabase.auth.refreshSession();
-      if (!error && data.session) session = data.session;
-    }
-  }
+  const session = await getValidSession();
   const token = session?.access_token;
   // Gateway requires project anon key on every Functions request; without it you often get "Invalid JWT".
   const headers: Record<string, string> = {

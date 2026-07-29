@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase, giveaways as giveawaysApi } from "@/lib/supabase";
-import { useAuth } from "@/hooks/useAuth";
+import { getAppUserId } from "@/lib/appUser";
 
 export interface Giveaway {
   id: string;
@@ -100,11 +100,16 @@ export function mapGiveawayRow(g: Record<string, unknown>): Giveaway {
 }
 
 export const useGiveaways = () => {
-  const { profile } = useAuth();
   const [giveawayList, setGiveawayList] = useState<Giveaway[]>([]);
+  const [creatorId, setCreatorId] = useState<string | null>(null);
+
+  useEffect(() => {
+    void getAppUserId().then(setCreatorId);
+  }, []);
 
   const fetchGiveaways = useCallback(async () => {
-    if (!profile?.id) {
+    const appUserId = creatorId ?? (await getAppUserId());
+    if (!appUserId) {
       setGiveawayList([]);
       return;
     }
@@ -112,6 +117,7 @@ export const useGiveaways = () => {
     const { data, error } = await supabase
       .from("giveaways")
       .select("*, giveaway_redemptions(count)")
+      .eq("creator_id", appUserId)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -121,7 +127,7 @@ export const useGiveaways = () => {
     }
 
     if (data) setGiveawayList((data as Record<string, unknown>[]).map(mapGiveawayRow));
-  }, [profile?.id]);
+  }, [creatorId]);
 
   useEffect(() => {
     void fetchGiveaways();
@@ -139,6 +145,7 @@ export const useGiveaways = () => {
       showOnEventScreen: boolean;
       pin: string;
     }) => {
+      const appUserId = creatorId ?? (await getAppUserId());
       const result = await giveawaysApi.create({
         title: data.title,
         total_amount: data.totalAmount,
@@ -159,8 +166,8 @@ export const useGiveaways = () => {
       return {
         id,
         code,
-        creatorId: profile?.id ?? "",
-        creatorName: profile?.full_name ?? "",
+        creatorId: appUserId ?? "",
+        creatorName: "",
         title: data.title,
         totalAmount: data.totalAmount,
         perPersonAmount: data.perPersonAmount,
@@ -177,7 +184,7 @@ export const useGiveaways = () => {
         createdAt: new Date().toISOString(),
       } satisfies Giveaway;
     },
-    [fetchGiveaways, profile?.id, profile?.full_name]
+    [fetchGiveaways],
   );
 
   const redeemGiveaway = useCallback(
@@ -217,10 +224,7 @@ export const useGiveaways = () => {
     return mapGiveawayRow(row);
   }, []);
 
-  const getMyGiveaways = useCallback(() => {
-    if (!profile?.id) return [];
-    return giveawayList.filter((x) => x.creatorId === profile.id);
-  }, [giveawayList, profile?.id]);
+  const getMyGiveaways = useCallback(() => giveawayList, [giveawayList]);
 
   const getActiveGiveaways = useCallback(() => {
     return giveawayList.filter((g) => g.status === "active" && !g.isPrivate);

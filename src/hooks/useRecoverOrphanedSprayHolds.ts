@@ -18,7 +18,8 @@ export function useRecoverOrphanedSprayHolds(
     if (!userId || ranRef.current) return;
     ranRef.current = true;
 
-    void (async () => {
+    const timer = window.setTimeout(() => {
+      void (async () => {
       try {
         // Release holds whose session window ended (helps projector + other guests).
         await supabase.rpc("cleanup_spray_holds");
@@ -53,5 +54,8 @@ export function useRecoverOrphanedSprayHolds(
         console.warn("Could not recover orphaned spray holds:", err);
       }
     })();
+    }, 1500);
+
+    return () => window.clearTimeout(timer);
   }, [userId]);
 }

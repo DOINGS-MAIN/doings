@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { useAuth } from "@/hooks/useAuth";
 import { useDashboardShell } from "@/contexts/DashboardShellContext";
 
 export interface LeaderboardEntry {
@@ -95,9 +94,9 @@ function mapRow(row: Record<string, unknown>, appUserId: string | undefined): Le
   };
 }
 
-export function useLeaderboard(period: TimePeriod) {
-  const { profile } = useAuth();
-  const { transactions } = useDashboardShell();
+export function useLeaderboard(period: TimePeriod, appUserId?: string) {
+  const { transactions, profile } = useDashboardShell();
+  const userId = appUserId ?? profile?.id;
 
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -126,10 +125,10 @@ export function useLeaderboard(period: TimePeriod) {
       setLeaderboard([]);
     } else {
       const rows = (data ?? []) as Record<string, unknown>[];
-      setLeaderboard(rows.map((r) => mapRow(r, profile?.id)));
+      setLeaderboard(rows.map((r) => mapRow(r, userId)));
     }
     setLoading(false);
-  }, [period, profile?.id]);
+  }, [period, userId]);
 
   useEffect(() => {
     void fetchLeaderboard();

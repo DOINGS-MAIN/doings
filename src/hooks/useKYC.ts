@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase, kyc } from "@/lib/supabase";
 import { getAppUserId } from "@/lib/appUser";
-import { getCachedSession } from "@/lib/authSession";
+import { getValidSession, refreshCachedSession } from "@/lib/authSession";
 import { KYCLevel, KYCState, KYCVerification } from "@/types/finance";
 
 export const useKYC = () => {
@@ -136,9 +136,9 @@ export const useKYC = () => {
       };
     }
 
-    await supabase.auth.refreshSession();
+    await refreshCachedSession();
     await fetchKYCState();
-    const session = await getCachedSession();
+    const session = await getValidSession();
     if (session?.user?.email_confirmed_at) {
       return { success: true, message: "Email verified — you can receive in-app transfers and giveaways." };
     }
