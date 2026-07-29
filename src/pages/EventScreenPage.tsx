@@ -4,7 +4,7 @@ import { Loader2 } from "lucide-react";
 import { EventScreenView } from "@/components/EventScreenView";
 import { useAuth } from "@/hooks/useAuth";
 import type { EventData } from "@/hooks/useEvents";
-import { useGiveaways } from "@/hooks/useGiveaways";
+import { useEventScreenGiveaways } from "@/hooks/useEventScreenGiveaways";
 import { fetchProjectorEvent, fetchProjectorEventByCode } from "@/lib/publicEventScreen";
 import { isEmbedMode } from "@/lib/eventScreenLink";
 import { supabase } from "@/lib/supabase";
@@ -21,7 +21,6 @@ export default function EventScreenPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, initialized, isAuthenticated } = useAuth();
-  const { getMyGiveaways } = useGiveaways();
 
   const embed = isEmbedMode(location.search);
 
@@ -123,9 +122,13 @@ export default function EventScreenPage() {
     };
   }, [event, navigate, isAuthenticated, profile?.id]);
 
+  const { displayGiveaways } = useEventScreenGiveaways(
+    event?.id,
+    event?.status === "live",
+  );
+
   const isHost = Boolean(profile?.id && event?.hostId === profile.id);
   const isPublicViewer = Boolean(event && !event.isPrivate && !isHost);
-  const giveaways = isHost ? getMyGiveaways() : [];
 
   const handleBack = () => {
     if (isHost) {
@@ -211,7 +214,7 @@ export default function EventScreenPage() {
   return (
     <EventScreenView
       event={event}
-      giveaways={giveaways}
+      giveaways={displayGiveaways}
       onBack={handleBack}
       showCloseButton={!isPublicViewer && !embed}
       embed={embed}

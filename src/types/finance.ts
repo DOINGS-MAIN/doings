@@ -108,6 +108,7 @@ export const KYC_GATES = {
   WITHDRAW_USDC: 2 as KYCLevel,
   CONVERT: 2 as KYCLevel,
   SPRAY: 2 as KYCLevel,
+  CREATE_GIVEAWAY: 2 as KYCLevel,
 } as const;
 
 // ---- Wallet ----

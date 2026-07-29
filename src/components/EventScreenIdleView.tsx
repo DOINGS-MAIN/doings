@@ -3,6 +3,8 @@ import { Maximize2, X } from "lucide-react";
 import type { EventData } from "@/hooks/useEvents";
 import { SprayAvatarCharacter } from "@/components/SprayAvatarCharacter";
 import { EventScreenJoinQr } from "@/components/EventScreenJoinQr";
+import { EventScreenGiveawaysBanner } from "@/components/EventScreenGiveawaysBanner";
+import type { ProjectorGiveawayDisplay } from "@/hooks/useEventScreenGiveaways";
 
 interface EventScreenIdleViewProps {
   event: EventData;
@@ -12,6 +14,7 @@ interface EventScreenIdleViewProps {
   onBack: () => void;
   showCloseButton?: boolean;
   embed?: boolean;
+  giveaways?: ProjectorGiveawayDisplay[];
 }
 
 /** Projector waiting room — one avatar + join QR, nothing else. */
@@ -23,10 +26,12 @@ export function EventScreenIdleView({
   onBack,
   showCloseButton = true,
   embed = false,
+  giveaways = [],
 }: EventScreenIdleViewProps) {
   if (embed) {
     return (
       <div className="relative flex min-h-dvh max-h-dvh flex-col overflow-hidden bg-black">
+        <EventScreenGiveawaysBanner giveaways={giveaways} compact />
         <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center gap-8 px-6 pb-10">
           <motion.div
             className="flex flex-col items-center text-center"
@@ -54,6 +59,8 @@ export function EventScreenIdleView({
     <div className="relative flex min-h-dvh max-h-dvh flex-col overflow-hidden bg-black">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,hsl(43_96%_56%/0.14),transparent_55%)]" />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/80" />
+
+      <EventScreenGiveawaysBanner giveaways={giveaways} />
 
       <div className="relative z-10 flex shrink-0 items-center justify-between px-5 py-4 md:px-8">
         <div className="min-w-0">

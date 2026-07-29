@@ -4,10 +4,12 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Gift, Users, Coins, Lock, Eye, ChevronLeft, ChevronRight, Sparkles, PartyPopper } from "lucide-react";
+import { Gift, Users, Coins, Lock, Eye, ChevronLeft, ChevronRight, Sparkles, PartyPopper, Shield } from "lucide-react";
 import { EventData } from "@/hooks/useEvents";
 import { PinInput } from "@/components/PinInput";
 import { isValidPin } from "@/lib/pin";
+import { buildGiveawayRedeemLink } from "@/lib/shareLinks";
+import { KYCLevel, KYC_GATES } from "@/types/finance";
 import { toast } from "sonner";
 
 interface CreateGiveawaySheetProps {
@@ -27,6 +29,8 @@ interface CreateGiveawaySheetProps {
   balance: number;
   liveEvents: EventData[];
   onPinNotSet?: () => void;
+  kycLevel: KYCLevel;
+  onOpenKYC: () => void;
 }
 
 export const CreateGiveawaySheet = ({
@@ -36,6 +40,8 @@ export const CreateGiveawaySheet = ({
   balance,
   liveEvents,
   onPinNotSet,
+  kycLevel,
+  onOpenKYC,
 }: CreateGiveawaySheetProps) => {
   const [step, setStep] = useState(1);
   const [title, setTitle] = useState("");
@@ -431,7 +437,9 @@ export const CreateGiveawaySheet = ({
               <Button
                 variant="outline"
                 onClick={() => {
-                  navigator.clipboard.writeText(`https://doings.app/redeem/${createdGiveaway?.code}`);
+                  if (createdGiveaway?.code) {
+                    void navigator.clipboard.writeText(buildGiveawayRedeemLink(createdGiveaway.code));
+                  }
                 }}
                 className="h-12 rounded-xl"
               >
@@ -461,13 +469,36 @@ export const CreateGiveawaySheet = ({
         side="bottom"
         className="flex h-[85dvh] max-h-[85dvh] flex-col overflow-hidden rounded-t-3xl bg-background"
       >
-        <SheetHeader className="sr-only">
-          <SheetTitle>Create Giveaway</SheetTitle>
-        </SheetHeader>
-        <div className="mx-auto mb-4 h-1 w-12 shrink-0 rounded-full bg-muted" />
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]">
-          <AnimatePresence mode="sync">{renderStep()}</AnimatePresence>
-        </div>
+        {kycLevel < KYC_GATES.CREATE_GIVEAWAY ? (
+          <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+            <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-primary/10">
+              <Shield className="h-10 w-10 text-primary" />
+            </div>
+            <h2 className="mb-2 text-xl font-bold">Complete Full Verification</h2>
+            <p className="mb-2 text-muted-foreground">
+              Complete BVN + NIN verification (Level 2) to create giveaways.
+            </p>
+            <p className="mb-6 text-sm text-muted-foreground">Current level: {kycLevel}/2</p>
+            <Button
+              onClick={() => {
+                handleClose();
+                onOpenKYC();
+              }}
+            >
+              Complete Verification
+            </Button>
+          </div>
+        ) : (
+          <>
+            <SheetHeader className="sr-only">
+              <SheetTitle>Create Giveaway</SheetTitle>
+            </SheetHeader>
+            <div className="mx-auto mb-4 h-1 w-12 shrink-0 rounded-full bg-muted" />
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain [-webkit-overflow-scrolling:touch]">
+              <AnimatePresence mode="sync">{renderStep()}</AnimatePresence>
+            </div>
+          </>
+        )}
       </SheetContent>
     </Sheet>
   );
