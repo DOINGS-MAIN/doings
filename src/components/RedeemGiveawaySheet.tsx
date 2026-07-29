@@ -3,8 +3,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Gift, QrCode, Keyboard, CheckCircle, XCircle, Sparkles } from "lucide-react";
+import { Gift, QrCode, Keyboard, CheckCircle, XCircle, Sparkles, Loader2 } from "lucide-react";
 import { Giveaway, mapGiveawayRow } from "@/hooks/useGiveaways";
+import { useAuth } from "@/hooks/useAuth";
 import { giveaways as giveawaysApi } from "@/lib/supabase";
 
 interface RedeemGiveawaySheetProps {
@@ -22,10 +23,12 @@ export const RedeemGiveawaySheet = ({
   findGiveawayByCode,
   initialCode,
 }: RedeemGiveawaySheetProps) => {
+  const { profile } = useAuth();
   const [code, setCode] = useState("");
   const [mode, setMode] = useState<'input' | 'result'>('input');
   const [result, setResult] = useState<{ success: boolean; message: string; amount?: number } | null>(null);
   const [previewGiveaway, setPreviewGiveaway] = useState<Giveaway | null>(null);
+  const [redeeming, setRedeeming] = useState(false);
 
   const handleCodeChange = (value: string) => {
     const upperCode = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
@@ -66,10 +69,25 @@ export const RedeemGiveawaySheet = ({
   }, [isOpen, initialCode]);
 
   const handleRedeem = async () => {
-    const redeemResult = await onRedeem(code);
-    setResult(redeemResult);
-    setMode('result');
+    if (redeeming) return;
+    setRedeeming(true);
+    try {
+      const redeemResult = await onRedeem(code);
+      setResult(redeemResult);
+      setMode('result');
+    } finally {
+      setRedeeming(false);
+    }
   };
+
+  const isOwnGiveaway = Boolean(
+    profile?.id && previewGiveaway?.creatorId && profile.id === previewGiveaway.creatorId,
+  );
+  const canRedeem =
+    code.length === 6 &&
+    previewGiveaway?.status === "active" &&
+    !isOwnGiveaway &&
+    !redeeming;
 
   const handleClose = () => {
     setCode("");
@@ -190,12 +208,25 @@ export const RedeemGiveawaySheet = ({
                 Scan QR Code
               </Button>
 
+              {isOwnGiveaway && (
+                <p className="text-center text-sm text-destructive">
+                  You cannot redeem a giveaway you created. Share the code with someone else.
+                </p>
+              )}
+
               <Button
-                onClick={handleRedeem}
-                disabled={code.length !== 6}
+                onClick={() => void handleRedeem()}
+                disabled={!canRedeem}
                 className="w-full h-14 rounded-2xl bg-gradient-to-r from-primary to-accent text-primary-foreground font-bold text-lg"
               >
-                Redeem Now
+                {redeeming ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Redeeming…
+                  </>
+                ) : (
+                  "Redeem Now"
+                )}
               </Button>
             </motion.div>
           )}

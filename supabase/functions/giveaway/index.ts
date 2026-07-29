@@ -37,7 +37,10 @@ function getPathAction(url: string): { action: string; id?: string } {
 }
 
 function rpcErrorMessage(err: unknown): string {
-  const msg = String(err);
+  const msg =
+    err && typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string"
+      ? (err as { message: string }).message
+      : String(err);
   if (msg.includes("Insufficient")) return "Insufficient balance to fund giveaway";
   if (msg.includes("Minimum total")) return "Minimum total is ₦100";
   if (msg.includes("Minimum per person")) return "Minimum per person is ₦10";
@@ -48,6 +51,7 @@ function rpcErrorMessage(err: unknown): string {
   if (msg.includes("no longer active")) return "Giveaway is no longer active";
   if (msg.includes("Verify your email")) return "Verify your email to redeem giveaways";
   if (msg.includes("Cannot redeem your own")) return "Cannot redeem your own giveaway";
+  if (msg.includes("Wallet not found")) return "Wallet not found — contact support";
   if (msg.includes("exhausted")) return "Giveaway is exhausted";
   if (msg.includes("already redeemed")) return "You have already redeemed this giveaway";
   if (msg.includes("Only the creator")) return "Only the creator can stop a giveaway";
