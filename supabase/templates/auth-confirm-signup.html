@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="color-scheme" content="dark" />
+  <title>Confirm your Doings account</title>
+</head>
+<body style="margin:0;padding:0;background-color:#0f1116;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#0f1116;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background-color:#141820;border:1px solid #2a3140;border-radius:20px;overflow:hidden;">
+          <tr>
+            <td style="padding:32px 32px 24px;text-align:center;background:linear-gradient(180deg,#1a1f2b 0%,#141820 100%);">
+              <div style="display:inline-block;width:56px;height:56px;line-height:56px;border-radius:14px;background:linear-gradient(135deg,#ffd700 0%,#111111 100%);font-size:28px;font-weight:800;color:#ffffff;margin-bottom:16px;">D</div>
+              <h1 style="margin:0;font-size:24px;line-height:1.3;font-weight:800;color:#f5f3ea;">Confirm your Doings account</h1>
+              <p style="margin:12px 0 0;font-size:15px;line-height:1.6;color:#a8b0c0;">Spray the vibe. One tap to verify your email and start joining events.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 32px 28px;">
+              <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#d8dde7;">Hi there,</p>
+              <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#d8dde7;">
+                Thanks for signing up for <strong style="color:#f5c842;">Doings</strong>.
+                Confirm <strong style="color:#ffffff;">{{ .Email }}</strong> to finish creating your account.
+              </p>
+              <table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 auto 24px;">
+                <tr>
+                  <td align="center" style="border-radius:14px;background:linear-gradient(135deg,#f5c842 0%,#e6a817 100%);">
+                    <a href="{{ .ConfirmationURL }}" target="_blank" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:700;color:#0f1116;text-decoration:none;border-radius:14px;">
+                      Confirm my email
+                    </a>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#8b95a8;">
+                If the button doesn&apos;t work, copy and paste this link into your browser:
+              </p>
+              <p style="margin:0 0 24px;font-size:12px;line-height:1.6;word-break:break-all;">
+                <a href="{{ .ConfirmationURL }}" style="color:#f5c842;text-decoration:underline;">{{ .ConfirmationURL }}</a>
+              </p>
+              <p style="margin:0;font-size:13px;line-height:1.6;color:#8b95a8;">
+                If you didn&apos;t create a Doings account, you can safely ignore this email.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 32px;border-top:1px solid #2a3140;text-align:center;">
+              <p style="margin:0 0 6px;font-size:12px;line-height:1.5;color:#8b95a8;">Doings · Digital event engagement</p>
+              <p style="margin:0;font-size:12px;line-height:1.5;color:#6b7380;">
+                <a href="https://doingsapp.com" style="color:#f5c842;text-decoration:none;">doingsapp.com</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

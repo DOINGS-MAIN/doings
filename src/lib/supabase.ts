@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { SprayTheatrePlan, QueueCompressionTier } from "@/lib/sprayTheatrePlan";
+import { getCachedSession } from "@/lib/authSession";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? "").trim();
@@ -13,7 +14,7 @@ export const supabase = createClient(
 );
 
 async function authHeaders(): Promise<Record<string, string>> {
-  let { data: { session } } = await supabase.auth.getSession();
+  let session = await getCachedSession();
   const nowSec = Math.floor(Date.now() / 1000);
   if (session?.refresh_token) {
     const exp = session.expires_at ?? 0;
@@ -315,6 +316,8 @@ export const spray = {
     }),
   setPaused: (holdId: string, paused: boolean) =>
     supabase.rpc("set_spray_hold_paused", { p_hold_id: holdId, p_paused: paused }),
+  cleanupHolds: () =>
+    supabase.rpc("cleanup_spray_holds") as Promise<{ data: { expired: number; stale: number }[] | null }>,
 };
 
 // ── Giveaways ──

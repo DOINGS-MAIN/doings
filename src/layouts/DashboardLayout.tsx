@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { FloatingMoney } from "@/components/FloatingMoney";
@@ -32,6 +32,7 @@ import { useGiveaways, Giveaway } from "@/hooks/useGiveaways";
 import { toast } from "sonner";
 import { Currency } from "@/types/finance";
 import { useTransactionPin } from "@/hooks/useTransactionPin";
+import { useRecoverOrphanedSprayHolds } from "@/hooks/useRecoverOrphanedSprayHolds";
 import { DashboardShellContext, type DashboardShellValue } from "@/contexts/DashboardShellContext";
 
 export function DashboardLayout() {
@@ -124,17 +125,22 @@ export function DashboardLayout() {
     withdrawalFeeSettings,
   } = useMultiWallet();
 
+  useRecoverOrphanedSprayHolds(profile?.id, refreshBalances);
+
   const wasSprayActiveRef = useRef(false);
-  useEffect(() => {
-    if (wasSprayActiveRef.current && !isSprayActive) {
-      void refreshBalances();
-    }
-    wasSprayActiveRef.current = isSprayActive;
-  }, [isSprayActive, refreshBalances]);
+  const refreshBalancesRef = useRef(refreshBalances);
+  refreshBalancesRef.current = refreshBalances;
 
   useEffect(() => {
-    if (showSpraySetup) void refreshBalances();
-  }, [showSpraySetup, refreshBalances]);
+    if (wasSprayActiveRef.current && !isSprayActive) {
+      void refreshBalancesRef.current();
+    }
+    wasSprayActiveRef.current = isSprayActive;
+  }, [isSprayActive]);
+
+  useEffect(() => {
+    if (showSpraySetup) void refreshBalancesRef.current();
+  }, [showSpraySetup]);
 
   const { currentLevel: kycLevel, kycLoading, verifyLevel1, verifyLevel2 } = useKYC();
 
@@ -451,7 +457,8 @@ export function DashboardLayout() {
   const handleCreateNgnAccount = async (bvn?: string) => createNgnAccount(bvn);
   const handleCreateMonnifyAccount = async (bvn: string) => createNgnAccount(bvn);
 
-  const shellValue: DashboardShellValue = {
+  const shellValue: DashboardShellValue = useMemo(
+    () => ({
     user,
     profile,
     avatarData,
@@ -517,7 +524,59 @@ export function DashboardLayout() {
     signOut,
     updateProfile,
     setUsername,
-  };
+    }),
+    [
+      user,
+      profile,
+      avatarData,
+      kycLevel,
+      kycLoading,
+      ngnBalance,
+      ngnAvailableBalance,
+      ngnLockedBalance,
+      usdcBalance,
+      walletLoading,
+      balanceRefreshing,
+      refreshBalances,
+      activeCurrency,
+      transactions,
+      monnifyAccount,
+      ngnReservedAccount,
+      fundingProviderId,
+      blockradarAddresses,
+      createNgnAccount,
+      createMonnifyAccount,
+      createBlockradarAddress,
+      withdrawNGN,
+      withdrawUSDC,
+      verifyLevel1,
+      verifyLevel2,
+      events,
+      myEvents,
+      myEventsInitialLoading,
+      createEvent,
+      goLive,
+      endEvent,
+      deleteEvent,
+      findEventByCode,
+      getLiveEvents,
+      joinEvent,
+      createGiveaway,
+      redeemGiveaway,
+      stopGiveaway,
+      getMyGiveaways,
+      findGiveawayByCode,
+      liveEventsForList,
+      handleJoinEvent,
+      handleManageEvent,
+      handleGoLive,
+      handleEndEvent,
+      handleViewGiveaway,
+      signOut,
+      updateProfile,
+      setUsername,
+    ],
+  );
 
   return (
     <DashboardShellContext.Provider value={shellValue}>

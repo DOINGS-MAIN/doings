@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { getAppUserId } from "@/lib/appUser";
+import { debounceAsync } from "@/lib/debounceAsync";
 import { STAGE_SLOT_COUNT } from "@/hooks/useSprayStage";
 
 type QueueRow = {
@@ -16,6 +16,7 @@ export function useSprayQueuePosition(
 ) {
   const [position, setPosition] = useState<number | null>(null);
   const [totalActive, setTotalActive] = useState(0);
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
 
   const refresh = useCallback(async () => {
     if (!eventId || !holdId || !enabled) {
@@ -46,6 +47,8 @@ export function useSprayQueuePosition(
     setPosition(idx >= 0 ? idx + 1 : null);
   }, [eventId, holdId, enabled, isPausedLocally]);
 
+  refreshRef.current = refresh;
+
   useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -53,35 +56,31 @@ export function useSprayQueuePosition(
   useEffect(() => {
     if (!eventId || !enabled) return;
 
-    let channel: ReturnType<typeof supabase.channel> | null = null;
+    const debouncedRefresh = debounceAsync(() => {
+      void refreshRef.current();
+    }, 200);
 
-    const setup = async () => {
-      const appUserId = await getAppUserId();
-      if (!appUserId) return;
-
-      channel = supabase
-        .channel(`spray-queue-pos-${eventId}-${holdId ?? "none"}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "*",
-            schema: "public",
-            table: "spray_holds",
-            filter: `event_id=eq.${eventId}`,
-          },
-          () => {
-            void refresh();
-          },
-        )
-        .subscribe();
-    };
-
-    void setup();
+    const channel = supabase
+      .channel(`spray-queue-pos-${eventId}-${holdId ?? "none"}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "spray_holds",
+          filter: `event_id=eq.${eventId}`,
+        },
+        () => {
+          debouncedRefresh();
+        },
+      )
+      .subscribe();
 
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      debouncedRefresh.cancel();
+      supabase.removeChannel(channel);
     };
-  }, [eventId, holdId, enabled, refresh]);
+  }, [eventId, holdId, enabled]);
 
   const onProjector = !isPausedLocally && position != null && position <= STAGE_SLOT_COUNT;
 

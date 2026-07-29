@@ -12,6 +12,11 @@ Deno.serve(async (req) => {
   }
 
   const supabase = getServiceClient();
+  const { data: cleanup, error: cleanupErr } = await supabase.rpc("cleanup_spray_holds");
+  if (cleanupErr) {
+    console.warn("cleanup_spray_holds:", cleanupErr.message);
+  }
+
   const { data: discrepancies, error } = await supabase.rpc("reconcile_wallets");
 
   if (error) {
@@ -43,6 +48,7 @@ Deno.serve(async (req) => {
     ok: true,
     reconciled_at: new Date().toISOString(),
     discrepancies_found: count,
+    spray_holds_cleaned: cleanup ?? null,
     discrepancies: count > 0 ? discrepancies : undefined,
   });
 });

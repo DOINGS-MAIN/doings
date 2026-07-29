@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PostgrestError } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
-import { useMultiWallet } from "@/hooks/useMultiWallet";
+import { useDashboardShell } from "@/contexts/DashboardShellContext";
 
 export interface LeaderboardEntry {
   id: string;
@@ -97,7 +97,7 @@ function mapRow(row: Record<string, unknown>, appUserId: string | undefined): Le
 
 export function useLeaderboard(period: TimePeriod) {
   const { profile } = useAuth();
-  const { transactions } = useMultiWallet();
+  const { transactions } = useDashboardShell();
 
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);

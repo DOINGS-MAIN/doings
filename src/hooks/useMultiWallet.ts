@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { getAppUserId } from "@/lib/appUser";
+import { debounceAsync } from "@/lib/debounceAsync";
 import { supabase, wallet, withdrawals } from "@/lib/supabase";
 import {
   Currency,
@@ -31,14 +32,14 @@ export const useMultiWallet = () => {
     DEFAULT_WITHDRAWAL_FEE_SETTINGS
   );
 
-  const fetchWallets = useCallback(async () => {
-    const appUserId = await getAppUserId();
-    if (!appUserId) return;
+  const fetchWallets = useCallback(async (appUserId?: string | null) => {
+    const uid = appUserId ?? (await getAppUserId());
+    if (!uid) return;
 
     const { data: wallets } = await supabase
       .from("wallets")
       .select("currency, balance, locked_balance")
-      .eq("user_id", appUserId);
+      .eq("user_id", uid);
 
     setNgnBalance(0);
     setNgnLockedBalance(0);
@@ -54,14 +55,14 @@ export const useMultiWallet = () => {
     }
   }, []);
 
-  const fetchTransactions = useCallback(async () => {
-    const appUserId = await getAppUserId();
-    if (!appUserId) return;
+  const fetchTransactions = useCallback(async (appUserId?: string | null) => {
+    const uid = appUserId ?? (await getAppUserId());
+    if (!uid) return;
 
     const { data: txns } = await supabase
       .from("transactions")
       .select("*")
-      .eq("user_id", appUserId)
+      .eq("user_id", uid)
       .order("created_at", { ascending: false })
       .limit(50);
 
@@ -88,9 +89,9 @@ export const useMultiWallet = () => {
     }
   }, []);
 
-  const fetchNgnReservedAccount = useCallback(async () => {
-    const appUserId = await getAppUserId();
-    if (!appUserId) return;
+  const fetchNgnReservedAccount = useCallback(async (appUserId?: string | null) => {
+    const uid = appUserId ?? (await getAppUserId());
+    if (!uid) return;
 
     const { data: providerId } = await wallet.getWalletFundingProvider();
     const provider = (providerId as string) || "monnify";
@@ -99,7 +100,7 @@ export const useMultiWallet = () => {
     const { data } = await supabase
       .from("reserved_accounts")
       .select("*")
-      .eq("user_id", appUserId)
+      .eq("user_id", uid)
       .eq("provider_id", provider)
       .limit(1)
       .maybeSingle();
@@ -120,11 +121,11 @@ export const useMultiWallet = () => {
     }
   }, []);
 
-  const fetchBlockradarAddresses = useCallback(async () => {
-    const appUserId = await getAppUserId();
-    if (!appUserId) return;
+  const fetchBlockradarAddresses = useCallback(async (appUserId?: string | null) => {
+    const uid = appUserId ?? (await getAppUserId());
+    if (!uid) return;
 
-    const { data: wallets } = await supabase.from("wallets").select("id").eq("user_id", appUserId);
+    const { data: wallets } = await supabase.from("wallets").select("id").eq("user_id", uid);
     const walletIds = wallets?.map((w) => w.id) ?? [];
     if (walletIds.length === 0) {
       setBlockradarAddresses([]);
@@ -171,34 +172,48 @@ export const useMultiWallet = () => {
 
     const load = async () => {
       setLoading(true);
+      const appUserId = await getAppUserId();
+      if (!appUserId) {
+        if (!cancelled) setLoading(false);
+        return;
+      }
+
       await Promise.all([
-        fetchWallets(),
-        fetchTransactions(),
-        fetchNgnReservedAccount(),
-        fetchBlockradarAddresses(),
+        fetchWallets(appUserId),
+        fetchTransactions(appUserId),
+        fetchNgnReservedAccount(appUserId),
+        fetchBlockradarAddresses(appUserId),
         fetchWithdrawalFeeSettings(),
       ]);
       if (!cancelled) setLoading(false);
     };
+
+    let debouncedWalletSync: ReturnType<typeof debounceAsync> | null = null;
 
     const setupRealtime = async () => {
       await load();
       const appUserId = await getAppUserId();
       if (!appUserId || cancelled) return;
 
+      debouncedWalletSync = debounceAsync(() => {
+        void fetchWallets(appUserId);
+        void fetchTransactions(appUserId);
+      }, 250);
+
       channel = supabase
         .channel(`wallet-${appUserId}`)
         .on(
           "postgres_changes",
           { event: "UPDATE", schema: "public", table: "wallets", filter: `user_id=eq.${appUserId}` },
-          () => { void fetchWallets(); },
+          () => {
+            debouncedWalletSync?.();
+          },
         )
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "transactions", filter: `user_id=eq.${appUserId}` },
           () => {
-            void fetchTransactions();
-            void fetchWallets();
+            debouncedWalletSync?.();
           },
         )
         .subscribe();
@@ -217,6 +232,7 @@ export const useMultiWallet = () => {
 
     return () => {
       cancelled = true;
+      debouncedWalletSync?.cancel();
       document.removeEventListener("visibilitychange", refreshOnVisible);
       window.removeEventListener("focus", refreshOnVisible);
       if (channel) supabase.removeChannel(channel);
