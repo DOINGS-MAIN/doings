@@ -2,17 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Users, X, Maximize2, Loader2 } from "lucide-react";
 import { EventData } from "@/hooks/useEvents";
-import { Giveaway } from "@/hooks/useGiveaways";
 import { useLiveSprayHolds } from "@/hooks/useLiveSprayHolds";
 import { buildEventJoinLink } from "@/lib/shareLinks";
 import { EventScreenDanceFloor } from "@/components/EventScreenDanceFloor";
 import { EventScreenIdleView } from "@/components/EventScreenIdleView";
 import { EventScreenJoinQr } from "@/components/EventScreenJoinQr";
+import { EventScreenGiveawaysBanner } from "@/components/EventScreenGiveawaysBanner";
+import type { ProjectorGiveawayDisplay } from "@/hooks/useEventScreenGiveaways";
 import { STAGE_SLOT_COUNT } from "@/hooks/useSprayStage";
 
 export interface EventScreenViewProps {
   event: EventData;
-  giveaways: Giveaway[];
+  giveaways: ProjectorGiveawayDisplay[];
   onBack: () => void;
   /** Hide host close control for anonymous public viewers. */
   showCloseButton?: boolean;
@@ -24,7 +25,7 @@ export interface EventScreenViewProps {
 
 export const EventScreenView = ({
   event,
-  giveaways: _giveaways,
+  giveaways,
   onBack,
   showCloseButton = true,
   embed = false,
@@ -92,6 +93,7 @@ export const EventScreenView = ({
         onBack={onBack}
         showCloseButton={showCloseButton}
         embed={embed}
+        giveaways={giveaways}
       />
     );
   }
@@ -111,6 +113,7 @@ export const EventScreenView = ({
   if (embed) {
     return (
       <div className="relative flex min-h-dvh max-h-dvh flex-col overflow-hidden bg-black">
+        <EventScreenGiveawaysBanner giveaways={giveaways} compact />
         <div className="relative z-10 min-h-0 flex-1">
           {loading && danceFloorSprayers.length === 0 ? (
             <div className="flex h-full items-center justify-center gap-2 text-white/50">
@@ -129,6 +132,8 @@ export const EventScreenView = ({
   return (
     <div className="relative flex min-h-dvh max-h-dvh flex-col overflow-hidden bg-black">
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/70" />
+
+      <EventScreenGiveawaysBanner giveaways={giveaways} />
 
       <div className="relative z-20 flex shrink-0 items-center justify-between px-5 py-3 md:px-8">
         <div className="flex min-w-0 items-center gap-3">

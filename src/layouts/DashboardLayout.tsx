@@ -435,27 +435,33 @@ export function DashboardLayout() {
   const handleCreateGiveaway = useCallback(
     async (data: Parameters<typeof createGiveaway>[0]) => {
       const giveaway = await createGiveaway(data);
+      await refreshBalances();
       toast.success("Giveaway created! 🎁");
       return { code: giveaway.code, id: giveaway.id };
     },
-    [createGiveaway],
+    [createGiveaway, refreshBalances],
   );
 
   const handleRedeemGiveaway = useCallback(
-    async (code: string) => redeemGiveaway(code),
-    [redeemGiveaway],
+    async (code: string) => {
+      const result = await redeemGiveaway(code);
+      if (result.success) await refreshBalances();
+      return result;
+    },
+    [redeemGiveaway, refreshBalances],
   );
 
   const handleStopGiveaway = useCallback(
     async (giveawayId: string, pin: string) => {
       const refund = await stopGiveaway(giveawayId, pin);
+      await refreshBalances();
       if (refund > 0) {
         toast.success(`₦${refund.toLocaleString()} refunded to your wallet`);
       } else {
         toast.info("Giveaway stopped");
       }
     },
-    [stopGiveaway],
+    [stopGiveaway, refreshBalances],
   );
 
   const handleViewGiveaway = useCallback(
@@ -828,6 +834,11 @@ export function DashboardLayout() {
             balance={ngnBalance}
             liveEvents={myLiveEventsForGiveaway}
             onPinNotSet={openPinSettings}
+            kycLevel={kycLevel}
+            onOpenKYC={() => {
+              setShowCreateGiveaway(false);
+              setShowKYC(true);
+            }}
           />
         )}
 
