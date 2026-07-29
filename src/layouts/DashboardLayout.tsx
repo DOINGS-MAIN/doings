@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { FloatingMoney } from "@/components/FloatingMoney";
@@ -32,14 +32,17 @@ import { useGiveaways, Giveaway } from "@/hooks/useGiveaways";
 import { toast } from "sonner";
 import { Currency } from "@/types/finance";
 import { useTransactionPin } from "@/hooks/useTransactionPin";
+import { useRecoverOrphanedSprayHolds } from "@/hooks/useRecoverOrphanedSprayHolds";
 import { DashboardShellContext, type DashboardShellValue } from "@/contexts/DashboardShellContext";
 
 export function DashboardLayout() {
-  const { user, profile, signOut, updateProfile, setUsername, refreshProfile } = useAuth();
+  const { user, profile, signOut, updateProfile, setUsername, refreshProfile, initialized } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
-  const { hasPin, loading: pinLoading } = useTransactionPin();
+  const { hasPin, loading: pinLoading, setPin, refresh: refreshPin } = useTransactionPin(
+    initialized ? user?.id : undefined,
+  );
 
   const [showTransactionPin, setShowTransactionPin] = useState(false);
   const [showFundSheet, setShowFundSheet] = useState(false);
@@ -67,10 +70,9 @@ export function DashboardLayout() {
   }, [isSprayActive]);
 
   useEffect(() => {
-    if (!pinLoading && hasPin === false) {
-      setShowTransactionPin(true);
-    }
-  }, [hasPin, pinLoading]);
+    if (!initialized || !user || pinLoading || hasPin !== false) return;
+    setShowTransactionPin(true);
+  }, [initialized, user, hasPin, pinLoading]);
 
 
   const [showAvatarCustomization, setShowAvatarCustomization] = useState(false);
@@ -124,17 +126,22 @@ export function DashboardLayout() {
     withdrawalFeeSettings,
   } = useMultiWallet();
 
+  useRecoverOrphanedSprayHolds(profile?.id, refreshBalances);
+
   const wasSprayActiveRef = useRef(false);
-  useEffect(() => {
-    if (wasSprayActiveRef.current && !isSprayActive) {
-      void refreshBalances();
-    }
-    wasSprayActiveRef.current = isSprayActive;
-  }, [isSprayActive, refreshBalances]);
+  const refreshBalancesRef = useRef(refreshBalances);
+  refreshBalancesRef.current = refreshBalances;
 
   useEffect(() => {
-    if (showSpraySetup) void refreshBalances();
-  }, [showSpraySetup, refreshBalances]);
+    if (wasSprayActiveRef.current && !isSprayActive) {
+      void refreshBalancesRef.current();
+    }
+    wasSprayActiveRef.current = isSprayActive;
+  }, [isSprayActive]);
+
+  useEffect(() => {
+    if (showSpraySetup) void refreshBalancesRef.current();
+  }, [showSpraySetup]);
 
   const { currentLevel: kycLevel, kycLoading, verifyLevel1, verifyLevel2 } = useKYC();
 
@@ -162,39 +169,48 @@ export function DashboardLayout() {
     findGiveawayByCode,
   } = useGiveaways();
 
-  const liveEventsForList = getLiveEvents().map((event) => ({
-    id: event.id,
-    title: event.title,
-    type: event.type.charAt(0).toUpperCase() + event.type.slice(1),
-    location: event.location,
-    participants: event.participants,
-    timeLeft: event.status === "live" ? "Live Now" : "Scheduled",
-    emoji: event.emoji,
-    gradient: event.gradient,
-  }));
+  const liveEventsForList = useMemo(
+    () =>
+      getLiveEvents().map((event) => ({
+        id: event.id,
+        title: event.title,
+        type: event.type.charAt(0).toUpperCase() + event.type.slice(1),
+        location: event.location,
+        participants: event.participants,
+        timeLeft: event.status === "live" ? "Live Now" : "Scheduled",
+        emoji: event.emoji,
+        gradient: event.gradient,
+      })),
+    [getLiveEvents],
+  );
 
-  const openPinSettings = () => setShowTransactionPin(true);
+  const myLiveEventsForGiveaway = useMemo(() => getMyLiveEvents(), [getMyLiveEvents]);
 
-  const handleJoinEvent = async (event: EventData) => {
-    if (event.status !== "live") {
-      toast.info("This event hasn't started yet");
-      return;
-    }
-    if (profile?.id && event.hostId === profile.id) {
-      toast.info("You're hosting this event — share the code for guests to spray you");
-      setSelectedEventDetails(event);
-      setShowEventDetails(true);
-      return;
-    }
-    try {
-      await joinEvent(event.id);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not join event");
-      return;
-    }
-    setSelectedEvent(event);
-    setShowSpraySetup(true);
-  };
+  const openPinSettings = useCallback(() => setShowTransactionPin(true), []);
+
+  const handleJoinEvent = useCallback(
+    async (event: EventData) => {
+      if (event.status !== "live") {
+        toast.info("This event hasn't started yet");
+        return;
+      }
+      if (profile?.id && event.hostId === profile.id) {
+        toast.info("You're hosting this event — share the code for guests to spray you");
+        setSelectedEventDetails(event);
+        setShowEventDetails(true);
+        return;
+      }
+      try {
+        await joinEvent(event.id);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not join event");
+        return;
+      }
+      setSelectedEvent(event);
+      setShowSpraySetup(true);
+    },
+    [joinEvent, profile?.id],
+  );
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -386,72 +402,100 @@ export function DashboardLayout() {
     }
   };
 
-  const handleGoLive = (eventId: string) => {
-    goLive(eventId);
-    toast.success("Your event is now LIVE! 🎉");
-  };
+  const handleGoLive = useCallback(
+    (eventId: string) => {
+      goLive(eventId);
+      toast.success("Your event is now LIVE! 🎉");
+    },
+    [goLive],
+  );
 
-  const handleEndEvent = (eventId: string) => {
-    endEvent(eventId);
-    toast.success("Event ended successfully");
-  };
+  const handleEndEvent = useCallback(
+    (eventId: string) => {
+      endEvent(eventId);
+      toast.success("Event ended successfully");
+    },
+    [endEvent],
+  );
 
-  const handleManageEvent = (event: EventData) => {
+  const handleManageEvent = useCallback((event: EventData) => {
     setSelectedEventDetails(event);
     setShowEventDetails(true);
-  };
+  }, []);
 
-  const handleUpdateEvent = async (eventId: string, body: Record<string, unknown>) => {
-    const updated = await persistEventPatch(eventId, body);
-    if (updated) setSelectedEventDetails(updated);
-    return updated;
-  };
+  const handleUpdateEvent = useCallback(
+    async (eventId: string, body: Record<string, unknown>) => {
+      const updated = await persistEventPatch(eventId, body);
+      if (updated) setSelectedEventDetails(updated);
+      return updated;
+    },
+    [persistEventPatch],
+  );
 
-  const handleCreateGiveaway = async (data: Parameters<typeof createGiveaway>[0]) => {
-    const giveaway = await createGiveaway(data);
-    toast.success("Giveaway created! 🎁");
-    return { code: giveaway.code, id: giveaway.id };
-  };
+  const handleCreateGiveaway = useCallback(
+    async (data: Parameters<typeof createGiveaway>[0]) => {
+      const giveaway = await createGiveaway(data);
+      toast.success("Giveaway created! 🎁");
+      return { code: giveaway.code, id: giveaway.id };
+    },
+    [createGiveaway],
+  );
 
-  const handleRedeemGiveaway = async (code: string) => {
-    return redeemGiveaway(code);
-  };
+  const handleRedeemGiveaway = useCallback(
+    async (code: string) => redeemGiveaway(code),
+    [redeemGiveaway],
+  );
 
-  const handleStopGiveaway = async (giveawayId: string, pin: string) => {
-    const refund = await stopGiveaway(giveawayId, pin);
-    if (refund > 0) {
-      toast.success(`₦${refund.toLocaleString()} refunded to your wallet`);
-    } else {
-      toast.info("Giveaway stopped");
-    }
-  };
+  const handleStopGiveaway = useCallback(
+    async (giveawayId: string, pin: string) => {
+      const refund = await stopGiveaway(giveawayId, pin);
+      if (refund > 0) {
+        toast.success(`₦${refund.toLocaleString()} refunded to your wallet`);
+      } else {
+        toast.info("Giveaway stopped");
+      }
+    },
+    [stopGiveaway],
+  );
 
-  const handleViewGiveaway = async (giveaway: Giveaway) => {
-    const id = giveaway.id;
-    setSelectedGiveaway(giveaway);
-    setShowGiveawayDetails(true);
-    try {
-      const enriched = await loadGiveawayDetail(giveaway);
-      setSelectedGiveaway((cur) => (cur?.id === id ? enriched : cur));
-    } catch {
-      /* list snapshot is enough */
-    }
-  };
+  const handleViewGiveaway = useCallback(
+    async (giveaway: Giveaway) => {
+      const id = giveaway.id;
+      setSelectedGiveaway(giveaway);
+      setShowGiveawayDetails(true);
+      try {
+        const enriched = await loadGiveawayDetail(giveaway);
+        setSelectedGiveaway((cur) => (cur?.id === id ? enriched : cur));
+      } catch {
+        /* list snapshot is enough */
+      }
+    },
+    [loadGiveawayDetail],
+  );
 
-  const handleFundNGN = (_amount: number, _description: string) => {
+  const liveEventsForJoin = useMemo(() => getLiveEvents(), [getLiveEvents]);
+
+  const handleFundNGN = useCallback((_amount: number, _description: string) => {
     toast.info("Transfer to your reserved account. Balance updates automatically.");
     setShowFundSheet(false);
-  };
+  }, []);
 
-  const handleFundUSDC = (_amount: number, _provider: "blockradar", _description: string) => {
+  const handleFundUSDC = useCallback((_amount: number, _provider: "blockradar", _description: string) => {
     toast.info("Send USDC to your deposit address. Balance updates automatically.");
     setShowFundSheet(false);
-  };
+  }, []);
 
-  const handleCreateNgnAccount = async (bvn?: string) => createNgnAccount(bvn);
-  const handleCreateMonnifyAccount = async (bvn: string) => createNgnAccount(bvn);
+  const handleCreateNgnAccount = useCallback(
+    async (bvn?: string) => createNgnAccount(bvn),
+    [createNgnAccount],
+  );
+  const handleCreateMonnifyAccount = useCallback(
+    async (bvn: string) => createNgnAccount(bvn),
+    [createNgnAccount],
+  );
 
-  const shellValue: DashboardShellValue = {
+  const shellValue: DashboardShellValue = useMemo(
+    () => ({
     user,
     profile,
     avatarData,
@@ -517,7 +561,60 @@ export function DashboardLayout() {
     signOut,
     updateProfile,
     setUsername,
-  };
+    }),
+    [
+      user,
+      profile,
+      avatarData,
+      kycLevel,
+      kycLoading,
+      ngnBalance,
+      ngnAvailableBalance,
+      ngnLockedBalance,
+      usdcBalance,
+      walletLoading,
+      balanceRefreshing,
+      refreshBalances,
+      activeCurrency,
+      transactions,
+      monnifyAccount,
+      ngnReservedAccount,
+      fundingProviderId,
+      blockradarAddresses,
+      createNgnAccount,
+      createMonnifyAccount,
+      createBlockradarAddress,
+      withdrawNGN,
+      withdrawUSDC,
+      verifyLevel1,
+      verifyLevel2,
+      events,
+      myEvents,
+      myEventsInitialLoading,
+      createEvent,
+      goLive,
+      endEvent,
+      deleteEvent,
+      findEventByCode,
+      getLiveEvents,
+      joinEvent,
+      createGiveaway,
+      redeemGiveaway,
+      stopGiveaway,
+      getMyGiveaways,
+      findGiveawayByCode,
+      liveEventsForList,
+      handleJoinEvent,
+      handleManageEvent,
+      handleGoLive,
+      handleEndEvent,
+      handleViewGiveaway,
+      handleUpdateEvent,
+      signOut,
+      updateProfile,
+      setUsername,
+    ],
+  );
 
   return (
     <DashboardShellContext.Provider value={shellValue}>
@@ -543,25 +640,27 @@ export function DashboardLayout() {
 
         <BottomNav />
 
-        <FundWalletSheet
-          isOpen={showFundSheet}
-          onClose={() => setShowFundSheet(false)}
-          onFundNGN={handleFundNGN}
-          onFundUSDC={handleFundUSDC}
-          activeCurrency={activeCurrency}
-          kycLevel={kycLevel}
-          onOpenKYC={() => {
-            setShowFundSheet(false);
-            setShowKYC(true);
-          }}
-          fundingProviderId={fundingProviderId}
-          ngnReservedAccount={ngnReservedAccount}
-          monnifyAccount={monnifyAccount}
-          onCreateNgnAccount={handleCreateNgnAccount}
-          onCreateMonnifyAccount={handleCreateMonnifyAccount}
-          blockradarAddresses={blockradarAddresses}
-          onCreateBlockradarAddress={createBlockradarAddress}
-        />
+        {showFundSheet && (
+          <FundWalletSheet
+            isOpen={showFundSheet}
+            onClose={() => setShowFundSheet(false)}
+            onFundNGN={handleFundNGN}
+            onFundUSDC={handleFundUSDC}
+            activeCurrency={activeCurrency}
+            kycLevel={kycLevel}
+            onOpenKYC={() => {
+              setShowFundSheet(false);
+              setShowKYC(true);
+            }}
+            fundingProviderId={fundingProviderId}
+            ngnReservedAccount={ngnReservedAccount}
+            monnifyAccount={monnifyAccount}
+            onCreateNgnAccount={handleCreateNgnAccount}
+            onCreateMonnifyAccount={handleCreateMonnifyAccount}
+            blockradarAddresses={blockradarAddresses}
+            onCreateBlockradarAddress={createBlockradarAddress}
+          />
+        )}
 
         <AnimatePresence>
           {showHistory && (
@@ -573,21 +672,23 @@ export function DashboardLayout() {
           )}
         </AnimatePresence>
 
-        <SpraySetupSheet
-          isOpen={showSpraySetup}
-          onClose={() => {
-            setShowSpraySetup(false);
-            setSelectedEvent(null);
-          }}
-          onStartSpray={handleStartSpray}
-          balance={ngnAvailableBalance}
-          eventName={selectedEvent?.title || ""}
-          kycLevel={kycLevel}
-          hasPin={hasPin}
-          isHost={Boolean(profile?.id && selectedEvent?.hostId === profile.id)}
-          onOpenKYC={() => setShowKYC(true)}
-          onPinNotSet={openPinSettings}
-        />
+        {showSpraySetup && selectedEvent && (
+          <SpraySetupSheet
+            isOpen={showSpraySetup}
+            onClose={() => {
+              setShowSpraySetup(false);
+              setSelectedEvent(null);
+            }}
+            onStartSpray={handleStartSpray}
+            balance={ngnAvailableBalance}
+            eventName={selectedEvent.title}
+            kycLevel={kycLevel}
+            hasPin={hasPin}
+            isHost={Boolean(profile?.id && selectedEvent.hostId === profile.id)}
+            onOpenKYC={() => setShowKYC(true)}
+            onPinNotSet={openPinSettings}
+          />
+        )}
 
         <AnimatePresence>
           {isSprayActive && (
@@ -608,127 +709,164 @@ export function DashboardLayout() {
           )}
         </AnimatePresence>
 
-        <AvatarCustomization
-          isOpen={showAvatarCustomization}
-          onClose={() => setShowAvatarCustomization(false)}
-          onSave={async (data) => {
-            try {
-              await saveAvatarData(data);
-              toast.success("Avatar saved! 🎉");
-              setShowAvatarCustomization(false);
-            } catch (err) {
-              toast.error(err instanceof Error ? err.message : "Could not save avatar");
+        {showAvatarCustomization && (
+          <AvatarCustomization
+            isOpen={showAvatarCustomization}
+            onClose={() => setShowAvatarCustomization(false)}
+            onSave={async (data) => {
+              try {
+                await saveAvatarData(data);
+                toast.success("Avatar saved! 🎉");
+                setShowAvatarCustomization(false);
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : "Could not save avatar");
+              }
+            }}
+            currentAvatar={avatarData}
+            saving={savingAvatar}
+          />
+        )}
+
+        {showCreateEvent && (
+          <CreateEventSheet
+            isOpen={showCreateEvent}
+            onClose={() => setShowCreateEvent(false)}
+            onCreateEvent={createEvent}
+          />
+        )}
+
+        {showEventDetails && selectedEventDetails && (
+          <EventDetailsSheet
+            event={selectedEventDetails}
+            isOpen={showEventDetails}
+            onClose={() => {
+              setShowEventDetails(false);
+              setSelectedEventDetails(null);
+            }}
+            onUpdateEvent={handleUpdateEvent}
+            onGoLive={handleGoLive}
+            onEndEvent={handleEndEvent}
+            onDelete={deleteEvent}
+          />
+        )}
+
+        {showJoinEvent && (
+          <JoinEventSheet
+            isOpen={showJoinEvent}
+            onClose={() => {
+              setShowJoinEvent(false);
+              setJoinEventInitialCode(undefined);
+            }}
+            onJoinEvent={handleJoinEvent}
+            findEventByCode={findEventByCode}
+            liveEvents={liveEventsForJoin}
+            initialCode={joinEventInitialCode}
+          />
+        )}
+
+        {showBankAccounts && (
+          <BankAccountsSheet open={showBankAccounts} onOpenChange={setShowBankAccounts} />
+        )}
+
+        {showKYC && (
+          <KYCVerificationSheet
+            open={showKYC}
+            onOpenChange={setShowKYC}
+            currentLevel={kycLevel}
+            onVerifyLevel1={verifyLevel1}
+            onVerifyLevel2={verifyLevel2}
+          />
+        )}
+
+        {showWithdraw && (
+          <WithdrawSheet
+            open={showWithdraw}
+            onOpenChange={setShowWithdraw}
+            onOpenBankAccounts={() => setShowBankAccounts(true)}
+            onOpenKYC={() => setShowKYC(true)}
+            activeCurrency={activeCurrency}
+            kycLevel={kycLevel}
+            ngnBalance={ngnBalance}
+            usdcBalance={usdcBalance}
+            ngnWithdrawalFees={withdrawalFeeSettings}
+            onWithdrawNGN={(amount, bankCode, accountNumber, accountName, pin) =>
+              withdrawNGN(amount, bankCode, accountNumber, accountName, pin)
             }
-          }}
-          currentAvatar={avatarData}
-          saving={savingAvatar}
-        />
+            onWithdrawUSDC={(amount, toAddress, network, provider, fee, pin) =>
+              withdrawUSDC(amount, toAddress, network, provider, fee, pin)
+            }
+            onPinNotSet={openPinSettings}
+          />
+        )}
 
-        <CreateEventSheet
-          isOpen={showCreateEvent}
-          onClose={() => setShowCreateEvent(false)}
-          onCreateEvent={createEvent}
-        />
+        {showSendMoney && (
+          <SendMoneySheet
+            open={showSendMoney}
+            onOpenChange={setShowSendMoney}
+            onPinNotSet={openPinSettings}
+          />
+        )}
 
-        <EventDetailsSheet
-          event={selectedEventDetails}
-          isOpen={showEventDetails}
-          onClose={() => {
-            setShowEventDetails(false);
-            setSelectedEventDetails(null);
-          }}
-          onUpdateEvent={handleUpdateEvent}
-          onGoLive={handleGoLive}
-          onEndEvent={handleEndEvent}
-          onDelete={deleteEvent}
-        />
+        {showConvert && (
+          <ConvertSheet
+            open={showConvert}
+            onOpenChange={setShowConvert}
+            onOpenKYC={() => setShowKYC(true)}
+            onPinNotSet={openPinSettings}
+            kycLevel={kycLevel}
+            ngnBalance={ngnBalance}
+            usdcBalance={usdcBalance}
+            onSuccess={() => void refreshBalances()}
+          />
+        )}
 
-        <JoinEventSheet
-          isOpen={showJoinEvent}
-          onClose={() => {
-            setShowJoinEvent(false);
-            setJoinEventInitialCode(undefined);
-          }}
-          onJoinEvent={handleJoinEvent}
-          findEventByCode={findEventByCode}
-          liveEvents={getLiveEvents()}
-          initialCode={joinEventInitialCode}
-        />
+        {showCreateGiveaway && (
+          <CreateGiveawaySheet
+            isOpen={showCreateGiveaway}
+            onClose={() => setShowCreateGiveaway(false)}
+            onCreateGiveaway={handleCreateGiveaway}
+            balance={ngnBalance}
+            liveEvents={myLiveEventsForGiveaway}
+            onPinNotSet={openPinSettings}
+          />
+        )}
 
-        <BankAccountsSheet open={showBankAccounts} onOpenChange={setShowBankAccounts} />
+        {showGiveawayDetails && selectedGiveaway && (
+          <GiveawayDetailsSheet
+            giveaway={selectedGiveaway}
+            isOpen={showGiveawayDetails}
+            onClose={() => {
+              setShowGiveawayDetails(false);
+              setSelectedGiveaway(null);
+            }}
+            onStop={handleStopGiveaway}
+            onPinNotSet={openPinSettings}
+          />
+        )}
 
-        <KYCVerificationSheet
-          open={showKYC}
-          onOpenChange={setShowKYC}
-          currentLevel={kycLevel}
-          onVerifyLevel1={verifyLevel1}
-          onVerifyLevel2={verifyLevel2}
-        />
+        {showTransactionPin && (
+          <TransactionPinSheet
+            open={showTransactionPin}
+            onOpenChange={setShowTransactionPin}
+            hasPin={hasPin}
+            loading={pinLoading}
+            setPin={setPin}
+            refreshPin={refreshPin}
+          />
+        )}
 
-        <WithdrawSheet
-          open={showWithdraw}
-          onOpenChange={setShowWithdraw}
-          onOpenBankAccounts={() => setShowBankAccounts(true)}
-          onOpenKYC={() => setShowKYC(true)}
-          activeCurrency={activeCurrency}
-          kycLevel={kycLevel}
-          ngnBalance={ngnBalance}
-          usdcBalance={usdcBalance}
-          ngnWithdrawalFees={withdrawalFeeSettings}
-          onWithdrawNGN={(amount, bankCode, accountNumber, accountName, pin) =>
-            withdrawNGN(amount, bankCode, accountNumber, accountName, pin)
-          }
-          onWithdrawUSDC={(amount, toAddress, network, provider, fee, pin) =>
-            withdrawUSDC(amount, toAddress, network, provider, fee, pin)
-          }
-          onPinNotSet={openPinSettings}
-        />
-
-        <SendMoneySheet open={showSendMoney} onOpenChange={setShowSendMoney} onPinNotSet={openPinSettings} />
-
-        <ConvertSheet
-          open={showConvert}
-          onOpenChange={setShowConvert}
-          onOpenKYC={() => setShowKYC(true)}
-          onPinNotSet={openPinSettings}
-          kycLevel={kycLevel}
-          ngnBalance={ngnBalance}
-          usdcBalance={usdcBalance}
-          onSuccess={() => void refreshBalances()}
-        />
-
-        <CreateGiveawaySheet
-          isOpen={showCreateGiveaway}
-          onClose={() => setShowCreateGiveaway(false)}
-          onCreateGiveaway={handleCreateGiveaway}
-          balance={ngnBalance}
-          liveEvents={getMyLiveEvents()}
-          onPinNotSet={openPinSettings}
-        />
-
-        <GiveawayDetailsSheet
-          giveaway={selectedGiveaway}
-          isOpen={showGiveawayDetails}
-          onClose={() => {
-            setShowGiveawayDetails(false);
-            setSelectedGiveaway(null);
-          }}
-          onStop={handleStopGiveaway}
-          onPinNotSet={openPinSettings}
-        />
-
-        <TransactionPinSheet open={showTransactionPin} onOpenChange={setShowTransactionPin} />
-
-        <RedeemGiveawaySheet
-          isOpen={showRedeemGiveaway}
-          onClose={() => {
-            setShowRedeemGiveaway(false);
-            setRedeemGiveawayInitialCode(undefined);
-          }}
-          onRedeem={handleRedeemGiveaway}
-          findGiveawayByCode={findGiveawayByCode}
-          initialCode={redeemGiveawayInitialCode}
-        />
+        {showRedeemGiveaway && (
+          <RedeemGiveawaySheet
+            isOpen={showRedeemGiveaway}
+            onClose={() => {
+              setShowRedeemGiveaway(false);
+              setRedeemGiveawayInitialCode(undefined);
+            }}
+            onRedeem={handleRedeemGiveaway}
+            findGiveawayByCode={findGiveawayByCode}
+            initialCode={redeemGiveawayInitialCode}
+          />
+        )}
 
         <AnimatePresence>
           {showNotifications && (

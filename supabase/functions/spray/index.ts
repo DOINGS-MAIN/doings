@@ -287,10 +287,10 @@ Deno.serve(async (req) => {
   }
 
   if (body.validate_only) {
-    const holdExpiresSec = theatrePlan.session_duration_sec + 600;
+    const holdExpiresSec = theatrePlan.session_duration_sec + 120;
 
     try {
-      await supabase.rpc("release_expired_spray_holds");
+      await supabase.rpc("cleanup_spray_holds");
 
       const { data: holdId, error: holdErr } = await supabase.rpc("create_spray_hold", {
         p_event_id: body.event_id,

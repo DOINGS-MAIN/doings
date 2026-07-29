@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { getAppUserId } from "@/lib/appUser";
+import { debounceAsync } from "@/lib/debounceAsync";
 import type { AvatarData } from "@/types/avatar";
 import { avatarDataFromProfile } from "@/types/avatar";
 
@@ -74,6 +74,7 @@ export function useEventSprayFeed(eventId: string | undefined, enabled = true) {
   const [loading, setLoading] = useState(false);
   const [feedReady, setFeedReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
 
   const refresh = useCallback(async () => {
     if (!eventId || !enabled) return;
@@ -98,6 +99,8 @@ export function useEventSprayFeed(eventId: string | undefined, enabled = true) {
     }
   }, [eventId, enabled]);
 
+  refreshRef.current = refresh;
+
   useEffect(() => {
     setFeedReady(false);
   }, [eventId]);
@@ -109,30 +112,26 @@ export function useEventSprayFeed(eventId: string | undefined, enabled = true) {
   useEffect(() => {
     if (!eventId || !enabled) return;
 
-    let channel: ReturnType<typeof supabase.channel> | null = null;
+    const debouncedRefresh = debounceAsync(() => {
+      void refreshRef.current();
+    }, 250);
 
-    const setup = async () => {
-      const appUserId = await getAppUserId();
-      if (!appUserId) return;
-
-      channel = supabase
-        .channel(`event-sprays-${eventId}`)
-        .on(
-          "postgres_changes",
-          { event: "INSERT", schema: "public", table: "spray_records", filter: `event_id=eq.${eventId}` },
-          () => {
-            void refresh();
-          },
-        )
-        .subscribe();
-    };
-
-    void setup();
+    const channel = supabase
+      .channel(`event-sprays-${eventId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "spray_records", filter: `event_id=eq.${eventId}` },
+        () => {
+          debouncedRefresh();
+        },
+      )
+      .subscribe();
 
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      debouncedRefresh.cancel();
+      supabase.removeChannel(channel);
     };
-  }, [eventId, enabled, refresh]);
+  }, [eventId, enabled]);
 
   return { activities, topGifters, loading, feedReady, error, refresh };
 }

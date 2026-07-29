@@ -5,7 +5,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useMultiWallet } from "@/hooks/useMultiWallet";
+import { useDashboardShell } from "@/contexts/DashboardShellContext";
 import { transfers } from "@/lib/supabase";
 import { formatUsername, normalizeUsernameInput, USERNAME_RE } from "@/lib/username";
 import { PinInput } from "@/components/PinInput";
@@ -45,7 +45,7 @@ function mapLookupUser(row: {
 }
 
 export const SendMoneySheet = ({ open, onOpenChange, onPinNotSet }: SendMoneySheetProps) => {
-  const { ngnBalance, refreshBalances } = useMultiWallet();
+  const { ngnBalance, refreshBalances } = useDashboardShell();
   const balance = ngnBalance;
   const [step, setStep] = useState<SendStep>("recipient");
   const [searchQuery, setSearchQuery] = useState("");

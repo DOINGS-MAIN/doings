@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase, kyc } from "@/lib/supabase";
+import { getAppUserId } from "@/lib/appUser";
+import { getCachedSession } from "@/lib/authSession";
 import { KYCLevel, KYCState, KYCVerification } from "@/types/finance";
 
 export const useKYC = () => {
@@ -14,21 +16,39 @@ export const useKYC = () => {
   const fetchKYCState = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+      let appUserId = await getAppUserId();
+      if (!appUserId) {
+        setState({
+          currentLevel: 0,
+          verifications: [],
+          bvnVerified: false,
+          ninVerified: false,
+        });
+        return;
+      }
 
       let { data: user } = await supabase
         .from("users")
         .select("id, kyc_level, full_name, phone, email")
-        .eq("auth_id", session.user.id)
+        .eq("id", appUserId)
         .maybeSingle();
 
       if (!user?.id) {
         await supabase.rpc("ensure_auth_user_profile");
+        appUserId = await getAppUserId();
+        if (!appUserId) {
+          setState({
+            currentLevel: 0,
+            verifications: [],
+            bvnVerified: false,
+            ninVerified: false,
+          });
+          return;
+        }
         const again = await supabase
           .from("users")
           .select("id, kyc_level, full_name, phone, email")
-          .eq("auth_id", session.user.id)
+          .eq("id", appUserId)
           .maybeSingle();
         user = again.data;
       }
@@ -118,7 +138,7 @@ export const useKYC = () => {
 
     await supabase.auth.refreshSession();
     await fetchKYCState();
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = await getCachedSession();
     if (session?.user?.email_confirmed_at) {
       return { success: true, message: "Email verified — you can receive in-app transfers and giveaways." };
     }

@@ -87,8 +87,7 @@ export const useGiveaways = () => {
   const [giveawayList, setGiveawayList] = useState<Giveaway[]>([]);
 
   const fetchGiveaways = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) {
+    if (!profile?.id) {
       setGiveawayList([]);
       return;
     }
@@ -105,7 +104,7 @@ export const useGiveaways = () => {
     }
 
     if (data) setGiveawayList((data as Record<string, unknown>[]).map(mapGiveawayRow));
-  }, []);
+  }, [profile?.id]);
 
   useEffect(() => {
     void fetchGiveaways();

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase, auth, isSupabaseConfigured, profileApi } from "@/lib/supabase";
+import { invalidateAppUserCache } from "@/lib/appUser";
 import type { SignUpResult } from "@/types/auth";
 
 export type { SignUpResult } from "@/types/auth";
@@ -180,6 +181,7 @@ export const useAuth = () => {
 
   const signOut = useCallback(async () => {
     await auth.signOut();
+    invalidateAppUserCache();
     setState({
       session: null,
       user: null,

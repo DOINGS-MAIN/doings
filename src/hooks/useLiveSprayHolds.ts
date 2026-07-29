@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { getAppUserId } from "@/lib/appUser";
+import { debounceAsync } from "@/lib/debounceAsync";
 import type { EventSprayActivity } from "@/hooks/useEventSprayFeed";
 import { avatarDataFromProfile } from "@/types/avatar";
 
@@ -34,8 +34,9 @@ export function useLiveSprayHolds(eventId: string | undefined, enabled = true) {
   const [liveSprays, setLiveSprays] = useState<EventSprayActivity[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const refreshRef = useRef<(showLoading?: boolean) => Promise<void>>(async () => {});
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (showLoading = true) => {
     if (!eventId || !enabled) {
       setLiveSprays([]);
       setLoading(false);
@@ -43,7 +44,7 @@ export function useLiveSprayHolds(eventId: string | undefined, enabled = true) {
       return;
     }
 
-    setLoading(true);
+    if (showLoading) setLoading(true);
     setError(null);
     try {
       const { data, error: rpcError } = await supabase.rpc("get_event_live_spray_holds", {
@@ -58,58 +59,56 @@ export function useLiveSprayHolds(eventId: string | undefined, enabled = true) {
 
       setLiveSprays(((data as Record<string, unknown>[]) ?? []).map(mapHoldRow));
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [eventId, enabled]);
 
+  refreshRef.current = refresh;
+
   useEffect(() => {
-    void refresh();
+    void refresh(true);
   }, [refresh]);
 
   useEffect(() => {
     if (!eventId || !enabled) return;
 
-    let channel: ReturnType<typeof supabase.channel> | null = null;
+    const debouncedRefresh = debounceAsync(() => {
+      void refreshRef.current(false);
+    }, 200);
 
-    const setup = async () => {
-      const appUserId = await getAppUserId();
-      if (!appUserId) return;
-
-      channel = supabase
-        .channel(`event-live-sprays-${eventId}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "spray_holds",
-            filter: `event_id=eq.${eventId}`,
-          },
-          () => {
-            void refresh();
-          },
-        )
-        .on(
-          "postgres_changes",
-          {
-            event: "UPDATE",
-            schema: "public",
-            table: "spray_holds",
-            filter: `event_id=eq.${eventId}`,
-          },
-          () => {
-            void refresh();
-          },
-        )
-        .subscribe();
-    };
-
-    void setup();
+    const channel = supabase
+      .channel(`event-live-sprays-${eventId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "spray_holds",
+          filter: `event_id=eq.${eventId}`,
+        },
+        () => {
+          debouncedRefresh();
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "spray_holds",
+          filter: `event_id=eq.${eventId}`,
+        },
+        () => {
+          debouncedRefresh();
+        },
+      )
+      .subscribe();
 
     return () => {
-      if (channel) supabase.removeChannel(channel);
+      debouncedRefresh.cancel();
+      supabase.removeChannel(channel);
     };
-  }, [eventId, enabled, refresh]);
+  }, [eventId, enabled]);
 
-  return { liveSprays, loading, error, refresh };
+  return { liveSprays, loading, error, refresh: () => refresh(true) };
 }

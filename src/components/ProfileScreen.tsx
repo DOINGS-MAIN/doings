@@ -323,12 +323,19 @@ export const ProfileScreen = ({
             {section.title}
           </p>
           <div className="glass rounded-2xl overflow-hidden divide-y divide-border/30">
-            {section.items.map((item) => (
-              <motion.button
+            {section.items.map((item) => {
+              const isToggle = "toggle" in item && item.toggle;
+              const Row = isToggle ? motion.div : motion.button;
+              return (
+              <Row
                 key={item.label}
-                onClick={'toggle' in item && item.toggle ? undefined : ('action' in item ? item.action : undefined)}
+                {...(!isToggle
+                  ? {
+                      onClick: "action" in item ? item.action : undefined,
+                      whileTap: { scale: 0.99 },
+                    }
+                  : {})}
                 className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-muted/30 transition-colors"
-                whileTap={'toggle' in item && item.toggle ? undefined : { scale: 0.99 }}
               >
                 <div className="w-9 h-9 rounded-xl bg-muted/50 flex items-center justify-center">
                   <item.icon className="w-4.5 h-4.5 text-foreground" />
@@ -337,16 +344,17 @@ export const ProfileScreen = ({
                   <p className="text-sm font-medium text-foreground">{item.label}</p>
                   <p className="text-xs text-muted-foreground">{item.sublabel}</p>
                 </div>
-                {'toggle' in item && item.toggle ? (
+                {isToggle ? (
                   <Switch
-                    checked={'toggled' in item ? item.toggled : false}
-                    onCheckedChange={'onToggle' in item ? item.onToggle : undefined}
+                    checked={"toggled" in item ? item.toggled : false}
+                    onCheckedChange={"onToggle" in item ? item.onToggle : undefined}
                   />
                 ) : (
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 )}
-              </motion.button>
-            ))}
+              </Row>
+            );
+            })}
           </div>
         </motion.div>
       ))}
