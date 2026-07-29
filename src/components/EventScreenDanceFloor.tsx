@@ -4,28 +4,37 @@ import gsap from "gsap";
 import { SprayAvatarCharacter } from "@/components/SprayAvatarCharacter";
 import { createSprayBillElement, formatSprayDenomination } from "@/lib/sprayNotes";
 import type { EventSprayActivity } from "@/hooks/useEventSprayFeed";
+import type { SprayAvatarSize } from "@/components/SprayAvatarCharacter";
 
-/** Stacked offsets — sprayers cluster in the center like a dance floor. */
-const STACK_OFFSETS = [
-  { x: 0, y: 0, scale: 1.08, z: 50 },
-  { x: -11, y: 9, scale: 0.94, z: 40 },
-  { x: 12, y: 7, scale: 0.96, z: 42 },
-  { x: -7, y: -11, scale: 0.9, z: 35 },
-  { x: 9, y: -9, scale: 0.92, z: 38 },
-  { x: -14, y: -3, scale: 0.88, z: 32 },
-  { x: 15, y: -2, scale: 0.89, z: 33 },
-  { x: 0, y: 12, scale: 0.86, z: 30 },
-];
+/** Horizontal stage slots — up to 3 sprayers side by side on the dance floor. */
+const STAGE_LAYOUTS: Record<number, Array<{ x: number; y: number; scale: number }>> = {
+  1: [{ x: 50, y: 50, scale: 1.08 }],
+  2: [
+    { x: 30, y: 50, scale: 0.98 },
+    { x: 70, y: 50, scale: 0.98 },
+  ],
+  3: [
+    { x: 20, y: 52, scale: 0.92 },
+    { x: 50, y: 48, scale: 1 },
+    { x: 80, y: 52, scale: 0.92 },
+  ],
+};
 
-function stackStyle(index: number, total: number) {
-  const preset = STACK_OFFSETS[index % STACK_OFFSETS.length];
-  const spread = total > 4 ? 1.15 : 1;
+function stageSlotStyle(index: number, total: number) {
+  const layout = STAGE_LAYOUTS[Math.min(Math.max(total, 1), 3)] ?? STAGE_LAYOUTS[3];
+  const slot = layout[index] ?? layout[layout.length - 1];
   return {
-    x: preset.x * spread,
-    y: preset.y * spread,
-    scale: Math.max(0.75, preset.scale - Math.floor(index / STACK_OFFSETS.length) * 0.04),
-    zIndex: preset.z - index,
+    left: `${slot.x}%`,
+    top: `${slot.y}%`,
+    scale: slot.scale,
+    zIndex: 20 + (layout.length - index),
   };
+}
+
+function avatarSizeForCount(total: number): SprayAvatarSize {
+  if (total <= 1) return "hero";
+  if (total === 2) return "lg";
+  return "md";
 }
 
 interface DanceFloorSprayerProps {
@@ -36,7 +45,8 @@ interface DanceFloorSprayerProps {
 
 function DanceFloorSprayer({ spray, index, total }: DanceFloorSprayerProps) {
   const rainRef = useRef<HTMLDivElement>(null);
-  const { x, y, scale, zIndex } = stackStyle(index, total);
+  const slot = stageSlotStyle(index, total);
+  const avatarSize = avatarSizeForCount(total);
 
   useEffect(() => {
     if (!rainRef.current) return;
@@ -79,19 +89,14 @@ function DanceFloorSprayer({ spray, index, total }: DanceFloorSprayerProps) {
 
   return (
     <motion.div
-      initial={{ opacity: 0, scale: 0.5 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.6 }}
+      initial={{ opacity: 0, scale: slot.scale * 0.5, x: "-50%", y: "-50%" }}
+      animate={{ opacity: 1, scale: slot.scale, x: "-50%", y: "-50%" }}
+      exit={{ opacity: 0, scale: slot.scale * 0.6, x: "-50%", y: "-50%" }}
       transition={{ type: "spring", stiffness: 280, damping: 22 }}
-      className="absolute left-1/2 top-1/2"
-      style={{ zIndex }}
+      className="absolute w-[min(30vw,200px)]"
+      style={{ left: slot.left, top: slot.top, zIndex: slot.zIndex }}
     >
-      <div
-        className="relative flex w-[min(42vw,220px)] flex-col items-center"
-        style={{
-          transform: `translate(calc(-50% + ${x * 0.35}rem), calc(-50% + ${y * 0.35}rem)) scale(${scale})`,
-        }}
-      >
+      <div className="relative flex flex-col items-center">
         <div
           ref={rainRef}
           className="pointer-events-none absolute -inset-x-8 -top-16 bottom-0 overflow-hidden"
@@ -100,15 +105,15 @@ function DanceFloorSprayer({ spray, index, total }: DanceFloorSprayerProps) {
         <SprayAvatarCharacter
           avatar={spray.avatarData}
           name={spray.name}
-          size={total <= 2 ? "hero" : "lg"}
+          size={avatarSize}
           dancing
           danceStyle="spray"
           showGlow
         />
-        <p className="mt-3 max-w-full truncate text-center text-lg font-black text-white drop-shadow-lg md:text-xl">
+        <p className="mt-3 max-w-full truncate text-center text-base font-black text-white drop-shadow-lg md:text-lg">
           {spray.name}
         </p>
-        <p className="text-2xl font-black text-primary drop-shadow md:text-3xl">
+        <p className="text-xl font-black text-primary drop-shadow md:text-2xl">
           ₦{spray.amount.toLocaleString()}
         </p>
         <p className="text-xs font-semibold text-white/80 md:text-sm">

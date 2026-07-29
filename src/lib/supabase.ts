@@ -272,6 +272,21 @@ export const events = {
   delete: (id: string) => invoke("events", { method: "DELETE", path: id }),
 };
 
+/** Rate-limited live spray feed for anonymous public projector viewers. */
+export const publicProjector = {
+  getLiveSprays: (params: { eventId?: string; eventCode?: string }) =>
+    invoke<{ event_id: string; live_sprays: Record<string, unknown>[]; remaining?: number }>(
+      "public-projector",
+      {
+        method: "GET",
+        params: {
+          event_id: params.eventId,
+          code: params.eventCode,
+        },
+      },
+    ),
+};
+
 // ── Spray ──
 export type SpraySettlement = "partial" | "full" | "cancelled";
 

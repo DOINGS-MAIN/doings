@@ -53,9 +53,10 @@ const App = () => (
           <Route path="/redeem/:code" element={<RedeemGiveawayLinkPage />} />
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/events/:eventId/screen" element={<EventScreenPage />} />
+          <Route path="/watch/:eventCode" element={<EventScreenPage />} />
 
           <Route element={<RequireAuth />}>
-            <Route path="/events/:eventId/screen" element={<EventScreenPage />} />
             <Route element={<DashboardLayout />}>
               <Route path="/home" element={<HomePage />} />
               <Route path="/events" element={<EventsPage />} />

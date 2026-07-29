@@ -87,4 +87,11 @@ export const RATE_LIMITS = {
     maxRequests: 100,
     windowMs: 60_000,
   }),
+
+  /** Anonymous public projector: per IP + event. */
+  publicProjector: (scope: string): RateLimitConfig => ({
+    key: `pub-proj:${scope}`,
+    maxRequests: 60,
+    windowMs: 60_000,
+  }),
 };

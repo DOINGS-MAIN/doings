@@ -17,7 +17,7 @@ import {
 import { EventData } from "@/hooks/useEvents";
 import { toast } from "sonner";
 import { shareEventLink } from "@/lib/shareLinks";
-import { getEventScreenPath } from "@/lib/eventScreenLink";
+import { getProjectorPath } from "@/lib/eventScreenLink";
 
 interface MyEventsScreenProps {
   events: EventData[];
@@ -230,7 +230,15 @@ export const MyEventsScreen = ({
                 ) : event.status === 'live' ? (
                   <>
                     <motion.button
-                      onClick={() => navigate(getEventScreenPath(event.id))}
+                      onClick={() =>
+                        navigate(
+                          getProjectorPath({
+                            id: event.id,
+                            eventCode: event.eventCode,
+                            isPrivate: event.isPrivate,
+                          }),
+                        )
+                      }
                       className="flex flex-1 items-center justify-center gap-2 bg-primary/20 text-primary py-2.5 rounded-xl font-semibold text-sm"
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}

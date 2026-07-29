@@ -10,6 +10,8 @@ interface EventScreenIdleViewProps {
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
   onBack: () => void;
+  showCloseButton?: boolean;
+  embed?: boolean;
 }
 
 /** Projector waiting room — one avatar + join QR, nothing else. */
@@ -19,7 +21,35 @@ export function EventScreenIdleView({
   isFullscreen,
   onToggleFullscreen,
   onBack,
+  showCloseButton = true,
+  embed = false,
 }: EventScreenIdleViewProps) {
+  if (embed) {
+    return (
+      <div className="relative flex min-h-dvh max-h-dvh flex-col overflow-hidden bg-black">
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center gap-8 px-6 pb-10">
+          <motion.div
+            className="flex flex-col items-center text-center"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+          >
+            <motion.div
+              animate={{ y: [0, -12, 0] }}
+              transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+            >
+              <SprayAvatarCharacter size="hero" dancing danceStyle="sway" showGlow />
+            </motion.div>
+            <p className="mt-6 text-xl font-bold text-white md:text-2xl">Waiting for sprayers</p>
+          </motion.div>
+        </div>
+        <div className="pointer-events-none absolute bottom-4 right-4 z-20 md:bottom-6 md:right-6">
+          <EventScreenJoinQr joinLink={joinLink} eventCode={event.eventCode} compact />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative flex min-h-dvh max-h-dvh flex-col overflow-hidden bg-black">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_40%,hsl(43_96%_56%/0.14),transparent_55%)]" />
@@ -43,15 +73,17 @@ export function EventScreenIdleView({
           >
             <Maximize2 className="h-5 w-5" />
           </motion.button>
-          <motion.button
-            type="button"
-            onClick={onBack}
-            className="rounded-xl bg-white/10 p-2.5 text-white backdrop-blur transition-colors hover:bg-white/15"
-            whileTap={{ scale: 0.95 }}
-            aria-label="Close event screen"
-          >
-            <X className="h-5 w-5" />
-          </motion.button>
+          {showCloseButton && (
+            <motion.button
+              type="button"
+              onClick={onBack}
+              className="rounded-xl bg-white/10 p-2.5 text-white backdrop-blur transition-colors hover:bg-white/15"
+              whileTap={{ scale: 0.95 }}
+              aria-label="Close event screen"
+            >
+              <X className="h-5 w-5" />
+            </motion.button>
+          )}
         </div>
       </div>
 

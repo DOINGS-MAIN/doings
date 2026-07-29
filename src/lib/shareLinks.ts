@@ -16,9 +16,26 @@ export function buildGiveawayRedeemLink(code: string): string {
   return `${getAppBaseUrl()}/redeem/${encodeURIComponent(normalized)}`;
 }
 
-export function buildEventScreenLink(eventId: string): string {
+export function buildEventScreenLink(eventId: string, options?: { embed?: boolean }): string {
   const id = eventId.trim();
-  return `${getAppBaseUrl()}/events/${encodeURIComponent(id)}/screen`;
+  const base = `${getAppBaseUrl()}/events/${encodeURIComponent(id)}/screen`;
+  return options?.embed ? `${base}?embed=1` : base;
+}
+
+/** Short public watch URL — works without login for public live events. */
+export function buildPublicWatchLink(eventCode: string, options?: { embed?: boolean }): string {
+  const code = eventCode.trim().toUpperCase();
+  const base = `${getAppBaseUrl()}/watch/${encodeURIComponent(code)}`;
+  return options?.embed ? `${base}?embed=1` : base;
+}
+
+/** Prefer watch link for public events; host UUID link for private. */
+export function buildProjectorShareLink(
+  event: { id: string; eventCode: string; isPrivate: boolean },
+  options?: { embed?: boolean },
+): string {
+  if (event.isPrivate) return buildEventScreenLink(event.id, options);
+  return buildPublicWatchLink(event.eventCode, options);
 }
 
 export function buildEventSharePayload(event: { title: string; eventCode: string }) {

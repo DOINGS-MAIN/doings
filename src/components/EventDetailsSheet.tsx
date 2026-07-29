@@ -484,7 +484,11 @@ export const EventDetailsSheet = ({
 
           {event.status === "live" && (
             <div className="mb-2">
-              <EventProjectorLink eventId={event.id} />
+              <EventProjectorLink
+                eventId={event.id}
+                eventCode={event.eventCode}
+                isPrivate={event.isPrivate}
+              />
             </div>
           )}
 

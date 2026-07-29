@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { publicProjector, supabase } from "@/lib/supabase";
 import { debounceAsync } from "@/lib/debounceAsync";
 import type { EventSprayActivity } from "@/hooks/useEventSprayFeed";
 import { avatarDataFromProfile } from "@/types/avatar";
@@ -30,38 +30,71 @@ function mapHoldRow(row: Record<string, unknown>): EventSprayActivity {
   };
 }
 
-export function useLiveSprayHolds(eventId: string | undefined, enabled = true) {
+export interface UseLiveSprayHoldsOptions {
+  /** Use rate-limited edge function instead of direct RPC (anonymous public viewers). */
+  publicViewer?: boolean;
+  eventCode?: string;
+  debounceMs?: number;
+  /** Fallback poll when Realtime misses an update (public viewers only). */
+  pollIntervalMs?: number;
+}
+
+export function useLiveSprayHolds(
+  eventId: string | undefined,
+  enabled = true,
+  options?: UseLiveSprayHoldsOptions,
+) {
   const [liveSprays, setLiveSprays] = useState<EventSprayActivity[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const refreshRef = useRef<(showLoading?: boolean) => Promise<void>>(async () => {});
 
-  const refresh = useCallback(async (showLoading = true) => {
-    if (!eventId || !enabled) {
-      setLiveSprays([]);
-      setLoading(false);
-      setError(null);
-      return;
-    }
+  const publicViewer = options?.publicViewer ?? false;
+  const debounceMs = options?.debounceMs ?? (publicViewer ? 500 : 200);
+  const pollIntervalMs = options?.pollIntervalMs ?? (publicViewer ? 8_000 : 0);
 
-    if (showLoading) setLoading(true);
-    setError(null);
-    try {
-      const { data, error: rpcError } = await supabase.rpc("get_event_live_spray_holds", {
-        p_event_id: eventId,
-      });
-
-      if (rpcError) {
-        console.warn("Could not load live spray holds:", rpcError.message);
-        setError(rpcError.message);
+  const refresh = useCallback(
+    async (showLoading = true) => {
+      if (!eventId || !enabled) {
+        setLiveSprays([]);
+        setLoading(false);
+        setError(null);
         return;
       }
 
-      setLiveSprays(((data as Record<string, unknown>[]) ?? []).map(mapHoldRow));
-    } finally {
-      if (showLoading) setLoading(false);
-    }
-  }, [eventId, enabled]);
+      if (showLoading) setLoading(true);
+      setError(null);
+      try {
+        if (publicViewer) {
+          const result = await publicProjector.getLiveSprays({
+            eventId,
+            eventCode: options?.eventCode,
+          });
+          setLiveSprays((result.live_sprays ?? []).map(mapHoldRow));
+          return;
+        }
+
+        const { data, error: rpcError } = await supabase.rpc("get_event_live_spray_holds", {
+          p_event_id: eventId,
+        });
+
+        if (rpcError) {
+          console.warn("Could not load live spray holds:", rpcError.message);
+          setError(rpcError.message);
+          return;
+        }
+
+        setLiveSprays(((data as Record<string, unknown>[]) ?? []).map(mapHoldRow));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Could not load live sprays";
+        console.warn("Could not load live spray holds:", message);
+        setError(message);
+      } finally {
+        if (showLoading) setLoading(false);
+      }
+    },
+    [eventId, enabled, publicViewer, options?.eventCode],
+  );
 
   refreshRef.current = refresh;
 
@@ -74,10 +107,10 @@ export function useLiveSprayHolds(eventId: string | undefined, enabled = true) {
 
     const debouncedRefresh = debounceAsync(() => {
       void refreshRef.current(false);
-    }, 200);
+    }, debounceMs);
 
     const channel = supabase
-      .channel(`event-live-sprays-${eventId}`)
+      .channel(`event-live-sprays-${eventId}${publicViewer ? "-public" : ""}`)
       .on(
         "postgres_changes",
         {
@@ -108,7 +141,17 @@ export function useLiveSprayHolds(eventId: string | undefined, enabled = true) {
       debouncedRefresh.cancel();
       supabase.removeChannel(channel);
     };
-  }, [eventId, enabled]);
+  }, [eventId, enabled, debounceMs, publicViewer]);
+
+  useEffect(() => {
+    if (!eventId || !enabled || pollIntervalMs <= 0) return;
+
+    const timer = window.setInterval(() => {
+      void refreshRef.current(false);
+    }, pollIntervalMs);
+
+    return () => window.clearInterval(timer);
+  }, [eventId, enabled, pollIntervalMs]);
 
   return { liveSprays, loading, error, refresh: () => refresh(true) };
 }
