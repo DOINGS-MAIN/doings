@@ -4,10 +4,12 @@ import { supabase } from "@/lib/supabase";
 /** Coalesce concurrent `getSession()` calls — parallel callers share one in-flight request. */
 let cachedSession: Session | null | undefined;
 let inflightSession: Promise<Session | null> | null = null;
+let inflightRefresh: Promise<Session | null> | null = null;
 
 export function invalidateAuthSessionCache(): void {
   cachedSession = undefined;
   inflightSession = null;
+  inflightRefresh = null;
 }
 
 export async function getCachedSession(): Promise<Session | null> {
@@ -30,13 +32,71 @@ export async function getCachedSession(): Promise<Session | null> {
   return inflightSession;
 }
 
+/**
+ * Returns a session, refreshing once when near expiry.
+ * Concurrent refresh callers share one in-flight `refreshSession()` (avoids auth deadlocks).
+ */
+export async function getValidSession(refreshSkewSec = 600): Promise<Session | null> {
+  let session = await getCachedSession();
+  if (!session?.refresh_token) return session;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const exp = session.expires_at ?? 0;
+  if (exp > nowSec + refreshSkewSec) return session;
+
+  if (inflightRefresh) return inflightRefresh;
+
+  const previous = session;
+  inflightRefresh = supabase.auth
+    .refreshSession()
+    .then(({ data, error }) => {
+      inflightRefresh = null;
+      if (!error && data.session) {
+        cachedSession = data.session;
+        return data.session;
+      }
+      return previous;
+    })
+    .catch((err) => {
+      inflightRefresh = null;
+      throw err;
+    });
+
+  return inflightRefresh;
+}
+
+/**
+ * Force-refresh the session once. Concurrent callers share one in-flight request.
+ */
+export async function refreshCachedSession(): Promise<Session | null> {
+  if (inflightRefresh) return inflightRefresh;
+
+  inflightRefresh = supabase.auth
+    .refreshSession()
+    .then(({ data, error }) => {
+      inflightRefresh = null;
+      if (!error && data.session) {
+        cachedSession = data.session;
+        return data.session;
+      }
+      return cachedSession !== undefined ? cachedSession : null;
+    })
+    .catch((err) => {
+      inflightRefresh = null;
+      throw err;
+    });
+
+  return inflightRefresh;
+}
+
 let cacheInvalidationRegistered = false;
 
 export function ensureAuthSessionCacheInvalidation(): void {
   if (cacheInvalidationRegistered) return;
   cacheInvalidationRegistered = true;
-  supabase.auth.onAuthStateChange(() => {
-    invalidateAuthSessionCache();
+  supabase.auth.onAuthStateChange((_event, session) => {
+    cachedSession = session;
+    inflightSession = null;
+    inflightRefresh = null;
   });
 }
-

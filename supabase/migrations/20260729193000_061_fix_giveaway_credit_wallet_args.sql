@@ -1,98 +1,6 @@
--- Atomic giveaway create / redeem / stop, plus projector giveaway feed.
-
-CREATE OR REPLACE FUNCTION public.create_giveaway_funded(
-  p_creator_id UUID,
-  p_title TEXT,
-  p_total_kobo BIGINT,
-  p_per_person_kobo BIGINT,
-  p_type public.giveaway_type,
-  p_event_id UUID DEFAULT NULL,
-  p_is_private BOOLEAN DEFAULT false,
-  p_show_on_event_screen BOOLEAN DEFAULT true,
-  p_idempotency_key TEXT DEFAULT NULL
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-  v_wallet_id UUID;
-  v_fund_txn_id UUID;
-  v_giveaway public.giveaways%ROWTYPE;
-  v_idem TEXT;
-BEGIN
-  IF p_total_kobo < 10000 THEN
-    RAISE EXCEPTION 'Minimum total is ₦100';
-  END IF;
-  IF p_per_person_kobo < 1000 THEN
-    RAISE EXCEPTION 'Minimum per person is ₦10';
-  END IF;
-  IF p_per_person_kobo > p_total_kobo THEN
-    RAISE EXCEPTION 'per_person_amount cannot exceed total_amount';
-  END IF;
-  IF p_total_kobo % p_per_person_kobo <> 0 THEN
-    RAISE EXCEPTION 'total_amount must be evenly divisible by per_person_amount';
-  END IF;
-
-  SELECT id INTO v_wallet_id
-  FROM public.wallets
-  WHERE user_id = p_creator_id AND currency = 'NGN';
-
-  IF v_wallet_id IS NULL THEN
-    RAISE EXCEPTION 'NGN wallet not found';
-  END IF;
-
-  v_idem := COALESCE(p_idempotency_key, 'giveaway-fund-' || gen_random_uuid()::text);
-
-  v_fund_txn_id := public.debit_wallet(
-    v_wallet_id,
-    p_creator_id,
-    p_total_kobo,
-    0,
-    'giveaway',
-    'Giveaway funding: ' || p_title,
-    'internal',
-    v_idem,
-    jsonb_build_object('title', p_title)
-  );
-
-  INSERT INTO public.giveaways (
-    creator_id,
-    title,
-    total_amount,
-    per_person_amount,
-    remaining_amount,
-    type,
-    event_id,
-    is_private,
-    show_on_event_screen,
-    funding_transaction_id
-  ) VALUES (
-    p_creator_id,
-    p_title,
-    p_total_kobo,
-    p_per_person_kobo,
-    p_total_kobo,
-    p_type,
-    p_event_id,
-    COALESCE(p_is_private, false),
-    COALESCE(p_show_on_event_screen, true),
-    v_fund_txn_id
-  )
-  RETURNING * INTO v_giveaway;
-
-  RETURN jsonb_build_object(
-    'id', v_giveaway.id,
-    'code', v_giveaway.code,
-    'total_amount', v_giveaway.total_amount,
-    'per_person_amount', v_giveaway.per_person_amount,
-    'max_recipients', v_giveaway.max_recipients,
-    'status', v_giveaway.status,
-    'funding_transaction_id', v_fund_txn_id
-  );
-END;
-$$;
+-- Fix credit_wallet argument order in giveaway RPCs.
+-- credit_wallet(..., provider, provider_ref, idempotency_key, metadata)
+-- Migration 060 passed idempotency_key where provider_ref belongs.
 
 CREATE OR REPLACE FUNCTION public.redeem_giveaway_code(
   p_redeemer_id UUID,
@@ -254,61 +162,38 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.get_event_screen_giveaways(p_event_id UUID)
-RETURNS TABLE (
-  id UUID,
-  title TEXT,
-  code TEXT,
-  per_person_amount BIGINT,
-  remaining_amount BIGINT,
-  status public.giveaway_status,
-  show_on_event_screen BOOLEAN
-)
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT
-    g.id,
-    g.title,
-    g.code,
-    g.per_person_amount,
-    g.remaining_amount,
-    g.status,
-    g.show_on_event_screen
-  FROM public.giveaways g
-  JOIN public.events e ON e.id = g.event_id
-  WHERE g.event_id = p_event_id
-    AND g.status = 'active'
-    AND g.show_on_event_screen = true
-    AND e.status = 'live'
-    AND (
-      (e.is_private = false)
-      OR e.host_id IN (SELECT u.id FROM public.users u WHERE u.auth_id = auth.uid())
-    );
-$$;
+-- Do not block redemption if creator notification insert fails.
+CREATE OR REPLACE FUNCTION public.notify_giveaway_redeemed()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_creator_id UUID;
+  v_title TEXT;
+  v_redeemer_name TEXT;
+  v_display_amount TEXT;
+BEGIN
+  SELECT creator_id, title INTO v_creator_id, v_title
+  FROM public.giveaways WHERE id = NEW.giveaway_id;
 
-REVOKE ALL ON FUNCTION public.create_giveaway_funded(UUID, TEXT, BIGINT, BIGINT, public.giveaway_type, UUID, BOOLEAN, BOOLEAN, TEXT) FROM PUBLIC;
+  SELECT COALESCE(full_name, username, phone) INTO v_redeemer_name
+  FROM public.users WHERE id = NEW.user_id;
+
+  v_display_amount := '₦' || TRIM(to_char(NEW.amount / 100.0, '999,999,999.00'));
+
+  BEGIN
+    PERFORM public.create_notification(
+      v_creator_id, 'giveaway_redeemed', 'Giveaway claimed',
+      v_redeemer_name || ' claimed ' || v_display_amount || ' from "' || v_title || '".',
+      jsonb_build_object('giveaway_id', NEW.giveaway_id, 'redemption_id', NEW.id, 'user_id', NEW.user_id, 'amount', NEW.amount)
+    );
+  EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'notify_giveaway_redeemed failed for redemption %: %', NEW.id, SQLERRM;
+  END;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
 REVOKE ALL ON FUNCTION public.redeem_giveaway_code(UUID, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.stop_giveaway_funded(UUID, UUID) FROM PUBLIC;
-
-GRANT EXECUTE ON FUNCTION public.create_giveaway_funded(UUID, TEXT, BIGINT, BIGINT, public.giveaway_type, UUID, BOOLEAN, BOOLEAN, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.redeem_giveaway_code(UUID, TEXT) TO service_role;
 GRANT EXECUTE ON FUNCTION public.stop_giveaway_funded(UUID, UUID) TO service_role;
-GRANT EXECUTE ON FUNCTION public.get_event_screen_giveaways(UUID) TO anon, authenticated;
-
--- Allow anonymous viewers to read active event-screen giveaways on public live events (projector realtime).
-CREATE POLICY "Anon can view event screen giveaways"
-  ON public.giveaways FOR SELECT TO anon
-  USING (
-    status = 'active'
-    AND show_on_event_screen = true
-    AND event_id IS NOT NULL
-    AND EXISTS (
-      SELECT 1 FROM public.events e
-      WHERE e.id = giveaways.event_id
-        AND e.status = 'live'
-        AND e.is_private = false
-    )
-  );

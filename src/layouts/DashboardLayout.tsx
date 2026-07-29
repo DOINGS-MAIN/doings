@@ -284,7 +284,7 @@ export function DashboardLayout() {
     }
     if (!holdId) {
       toast.error("Could not reserve spray funds. Try again.");
-      return;
+      throw new Error("Could not reserve spray funds");
     }
     sprayHoldIdRef.current = holdId;
     setSprayAmount(amount);
@@ -876,6 +876,7 @@ export function DashboardLayout() {
             onRedeem={handleRedeemGiveaway}
             findGiveawayByCode={findGiveawayByCode}
             initialCode={redeemGiveawayInitialCode}
+            profileId={profile?.id}
           />
         )}
 

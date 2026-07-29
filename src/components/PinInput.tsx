@@ -8,6 +8,7 @@ interface PinInputProps {
   value: string;
   onChange: (value: string) => void;
   className?: string;
+  disabled?: boolean;
 }
 
 export const PinInput = ({
@@ -16,6 +17,7 @@ export const PinInput = ({
   value,
   onChange,
   className,
+  disabled = false,
 }: PinInputProps) => (
   <div className="space-y-2">
     <Label htmlFor={id}>{label}</Label>
@@ -28,6 +30,7 @@ export const PinInput = ({
       onChange={(e) => onChange(sanitizePinInput(e.target.value))}
       maxLength={4}
       autoComplete="off"
+      disabled={disabled}
       className={`text-center text-2xl tracking-[1em] font-bold ${className ?? ""}`}
     />
   </div>

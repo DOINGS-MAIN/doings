@@ -194,7 +194,7 @@ export const SpraySetupSheet = ({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={handleReset}
+            onClick={starting ? undefined : handleReset}
           />
 
           <motion.div
@@ -213,7 +213,8 @@ export const SpraySetupSheet = ({
                 {step !== "amount" && (
                   <button
                     onClick={handleBack}
-                    className="p-2 hover:bg-muted rounded-full transition-colors"
+                    disabled={starting}
+                    className="p-2 hover:bg-muted rounded-full transition-colors disabled:opacity-50"
                   >
                     <ArrowLeft className="w-5 h-5 text-muted-foreground" />
                   </button>
@@ -229,13 +230,21 @@ export const SpraySetupSheet = ({
               </div>
               <button
                 onClick={handleReset}
-                className="p-2 hover:bg-muted rounded-full transition-colors"
+                disabled={starting}
+                className="p-2 hover:bg-muted rounded-full transition-colors disabled:opacity-50"
               >
                 <X className="w-5 h-5 text-muted-foreground" />
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-6 [-webkit-overflow-scrolling:touch]">
+            <div className="relative min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-6 [-webkit-overflow-scrolling:touch]">
+              {starting && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-xl bg-background/80 backdrop-blur-sm">
+                  <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                  <p className="text-sm font-medium text-foreground">Reserving spray funds…</p>
+                  <p className="text-xs text-muted-foreground">This may take a few seconds</p>
+                </div>
+              )}
               <AnimatePresence mode="sync">
                 {step === "amount" && (
                   <motion.div
@@ -386,18 +395,19 @@ export const SpraySetupSheet = ({
                         {Math.floor(selectedAmount / selectedDenomination)} × ₦{selectedDenomination} notes
                       </p>
                     </div>
-                    <PinInput value={pin} onChange={setPin} label="Transaction PIN" />
+                    <PinInput value={pin} onChange={setPin} label="Transaction PIN" disabled={starting} />
                     <Button
                       variant="gold"
                       size="lg"
-                      className="w-full h-14"
+                      className="w-full h-14 disabled:opacity-80"
                       onClick={() => void handleConfirmPin()}
                       disabled={!isValidPin(pin) || starting}
+                      aria-busy={starting}
                     >
                       {starting ? (
                         <>
                           <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                          Verifying…
+                          Starting spray…
                         </>
                       ) : (
                         "Start spraying"

@@ -37,7 +37,10 @@ function getPathAction(url: string): { action: string; id?: string } {
 }
 
 function rpcErrorMessage(err: unknown): string {
-  const msg = String(err);
+  const msg =
+    err && typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string"
+      ? (err as { message: string }).message
+      : String(err);
   if (msg.includes("Insufficient")) return "Insufficient balance to fund giveaway";
   if (msg.includes("Minimum total")) return "Minimum total is ₦100";
   if (msg.includes("Minimum per person")) return "Minimum per person is ₦10";
@@ -48,6 +51,7 @@ function rpcErrorMessage(err: unknown): string {
   if (msg.includes("no longer active")) return "Giveaway is no longer active";
   if (msg.includes("Verify your email")) return "Verify your email to redeem giveaways";
   if (msg.includes("Cannot redeem your own")) return "Cannot redeem your own giveaway";
+  if (msg.includes("Wallet not found")) return "Wallet not found — contact support";
   if (msg.includes("exhausted")) return "Giveaway is exhausted";
   if (msg.includes("already redeemed")) return "You have already redeemed this giveaway";
   if (msg.includes("Only the creator")) return "Only the creator can stop a giveaway";
@@ -116,6 +120,42 @@ Deno.serve(async (req) => {
       .eq("id", id)
       .single();
     if (error || !data) return withCors({ error: "Giveaway not found" }, { status: 404 });
+
+    const redemptions = (data.giveaway_redemptions ?? []) as Array<{
+      id: string;
+      user_id: string;
+      amount: number;
+      redeemed_at: string;
+      redeemer_name?: string;
+    }>;
+
+    if (redemptions.length > 0) {
+      const userIds = [...new Set(redemptions.map((r) => r.user_id).filter(Boolean))];
+      const { data: users } = await supabase
+        .from("users")
+        .select("id, full_name, username, phone")
+        .in("id", userIds);
+
+      const nameById = new Map(
+        (users ?? []).map((u) => {
+          const fullName = u.full_name && String(u.full_name).trim();
+          const username = u.username && String(u.username).trim();
+          const phone = u.phone && String(u.phone).trim();
+          const name =
+            fullName ||
+            (username ? (username.startsWith("@") ? username : `@${username}`) : "") ||
+            phone ||
+            "Guest";
+          return [u.id, name] as const;
+        }),
+      );
+
+      data.giveaway_redemptions = redemptions.map((r) => ({
+        ...r,
+        redeemer_name: nameById.get(r.user_id) ?? "Guest",
+      }));
+    }
+
     return withCors(data);
   }
 

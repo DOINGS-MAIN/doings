@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Gift, QrCode, Keyboard, CheckCircle, XCircle, Sparkles } from "lucide-react";
+import { Gift, QrCode, Keyboard, CheckCircle, XCircle, Sparkles, Loader2 } from "lucide-react";
 import { Giveaway, mapGiveawayRow } from "@/hooks/useGiveaways";
 import { giveaways as giveawaysApi } from "@/lib/supabase";
 
@@ -13,6 +13,7 @@ interface RedeemGiveawaySheetProps {
   onRedeem: (code: string) => { success: boolean; message: string; amount?: number } | Promise<{ success: boolean; message: string; amount?: number }>;
   findGiveawayByCode: (code: string) => Giveaway | undefined;
   initialCode?: string;
+  profileId?: string;
 }
 
 export const RedeemGiveawaySheet = ({
@@ -21,11 +22,14 @@ export const RedeemGiveawaySheet = ({
   onRedeem,
   findGiveawayByCode,
   initialCode,
+  profileId,
 }: RedeemGiveawaySheetProps) => {
   const [code, setCode] = useState("");
   const [mode, setMode] = useState<'input' | 'result'>('input');
   const [result, setResult] = useState<{ success: boolean; message: string; amount?: number } | null>(null);
   const [previewGiveaway, setPreviewGiveaway] = useState<Giveaway | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [redeeming, setRedeeming] = useState(false);
 
   const handleCodeChange = (value: string) => {
     const upperCode = value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
@@ -38,14 +42,17 @@ export const RedeemGiveawaySheet = ({
   useEffect(() => {
     if (code.length !== 6) {
       setPreviewGiveaway(null);
+      setPreviewLoading(false);
       return;
     }
     const local = findGiveawayByCode(code);
     if (local) {
       setPreviewGiveaway(local);
+      setPreviewLoading(false);
       return;
     }
     let cancelled = false;
+    setPreviewLoading(true);
     void (async () => {
       try {
         const row = (await giveawaysApi.getByCode(code)) as Record<string, unknown>;
@@ -53,6 +60,8 @@ export const RedeemGiveawaySheet = ({
         setPreviewGiveaway(mapGiveawayRow({ ...row, giveaway_redemptions: [] }));
       } catch {
         if (!cancelled) setPreviewGiveaway(null);
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
       }
     })();
     return () => {
@@ -66,16 +75,52 @@ export const RedeemGiveawaySheet = ({
   }, [isOpen, initialCode]);
 
   const handleRedeem = async () => {
-    const redeemResult = await onRedeem(code);
-    setResult(redeemResult);
-    setMode('result');
+    if (redeeming || code.length !== 6 || isOwnGiveaway) return;
+
+    setRedeeming(true);
+    try {
+      let giveaway = previewGiveaway;
+      if (!giveaway) {
+        setPreviewLoading(true);
+        try {
+          const row = (await giveawaysApi.getByCode(code)) as Record<string, unknown>;
+          giveaway = mapGiveawayRow({ ...row, giveaway_redemptions: [] });
+          setPreviewGiveaway(giveaway);
+        } catch {
+          setResult({ success: false, message: "Invalid or expired code. Check it and try again." });
+          setMode("result");
+          return;
+        } finally {
+          setPreviewLoading(false);
+        }
+      }
+
+      if (giveaway.status !== "active") {
+        setResult({ success: false, message: "This giveaway is no longer active." });
+        setMode("result");
+        return;
+      }
+
+      const redeemResult = await onRedeem(code);
+      setResult(redeemResult);
+      setMode("result");
+    } finally {
+      setRedeeming(false);
+    }
   };
+
+  const isOwnGiveaway = Boolean(
+    profileId && previewGiveaway?.creatorId && profileId === previewGiveaway.creatorId,
+  );
+  const isBusy = redeeming || previewLoading;
+  const canRedeem = code.length === 6 && !isOwnGiveaway && !isBusy;
 
   const handleClose = () => {
     setCode("");
-    setMode('input');
+    setMode("input");
     setResult(null);
     setPreviewGiveaway(null);
+    setPreviewLoading(false);
     onClose();
   };
 
@@ -142,6 +187,13 @@ export const RedeemGiveawaySheet = ({
               </div>
 
               {/* Preview */}
+              {previewLoading && code.length === 6 && !previewGiveaway && (
+                <div className="flex items-center justify-center gap-2 rounded-2xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Looking up code…
+                </div>
+              )}
+
               {previewGiveaway && (
                 <motion.div
                   initial={{ opacity: 0, scale: 0.95 }}
@@ -190,12 +242,31 @@ export const RedeemGiveawaySheet = ({
                 Scan QR Code
               </Button>
 
+              {isOwnGiveaway && (
+                <p className="text-center text-sm text-destructive">
+                  You cannot redeem a giveaway you created. Share the code with someone else.
+                </p>
+              )}
+
               <Button
-                onClick={handleRedeem}
-                disabled={code.length !== 6}
-                className="w-full h-14 rounded-2xl bg-gradient-to-r from-primary to-accent text-primary-foreground font-bold text-lg"
+                onClick={() => void handleRedeem()}
+                disabled={!canRedeem}
+                aria-busy={isBusy}
+                className="w-full h-14 rounded-2xl bg-gradient-to-r from-primary to-accent text-primary-foreground font-bold text-lg disabled:opacity-80"
               >
-                Redeem Now
+                {redeeming ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Redeeming…
+                  </>
+                ) : previewLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                    Checking code…
+                  </>
+                ) : (
+                  "Redeem Now"
+                )}
               </Button>
             </motion.div>
           )}
