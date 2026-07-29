@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { debounceAsync } from "@/lib/debounceAsync";
 import { fetchProjectorGiveaways } from "@/lib/publicEventScreen";
 import type { EventScreenGiveaway } from "@/components/EventScreenGiveawaysBanner";
 
 const EXHAUSTED_GRACE_MS = 60_000;
+const REALTIME_DEBOUNCE_MS = 300;
+/** Fallback when Realtime misses an update (common on public/anon projector tabs). */
+const POLL_INTERVAL_MS = 5_000;
 
 export function remainingGiveawaySpots(giveaway: EventScreenGiveaway): number {
   if (giveaway.perPersonAmount <= 0) return 0;
@@ -63,6 +67,7 @@ export function useEventScreenGiveaways(eventId: string | undefined, eventLive: 
   const [graceById, setGraceById] = useState<Map<string, GraceEntry>>(() => new Map());
   const [now, setNow] = useState(() => Date.now());
   const previousFetchedRef = useRef<EventScreenGiveaway[]>([]);
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
 
   const refresh = useCallback(async () => {
     if (!eventId) {
@@ -79,6 +84,8 @@ export function useEventScreenGiveaways(eventId: string | undefined, eventLive: 
     setFetched(next);
   }, [eventId]);
 
+  refreshRef.current = refresh;
+
   useEffect(() => {
     if (!eventId || !eventLive) {
       setFetched([]);
@@ -93,28 +100,46 @@ export function useEventScreenGiveaways(eventId: string | undefined, eventLive: 
   useEffect(() => {
     if (!eventId || !eventLive) return;
 
+    const debouncedRefresh = debounceAsync(() => {
+      void refreshRef.current();
+    }, REALTIME_DEBOUNCE_MS);
+
     const channel = supabase
       .channel(`event-screen-giveaways-${eventId}`)
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "giveaways", filter: `event_id=eq.${eventId}` },
         () => {
-          void refresh();
+          debouncedRefresh();
         },
       )
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "giveaways", filter: `event_id=eq.${eventId}` },
         () => {
-          void refresh();
+          debouncedRefresh();
         },
       )
       .subscribe();
 
     return () => {
+      debouncedRefresh.cancel();
       supabase.removeChannel(channel);
     };
-  }, [eventId, eventLive, refresh]);
+  }, [eventId, eventLive]);
+
+  useEffect(() => {
+    if (!eventId || !eventLive) return;
+
+    const poll = () => {
+      if (document.visibilityState === "visible") {
+        void refreshRef.current();
+      }
+    };
+
+    const timer = window.setInterval(poll, POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [eventId, eventLive]);
 
   useEffect(() => {
     if (graceById.size === 0) return;
