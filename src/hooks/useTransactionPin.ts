@@ -1,22 +1,29 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase, transactionPin } from "@/lib/supabase";
 
-export const useTransactionPin = () => {
+/** Pass Supabase auth user id once session is ready; skips check until then. */
+export const useTransactionPin = (authUserId: string | undefined) => {
   const [hasPin, setHasPin] = useState<boolean | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
+    if (!authUserId) {
+      setHasPin(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const { data, error } = await transactionPin.has();
       if (error) throw error;
       setHasPin(Boolean(data));
     } catch {
-      setHasPin(false);
+      // Transient auth/RPC failures must not read as "no PIN" (avoids false modal on login).
+      setHasPin(null);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [authUserId]);
 
   useEffect(() => {
     void refresh();

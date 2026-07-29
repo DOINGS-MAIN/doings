@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase, events as eventsApi } from "@/lib/supabase";
+import { getAppUserId } from "@/lib/appUser";
+import { debounceAsync } from "@/lib/debounceAsync";
 
 export interface EventData {
   id: string;
@@ -105,18 +107,8 @@ export const useEvents = () => {
   const fetchMyEvents = useCallback(async () => {
     const isInitial = !myEventsFirstFetchDone.current;
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        setMyEvents([]);
-        return;
-      }
-
-      const { data: profile } = await supabase
-        .from("users")
-        .select("id")
-        .eq("auth_id", session.user.id)
-        .maybeSingle();
-      if (!profile?.id) {
+      const appUserId = await getAppUserId();
+      if (!appUserId) {
         setMyEvents([]);
         return;
       }
@@ -124,7 +116,7 @@ export const useEvents = () => {
       const { data } = await supabase
         .from("events")
         .select("*")
-        .eq("host_id", profile.id)
+        .eq("host_id", appUserId)
         .order("created_at", { ascending: false });
 
       if (data) setMyEvents(data.map(mapDbEvent));
@@ -140,18 +132,25 @@ export const useEvents = () => {
   }, []);
 
   useEffect(() => {
-    fetchEvents();
-    fetchMyEvents();
+    void fetchEvents();
+    void fetchMyEvents();
+
+    const debouncedSync = debounceAsync(() => {
+      void fetchEvents();
+      void fetchMyEvents();
+    }, 250);
 
     const channel = supabase
       .channel("event-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "events" }, () => {
-        fetchEvents();
-        fetchMyEvents();
+        debouncedSync();
       })
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      debouncedSync.cancel();
+      supabase.removeChannel(channel);
+    };
   }, [fetchEvents, fetchMyEvents]);
 
   const createEvent = useCallback(

@@ -2,6 +2,8 @@ import { useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase, transfers } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
+import { getAppUserId } from "@/lib/appUser";
+import { getCachedSession } from "@/lib/authSession";
 
 export interface BankAccount {
   id: string;
@@ -45,7 +47,7 @@ function mapRow(row: {
 }
 
 async function fetchBankAccounts(): Promise<BankAccount[]> {
-  const { data: { session } } = await supabase.auth.getSession();
+  const session = await getCachedSession();
   if (!session) return [];
 
   const { data, error } = await supabase
@@ -69,11 +71,9 @@ async function fetchNigerianBanks(): Promise<{ banks: NigerianBank[]; provider: 
 }
 
 async function getPublicUserId(): Promise<string> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("Sign in required");
-  const { data, error } = await supabase.from("users").select("id").eq("auth_id", user.id).maybeSingle();
-  if (error || !data) throw new Error("Profile not ready");
-  return data.id;
+  const appUserId = await getAppUserId();
+  if (!appUserId) throw new Error("Sign in required");
+  return appUserId;
 }
 
 export const useBankAccounts = () => {

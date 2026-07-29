@@ -3,17 +3,26 @@ import { Lock, Loader2 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { PinInput } from "@/components/PinInput";
-import { useTransactionPin } from "@/hooks/useTransactionPin";
 import { isValidPin, rpcErrorMessage } from "@/lib/pin";
 import { toast } from "sonner";
 
 interface TransactionPinSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  hasPin: boolean | null;
+  loading: boolean;
+  setPin: (pin: string, currentPin?: string) => Promise<void>;
+  refreshPin: () => Promise<void>;
 }
 
-export const TransactionPinSheet = ({ open, onOpenChange }: TransactionPinSheetProps) => {
-  const { hasPin, loading, setPin, refresh } = useTransactionPin();
+export const TransactionPinSheet = ({
+  open,
+  onOpenChange,
+  hasPin,
+  loading,
+  setPin,
+  refreshPin,
+}: TransactionPinSheetProps) => {
   const [currentPin, setCurrentPin] = useState("");
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
@@ -21,12 +30,12 @@ export const TransactionPinSheet = ({ open, onOpenChange }: TransactionPinSheetP
 
   useEffect(() => {
     if (open) {
-      void refresh();
+      void refreshPin();
       setCurrentPin("");
       setNewPin("");
       setConfirmPin("");
     }
-  }, [open, refresh]);
+  }, [open, refreshPin]);
 
   const handleSave = async () => {
     if (!isValidPin(newPin)) {

@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { getAppUserId } from "@/lib/appUser";
+import { debounceAsync } from "@/lib/debounceAsync";
 import { supabase, notifications as notificationsApi } from "@/lib/supabase";
 
 export interface Notification {
@@ -15,6 +16,7 @@ export const useNotifications = () => {
   const [items, setItems] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const refreshRef = useRef<() => Promise<void>>(async () => {});
 
   const fetchNotifications = useCallback(async () => {
     try {
@@ -25,7 +27,6 @@ export const useNotifications = () => {
       setItems(result.notifications ?? []);
       setUnreadCount(result.unread_count ?? 0);
     } catch {
-      // Fallback: direct query
       const appUserId = await getAppUserId();
       if (!appUserId) return;
 
@@ -45,36 +46,53 @@ export const useNotifications = () => {
     }
   }, []);
 
-  useEffect(() => {
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-    let cancelled = false;
+  refreshRef.current = fetchNotifications;
 
-    const setup = async () => {
+  useEffect(() => {
+    let cancelled = false;
+    const channelRef: { current: ReturnType<typeof supabase.channel> | null } = { current: null };
+    const debouncedRefresh = debounceAsync(() => {
+      void refreshRef.current();
+    }, 250);
+
+    void (async () => {
       await fetchNotifications();
+      if (cancelled) return;
+
       const appUserId = await getAppUserId();
       if (!appUserId || cancelled) return;
 
-      channel = supabase
+      const channel = supabase
         .channel(`notifications-${appUserId}`)
         .on(
           "postgres_changes",
           { event: "INSERT", schema: "public", table: "notifications", filter: `user_id=eq.${appUserId}` },
-          () => { void fetchNotifications(); },
+          () => {
+            debouncedRefresh();
+          },
         )
         .subscribe();
-    };
 
-    void setup();
+      if (cancelled) {
+        supabase.removeChannel(channel);
+        return;
+      }
+      channelRef.current = channel;
+    })();
 
     return () => {
       cancelled = true;
-      if (channel) supabase.removeChannel(channel);
+      debouncedRefresh.cancel();
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
     };
   }, [fetchNotifications]);
 
   const markRead = useCallback(async (notificationId: string) => {
     await notificationsApi.markRead(notificationId);
-    setItems((prev) => prev.map((n) => n.id === notificationId ? { ...n, read: true } : n));
+    setItems((prev) => prev.map((n) => (n.id === notificationId ? { ...n, read: true } : n)));
     setUnreadCount((prev) => Math.max(0, prev - 1));
   }, []);
 

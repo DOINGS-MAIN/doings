@@ -67,7 +67,6 @@ export function useLiveSprayHolds(eventId: string | undefined, enabled = true) {
 
   useEffect(() => {
     void refresh(true);
-    void supabase.rpc("cleanup_spray_holds");
   }, [refresh]);
 
   useEffect(() => {

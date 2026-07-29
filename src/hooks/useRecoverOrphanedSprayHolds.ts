@@ -26,7 +26,8 @@ export function useRecoverOrphanedSprayHolds(
         const { data: holds, error } = await supabase
           .from("spray_holds")
           .select("id")
-          .eq("status", "pending");
+          .eq("status", "pending")
+          .eq("sprayer_id", userId);
 
         if (error || !holds?.length) return;
 

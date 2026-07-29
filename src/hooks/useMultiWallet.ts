@@ -169,11 +169,13 @@ export const useMultiWallet = () => {
   useEffect(() => {
     let channel: ReturnType<typeof supabase.channel> | null = null;
     let cancelled = false;
+    let debouncedWalletSync: ReturnType<typeof debounceAsync> | null = null;
+    let debouncedRefreshOnVisible: ReturnType<typeof debounceAsync> | null = null;
 
-    const load = async () => {
+    const setup = async () => {
       setLoading(true);
       const appUserId = await getAppUserId();
-      if (!appUserId) {
+      if (!appUserId || cancelled) {
         if (!cancelled) setLoading(false);
         return;
       }
@@ -185,15 +187,8 @@ export const useMultiWallet = () => {
         fetchBlockradarAddresses(appUserId),
         fetchWithdrawalFeeSettings(),
       ]);
-      if (!cancelled) setLoading(false);
-    };
-
-    let debouncedWalletSync: ReturnType<typeof debounceAsync> | null = null;
-
-    const setupRealtime = async () => {
-      await load();
-      const appUserId = await getAppUserId();
-      if (!appUserId || cancelled) return;
+      if (cancelled) return;
+      setLoading(false);
 
       debouncedWalletSync = debounceAsync(() => {
         void fetchWallets(appUserId);
@@ -219,22 +214,27 @@ export const useMultiWallet = () => {
         .subscribe();
     };
 
-    void setupRealtime();
+    void setup();
 
-    const refreshOnVisible = () => {
-      if (document.visibilityState === "visible") {
-        void fetchWallets();
-        void fetchTransactions();
-      }
+    debouncedRefreshOnVisible = debounceAsync(() => {
+      if (document.visibilityState !== "visible") return;
+      void getAppUserId().then((appUserId) => {
+        if (!appUserId) return;
+        void fetchWallets(appUserId);
+        void fetchTransactions(appUserId);
+      });
+    }, 250);
+
+    const onVisibilityChange = () => {
+      debouncedRefreshOnVisible?.();
     };
-    document.addEventListener("visibilitychange", refreshOnVisible);
-    window.addEventListener("focus", refreshOnVisible);
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
       cancelled = true;
       debouncedWalletSync?.cancel();
-      document.removeEventListener("visibilitychange", refreshOnVisible);
-      window.removeEventListener("focus", refreshOnVisible);
+      debouncedRefreshOnVisible?.cancel();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       if (channel) supabase.removeChannel(channel);
     };
   }, [fetchWallets, fetchTransactions, fetchNgnReservedAccount, fetchBlockradarAddresses, fetchWithdrawalFeeSettings]);
