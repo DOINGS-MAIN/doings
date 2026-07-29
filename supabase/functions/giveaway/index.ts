@@ -120,6 +120,42 @@ Deno.serve(async (req) => {
       .eq("id", id)
       .single();
     if (error || !data) return withCors({ error: "Giveaway not found" }, { status: 404 });
+
+    const redemptions = (data.giveaway_redemptions ?? []) as Array<{
+      id: string;
+      user_id: string;
+      amount: number;
+      redeemed_at: string;
+      redeemer_name?: string;
+    }>;
+
+    if (redemptions.length > 0) {
+      const userIds = [...new Set(redemptions.map((r) => r.user_id).filter(Boolean))];
+      const { data: users } = await supabase
+        .from("users")
+        .select("id, full_name, username, phone")
+        .in("id", userIds);
+
+      const nameById = new Map(
+        (users ?? []).map((u) => {
+          const fullName = u.full_name && String(u.full_name).trim();
+          const username = u.username && String(u.username).trim();
+          const phone = u.phone && String(u.phone).trim();
+          const name =
+            fullName ||
+            (username ? (username.startsWith("@") ? username : `@${username}`) : "") ||
+            phone ||
+            "Guest";
+          return [u.id, name] as const;
+        }),
+      );
+
+      data.giveaway_redemptions = redemptions.map((r) => ({
+        ...r,
+        redeemer_name: nameById.get(r.user_id) ?? "Guest",
+      }));
+    }
+
     return withCors(data);
   }
 

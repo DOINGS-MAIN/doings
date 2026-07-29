@@ -34,6 +34,23 @@ export interface GiveawayRedemption {
   redeemedAt: string;
 }
 
+function redemptionDisplayName(r: Record<string, unknown>): string {
+  const fromApi = r.redeemer_name;
+  if (typeof fromApi === "string" && fromApi.trim()) return fromApi.trim();
+
+  const nested = r.users as Record<string, unknown> | null | undefined;
+  if (nested && typeof nested === "object") {
+    const fullName = String(nested.full_name ?? "").trim();
+    if (fullName) return fullName;
+    const username = String(nested.username ?? "").trim();
+    if (username) return username.startsWith("@") ? username : `@${username}`;
+    const phone = String(nested.phone ?? "").trim();
+    if (phone) return phone;
+  }
+
+  return "Guest";
+}
+
 function parseNestedRedemptions(raw: unknown): { redemptionCount: number; redemptions: GiveawayRedemption[] } {
   if (!Array.isArray(raw) || raw.length === 0) {
     return { redemptionCount: 0, redemptions: [] };
@@ -46,7 +63,7 @@ function parseNestedRedemptions(raw: unknown): { redemptionCount: number; redemp
     id: String(r.id ?? ""),
     giveawayId: "",
     userId: String(r.user_id ?? ""),
-    userName: "Winner",
+    userName: redemptionDisplayName(r),
     amount: Number(r.amount ?? 0) / 100,
     redeemedAt: String(r.redeemed_at ?? ""),
   }));
