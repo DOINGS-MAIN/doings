@@ -1,22 +1,32 @@
 import { motion } from "framer-motion";
 import { Copy, ExternalLink, Tv } from "lucide-react";
 import { toast } from "sonner";
-import { buildEventScreenLink } from "@/lib/shareLinks";
-import { getEventScreenPath } from "@/lib/eventScreenLink";
+import { buildProjectorShareLink } from "@/lib/shareLinks";
+import { getProjectorPath } from "@/lib/eventScreenLink";
 
 interface EventProjectorLinkProps {
   eventId: string;
+  eventCode: string;
+  /** Public events: anyone with the link can watch live sprays. */
+  isPrivate?: boolean;
   variant?: "card" | "inline";
 }
 
-export function EventProjectorLink({ eventId, variant = "card" }: EventProjectorLinkProps) {
-  const screenUrl = buildEventScreenLink(eventId);
-  const screenPath = getEventScreenPath(eventId);
+export function EventProjectorLink({
+  eventId,
+  eventCode,
+  isPrivate = false,
+  variant = "card",
+}: EventProjectorLinkProps) {
+  const shareEvent = { id: eventId, eventCode, isPrivate };
+  const screenUrl = buildProjectorShareLink(shareEvent);
+  const embedUrl = buildProjectorShareLink(shareEvent, { embed: true });
+  const screenPath = getProjectorPath(shareEvent);
 
-  const copyLink = async () => {
+  const copyLink = async (url: string, label: string) => {
     try {
-      await navigator.clipboard.writeText(screenUrl);
-      toast.success("Projector link copied!");
+      await navigator.clipboard.writeText(url);
+      toast.success(`${label} copied!`);
     } catch {
       toast.error("Could not copy link");
     }
@@ -40,13 +50,24 @@ export function EventProjectorLink({ eventId, variant = "card" }: EventProjector
         </motion.button>
         <motion.button
           type="button"
-          onClick={() => void copyLink()}
+          onClick={() => void copyLink(screenUrl, "Projector link")}
           className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-foreground"
           whileTap={{ scale: 0.98 }}
         >
           <Copy className="h-4 w-4" />
           Copy link
         </motion.button>
+        {!isPrivate && (
+          <motion.button
+            type="button"
+            onClick={() => void copyLink(embedUrl, "Embed link")}
+            className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-foreground"
+            whileTap={{ scale: 0.98 }}
+          >
+            <Copy className="h-4 w-4" />
+            Copy embed
+          </motion.button>
+        )}
       </div>
     );
   }
@@ -60,7 +81,9 @@ export function EventProjectorLink({ eventId, variant = "card" }: EventProjector
         <div className="min-w-0 flex-1">
           <p className="font-bold text-foreground">Projector screen</p>
           <p className="text-sm text-muted-foreground">
-            Open on a TV or projector — live sprayers on the dance floor with a compact join QR.
+            {isPrivate
+              ? "Host-only screen for your TV or projector — live sprayers with a join QR."
+              : "Share the watch link with anyone — no login needed. Use embed link for iframe/TV overlays."}
           </p>
         </div>
       </div>
@@ -69,7 +92,7 @@ export function EventProjectorLink({ eventId, variant = "card" }: EventProjector
         {screenUrl}
       </p>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <motion.button
           type="button"
           onClick={openProjector}
@@ -81,13 +104,25 @@ export function EventProjectorLink({ eventId, variant = "card" }: EventProjector
         </motion.button>
         <motion.button
           type="button"
-          onClick={() => void copyLink()}
+          onClick={() => void copyLink(screenUrl, "Projector link")}
           className="flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-semibold text-foreground"
           whileTap={{ scale: 0.98 }}
           aria-label="Copy projector link"
         >
           <Copy className="h-4 w-4" />
         </motion.button>
+        {!isPrivate && (
+          <motion.button
+            type="button"
+            onClick={() => void copyLink(embedUrl, "Embed link")}
+            className="flex items-center justify-center gap-2 rounded-xl bg-white/10 px-4 py-3 text-sm font-semibold text-foreground"
+            whileTap={{ scale: 0.98 }}
+            aria-label="Copy embed link"
+          >
+            <Copy className="h-4 w-4" />
+            Embed
+          </motion.button>
+        )}
       </div>
     </div>
   );

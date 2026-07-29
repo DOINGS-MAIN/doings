@@ -8,21 +8,41 @@ import { buildEventJoinLink } from "@/lib/shareLinks";
 import { EventScreenDanceFloor } from "@/components/EventScreenDanceFloor";
 import { EventScreenIdleView } from "@/components/EventScreenIdleView";
 import { EventScreenJoinQr } from "@/components/EventScreenJoinQr";
+import { STAGE_SLOT_COUNT } from "@/hooks/useSprayStage";
 
 export interface EventScreenViewProps {
   event: EventData;
   giveaways: Giveaway[];
   onBack: () => void;
+  /** Hide host close control for anonymous public viewers. */
+  showCloseButton?: boolean;
+  /** Strip header chrome for iframe / TV embeds (`?embed=1`). */
+  embed?: boolean;
+  /** Rate-limited edge feed for anonymous viewers. */
+  publicViewer?: boolean;
 }
 
-export const EventScreenView = ({ event, giveaways: _giveaways, onBack }: EventScreenViewProps) => {
+export const EventScreenView = ({
+  event,
+  giveaways: _giveaways,
+  onBack,
+  showCloseButton = true,
+  embed = false,
+  publicViewer = false,
+}: EventScreenViewProps) => {
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const { liveSprays, loading, error } = useLiveSprayHolds(event.id, event.status === "live");
+  const { liveSprays, loading, error } = useLiveSprayHolds(event.id, event.status === "live", {
+    publicViewer,
+    eventCode: event.eventCode,
+  });
 
   const joinLink = buildEventJoinLink(event.eventCode);
 
   const danceFloorSprayers = useMemo(
-    () => [...liveSprays].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
+    () =>
+      [...liveSprays]
+        .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+        .slice(0, STAGE_SLOT_COUNT),
     [liveSprays],
   );
 
@@ -49,13 +69,15 @@ export const EventScreenView = ({ event, giveaways: _giveaways, onBack }: EventS
       <div className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-black px-6 text-center text-white">
         <p className="text-lg font-semibold">Could not load live sprays</p>
         <p className="max-w-md text-sm text-white/60">{error}</p>
-        <button
-          type="button"
-          onClick={onBack}
-          className="mt-2 rounded-xl bg-primary px-6 py-3 font-semibold text-primary-foreground"
-        >
-          Back to events
-        </button>
+        {showCloseButton && (
+          <button
+            type="button"
+            onClick={onBack}
+            className="mt-2 rounded-xl bg-primary px-6 py-3 font-semibold text-primary-foreground"
+          >
+            Back to events
+          </button>
+        )}
       </div>
     );
   }
@@ -68,7 +90,39 @@ export const EventScreenView = ({ event, giveaways: _giveaways, onBack }: EventS
         isFullscreen={isFullscreen}
         onToggleFullscreen={toggleFullscreen}
         onBack={onBack}
+        showCloseButton={showCloseButton}
+        embed={embed}
       />
+    );
+  }
+
+  const qrOverlay = (
+    <div
+      className={
+        embed
+          ? "pointer-events-none absolute bottom-4 right-4 z-30 md:bottom-6 md:right-6"
+          : "relative z-20 flex shrink-0 justify-end px-5 pb-5 md:px-8 md:pb-6"
+      }
+    >
+      <EventScreenJoinQr joinLink={joinLink} eventCode={event.eventCode} compact />
+    </div>
+  );
+
+  if (embed) {
+    return (
+      <div className="relative flex min-h-dvh max-h-dvh flex-col overflow-hidden bg-black">
+        <div className="relative z-10 min-h-0 flex-1">
+          {loading && danceFloorSprayers.length === 0 ? (
+            <div className="flex h-full items-center justify-center gap-2 text-white/50">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Loading…
+            </div>
+          ) : (
+            <EventScreenDanceFloor sprayers={danceFloorSprayers} />
+          )}
+        </div>
+        {qrOverlay}
+      </div>
     );
   }
 
@@ -108,15 +162,17 @@ export const EventScreenView = ({ event, giveaways: _giveaways, onBack }: EventS
           >
             <Maximize2 className="h-5 w-5" />
           </motion.button>
-          <motion.button
-            type="button"
-            onClick={onBack}
-            className="rounded-xl bg-white/10 p-2 text-white backdrop-blur hover:bg-white/15"
-            whileTap={{ scale: 0.95 }}
-            aria-label="Close event screen"
-          >
-            <X className="h-5 w-5" />
-          </motion.button>
+          {showCloseButton && (
+            <motion.button
+              type="button"
+              onClick={onBack}
+              className="rounded-xl bg-white/10 p-2 text-white backdrop-blur hover:bg-white/15"
+              whileTap={{ scale: 0.95 }}
+              aria-label="Close event screen"
+            >
+              <X className="h-5 w-5" />
+            </motion.button>
+          )}
         </div>
       </div>
 
@@ -131,9 +187,7 @@ export const EventScreenView = ({ event, giveaways: _giveaways, onBack }: EventS
         )}
       </div>
 
-      <div className="relative z-20 flex shrink-0 justify-end px-5 pb-5 md:px-8 md:pb-6">
-        <EventScreenJoinQr joinLink={joinLink} eventCode={event.eventCode} compact />
-      </div>
+      {qrOverlay}
     </div>
   );
 };
