@@ -3,12 +3,15 @@ import { motion } from "framer-motion";
 import { Users, X, Maximize2, Loader2 } from "lucide-react";
 import { EventData } from "@/hooks/useEvents";
 import { useLiveSprayHolds } from "@/hooks/useLiveSprayHolds";
+import { useEventTopGifters } from "@/hooks/useEventTopGifters";
 import { buildEventJoinLink } from "@/lib/shareLinks";
 import { EventScreenDanceFloor } from "@/components/EventScreenDanceFloor";
 import { EventScreenIdleView } from "@/components/EventScreenIdleView";
 import { EventScreenJoinQr } from "@/components/EventScreenJoinQr";
 import { EventScreenGiveawaysBanner } from "@/components/EventScreenGiveawaysBanner";
+import { EventScreenTopGiftersPanel } from "@/components/EventScreenTopGiftersPanel";
 import type { ProjectorGiveawayDisplay } from "@/hooks/useEventScreenGiveaways";
+import type { EventTopGifter } from "@/hooks/useEventSprayFeed";
 import { STAGE_SLOT_COUNT } from "@/hooks/useSprayStage";
 
 export interface EventScreenViewProps {
@@ -37,6 +40,11 @@ export const EventScreenView = ({
     eventCode: event.eventCode,
   });
 
+  const { topGifters } = useEventTopGifters(event.id, event.status === "live", {
+    publicViewer,
+    eventCode: event.eventCode,
+  });
+
   const joinLink = buildEventJoinLink(event.eventCode);
 
   const danceFloorSprayers = useMemo(
@@ -48,6 +56,13 @@ export const EventScreenView = ({
   );
 
   const isProjectorIdle = !loading && danceFloorSprayers.length === 0;
+
+  const projectorGiveaways = useMemo(() => {
+    if (isProjectorIdle) return giveaways;
+    return giveaways.filter((g) => !g.exhausted);
+  }, [giveaways, isProjectorIdle]);
+
+  const giveawayCarousel = projectorGiveaways.length > 1;
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -94,6 +109,7 @@ export const EventScreenView = ({
         showCloseButton={showCloseButton}
         embed={embed}
         giveaways={giveaways}
+        topGifters={topGifters}
       />
     );
   }
@@ -113,7 +129,7 @@ export const EventScreenView = ({
   if (embed) {
     return (
       <div className="relative flex min-h-dvh max-h-dvh flex-col overflow-hidden bg-black">
-        <EventScreenGiveawaysBanner giveaways={giveaways} compact />
+        <EventScreenGiveawaysBanner giveaways={projectorGiveaways} compact carousel={giveawayCarousel} />
         <div className="relative z-10 min-h-0 flex-1">
           {loading && danceFloorSprayers.length === 0 ? (
             <div className="flex h-full items-center justify-center gap-2 text-white/50">
@@ -121,7 +137,14 @@ export const EventScreenView = ({
               Loading…
             </div>
           ) : (
-            <EventScreenDanceFloor sprayers={danceFloorSprayers} />
+            <>
+              <EventScreenDanceFloor sprayers={danceFloorSprayers} />
+              <EventScreenTopGiftersPanel
+                topGifters={topGifters}
+                compact
+                className="absolute right-3 top-3 z-20 md:right-5 md:top-5"
+              />
+            </>
           )}
         </div>
         {qrOverlay}
@@ -133,7 +156,7 @@ export const EventScreenView = ({
     <div className="relative flex min-h-dvh max-h-dvh flex-col overflow-hidden bg-black">
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/30 via-transparent to-black/70" />
 
-      <EventScreenGiveawaysBanner giveaways={giveaways} />
+      <EventScreenGiveawaysBanner giveaways={projectorGiveaways} compact carousel={giveawayCarousel} />
 
       <div className="relative z-20 flex shrink-0 items-center justify-between px-5 py-3 md:px-8">
         <div className="flex min-w-0 items-center gap-3">
@@ -188,7 +211,13 @@ export const EventScreenView = ({
             Loading…
           </div>
         ) : (
-          <EventScreenDanceFloor sprayers={danceFloorSprayers} />
+          <>
+            <EventScreenDanceFloor sprayers={danceFloorSprayers} />
+            <EventScreenTopGiftersPanel
+              topGifters={topGifters}
+              className="absolute right-4 top-4 z-20 md:right-8 md:top-6"
+            />
+          </>
         )}
       </div>
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,9 @@ interface CreateGiveawaySheetProps {
   }) => { code: string; id: string } | Promise<{ code: string; id: string }>;
   balance: number;
   liveEvents: EventData[];
+  initialEventId?: string;
+  /** Ensures post-join preselect works before the joined-events RPC returns. */
+  initialEvent?: EventData;
   onPinNotSet?: () => void;
   kycLevel: KYCLevel;
   onOpenKYC: () => void;
@@ -39,6 +42,8 @@ export const CreateGiveawaySheet = ({
   onCreateGiveaway,
   balance,
   liveEvents,
+  initialEventId,
+  initialEvent,
   onPinNotSet,
   kycLevel,
   onOpenKYC,
@@ -69,7 +74,22 @@ export const CreateGiveawaySheet = ({
     numericPerPerson <= numericTotal &&
     evenlyDivisible;
 
-  const selectedEvent = liveEvents.find(e => e.id === selectedEventId);
+  const eventsForPicker = useMemo(() => {
+    if (!initialEvent) return liveEvents;
+    if (liveEvents.some((e) => e.id === initialEvent.id)) return liveEvents;
+    return [initialEvent, ...liveEvents];
+  }, [liveEvents, initialEvent]);
+
+  const selectedEvent = eventsForPicker.find((e) => e.id === selectedEventId);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (initialEventId) {
+      setType("live");
+      setSelectedEventId(initialEventId);
+      setShowOnEventScreen(true);
+    }
+  }, [isOpen, initialEventId]);
 
   const handleCreate = async () => {
     if (!isValidPin(pin)) {
@@ -177,9 +197,9 @@ export const CreateGiveawaySheet = ({
               {type === 'live' && (
                 <div>
                   <label className="text-sm font-medium text-foreground mb-2 block">Select Event</label>
-                  {liveEvents.length > 0 ? (
+                  {eventsForPicker.length > 0 ? (
                     <div className="space-y-2 max-h-32 overflow-y-auto">
-                      {liveEvents.map(event => (
+                      {eventsForPicker.map(event => (
                         <motion.button
                           key={event.id}
                           onClick={() => setSelectedEventId(event.id)}
@@ -200,7 +220,7 @@ export const CreateGiveawaySheet = ({
                     </div>
                   ) : (
                     <div className="p-4 rounded-xl bg-muted/50 text-center">
-                      <p className="text-sm text-muted-foreground">No live events. Start an event first or choose "Scheduled".</p>
+                    <p className="text-sm text-muted-foreground">No live events you're in. Join an event first or choose "Scheduled".</p>
                     </div>
                   )}
                 </div>

@@ -53,7 +53,7 @@ function mapFeedRow(row: Record<string, unknown>): EventSprayActivity {
   };
 }
 
-function mapTopGifterRow(row: Record<string, unknown>): EventTopGifter {
+export function mapTopGifterRow(row: Record<string, unknown>): EventTopGifter {
   const name = String(row.sprayer_name ?? "Guest");
   const avatarUrl = (row.sprayer_avatar_url as string | null) ?? null;
   const avatarData = avatarDataFromProfile(row.sprayer_avatar_data, avatarUrl);

@@ -6,7 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { RequireAuth } from "@/components/RequireAuth";
 import { DashboardLayout } from "@/layouts/DashboardLayout";
-import { RootRedirect } from "@/pages/RootRedirect";
+import LandingPage from "@/pages/LandingPage";
 import LoginPage from "@/pages/LoginPage";
 import HomePage from "@/pages/dashboard/HomePage";
 import EventsPage from "@/pages/dashboard/EventsPage";
@@ -49,7 +49,7 @@ const App = () => (
       <AuthProvider>
         <BrowserRouter>
         <Routes>
-          <Route path="/" element={<RootRedirect />} />
+          <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/join/:eventCode" element={<JoinEventLinkPage />} />
           <Route path="/redeem/:code" element={<RedeemGiveawayLinkPage />} />

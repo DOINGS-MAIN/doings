@@ -130,7 +130,81 @@
     background-image: var(--gradient-cyan);
   }
 
-  /* Button variants will be in button.tsx */
+  /* Landing page — celebration editorial */
+  .landing-page {
+    font-family: "Figtree", system-ui, sans-serif;
+  }
+
+  .landing-display {
+    font-family: "Bebas Neue", system-ui, sans-serif;
+    letter-spacing: 0.02em;
+    line-height: 0.95;
+    text-wrap: balance;
+  }
+
+  .landing-photo {
+    @apply object-cover w-full h-full;
+  }
+
+  .landing-grain::after {
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+    opacity: 0.04;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .landing-reveal {
+      opacity: 1 !important;
+      transform: none !important;
+    }
+
+    .landing-marquee {
+      animation: none !important;
+    }
+  }
+
+  @keyframes landing-marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
+  .landing-marquee {
+    animation: landing-marquee 28s linear infinite;
+  }
+
+  @keyframes landing-money-fall {
+    0% {
+      opacity: 0;
+      transform: translateY(-10%) rotate(0deg);
+    }
+    15% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(220%) rotate(180deg);
+    }
+  }
+
+  .landing-money-fall {
+    top: -10%;
+    animation: landing-money-fall 2.2s ease-in forwards infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .landing-money-fall {
+      animation: none;
+      opacity: 0.35;
+    }
+  }
+
   
   /* Card hover effects */
   .card-interactive {

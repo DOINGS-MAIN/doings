@@ -3,8 +3,8 @@ import { Navigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { HeroSection } from "@/components/HeroSection";
-import { FeatureCards } from "@/components/FeatureCards";
+import { Link } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import { AuthFlow } from "@/components/AuthFlow";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -77,16 +77,24 @@ export default function LoginPage() {
         className="relative z-10 pb-32"
       >
         <motion.div
-          className="flex items-center justify-center pt-12 pb-4"
+          className="flex flex-col items-center pt-8 pb-6 px-6"
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
         >
-          <h1 className="text-2xl font-black text-gradient-gold tracking-tight">DOINGS</h1>
+          <Link
+            to="/"
+            className="self-start flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-8 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back
+          </Link>
+          <h1 className="text-2xl font-black text-gradient-gold tracking-tight mb-2">DOINGS</h1>
+          <p className="text-muted-foreground text-center text-sm max-w-xs">
+            Sign in or create an account to join events and spray live.
+          </p>
         </motion.div>
 
-        <HeroSection />
-        <FeatureCards />
         <AuthFlow
           onComplete={() => {}}
           signInWithPassword={signInWithPassword}

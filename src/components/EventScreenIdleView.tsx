@@ -4,7 +4,9 @@ import type { EventData } from "@/hooks/useEvents";
 import { SprayAvatarCharacter } from "@/components/SprayAvatarCharacter";
 import { EventScreenJoinQr } from "@/components/EventScreenJoinQr";
 import { EventScreenGiveawaysBanner } from "@/components/EventScreenGiveawaysBanner";
+import { EventScreenTopGiftersPanel } from "@/components/EventScreenTopGiftersPanel";
 import type { ProjectorGiveawayDisplay } from "@/hooks/useEventScreenGiveaways";
+import type { EventTopGifter } from "@/hooks/useEventSprayFeed";
 
 interface EventScreenIdleViewProps {
   event: EventData;
@@ -15,6 +17,7 @@ interface EventScreenIdleViewProps {
   showCloseButton?: boolean;
   embed?: boolean;
   giveaways?: ProjectorGiveawayDisplay[];
+  topGifters?: EventTopGifter[];
 }
 
 /** Projector waiting room — one avatar + join QR, nothing else. */
@@ -27,12 +30,22 @@ export function EventScreenIdleView({
   showCloseButton = true,
   embed = false,
   giveaways = [],
+  topGifters = [],
 }: EventScreenIdleViewProps) {
   if (embed) {
     return (
       <div className="relative flex min-h-dvh max-h-dvh flex-col overflow-hidden bg-black">
-        <EventScreenGiveawaysBanner giveaways={giveaways} compact />
+        <EventScreenGiveawaysBanner
+          giveaways={giveaways}
+          compact
+          carousel={giveaways.length > 1}
+        />
         <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center gap-8 px-6 pb-10">
+          <EventScreenTopGiftersPanel
+            topGifters={topGifters}
+            compact
+            className="absolute right-3 top-3 z-20 md:right-5 md:top-5"
+          />
           <motion.div
             className="flex flex-col items-center text-center"
             initial={{ opacity: 0, y: 16 }}
@@ -95,6 +108,10 @@ export function EventScreenIdleView({
       </div>
 
       <div className="relative z-10 flex min-h-0 flex-1 flex-col items-center justify-center gap-8 px-6 pb-10 md:flex-row md:gap-16 md:px-12">
+        <EventScreenTopGiftersPanel
+          topGifters={topGifters}
+          className="absolute right-4 top-20 z-20 md:right-8 md:top-24"
+        />
         <motion.div
           className="flex flex-col items-center text-center"
           initial={{ opacity: 0, y: 16 }}

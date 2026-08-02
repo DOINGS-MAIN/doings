@@ -64,9 +64,19 @@ Deno.serve(async (req) => {
     return withCors({ error: "Could not load live sprays" }, { status: 500 });
   }
 
+  const { data: topGifters, error: topErr } = await supabase.rpc("get_event_top_gifters", {
+    p_event_id: event.id,
+    p_limit: 3,
+  });
+
+  if (topErr) {
+    return withCors({ error: "Could not load top sprayers" }, { status: 500 });
+  }
+
   return withCors({
     event_id: event.id,
     live_sprays: liveSprays ?? [],
+    top_gifters: topGifters ?? [],
     remaining: rate.remaining,
   });
 });

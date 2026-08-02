@@ -267,16 +267,18 @@ export const events = {
 /** Rate-limited live spray feed for anonymous public projector viewers. */
 export const publicProjector = {
   getLiveSprays: (params: { eventId?: string; eventCode?: string }) =>
-    invoke<{ event_id: string; live_sprays: Record<string, unknown>[]; remaining?: number }>(
-      "public-projector",
-      {
-        method: "GET",
-        params: {
-          event_id: params.eventId,
-          code: params.eventCode,
-        },
+    invoke<{
+      event_id: string;
+      live_sprays: Record<string, unknown>[];
+      top_gifters: Record<string, unknown>[];
+      remaining?: number;
+    }>("public-projector", {
+      method: "GET",
+      params: {
+        event_id: params.eventId,
+        code: params.eventCode,
       },
-    ),
+    }),
 };
 
 // ── Spray ──

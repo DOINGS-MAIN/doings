@@ -19,6 +19,7 @@ import { SendMoneySheet } from "@/components/SendMoneySheet";
 import { ConvertSheet } from "@/components/ConvertSheet";
 import { TransactionPinSheet } from "@/components/TransactionPinSheet";
 import { CreateGiveawaySheet } from "@/components/CreateGiveawaySheet";
+import { EventJoinActionsSheet } from "@/components/EventJoinActionsSheet";
 import { GiveawayDetailsSheet } from "@/components/GiveawayDetailsSheet";
 import { RedeemGiveawaySheet } from "@/components/RedeemGiveawaySheet";
 import { NotificationsScreen } from "@/components/NotificationsScreen";
@@ -97,6 +98,9 @@ export function DashboardLayout() {
   const [redeemGiveawayInitialCode, setRedeemGiveawayInitialCode] = useState<string | undefined>();
 
   const [showCreateGiveaway, setShowCreateGiveaway] = useState(false);
+  const [createGiveawayInitialEventId, setCreateGiveawayInitialEventId] = useState<string | undefined>();
+  const [createGiveawayInitialEvent, setCreateGiveawayInitialEvent] = useState<EventData | undefined>();
+  const [showEventJoinActions, setShowEventJoinActions] = useState(false);
   const [showRedeemGiveaway, setShowRedeemGiveaway] = useState(false);
   const [showGiveawayDetails, setShowGiveawayDetails] = useState(false);
   const [selectedGiveaway, setSelectedGiveaway] = useState<Giveaway | null>(null);
@@ -156,7 +160,7 @@ export function DashboardLayout() {
     deleteEvent,
     findEventByCode,
     getLiveEvents,
-    getMyLiveEvents,
+    getLiveEventsForGiveaway,
     joinEvent,
   } = useEvents();
 
@@ -184,7 +188,13 @@ export function DashboardLayout() {
     [getLiveEvents],
   );
 
-  const myLiveEventsForGiveaway = useMemo(() => getMyLiveEvents(), [getMyLiveEvents]);
+  const liveEventsForGiveaway = useMemo(() => getLiveEventsForGiveaway(), [getLiveEventsForGiveaway]);
+
+  const openCreateGiveawayForEvent = useCallback((eventId?: string, event?: EventData) => {
+    setCreateGiveawayInitialEventId(eventId);
+    setCreateGiveawayInitialEvent(event);
+    setShowCreateGiveaway(true);
+  }, []);
 
   const openPinSettings = useCallback(() => setShowTransactionPin(true), []);
 
@@ -207,7 +217,7 @@ export function DashboardLayout() {
         return;
       }
       setSelectedEvent(event);
-      setShowSpraySetup(true);
+      setShowEventJoinActions(true);
     },
     [joinEvent, profile?.id],
   );
@@ -554,6 +564,7 @@ export function DashboardLayout() {
     setShowSendMoney,
     setShowConvert,
     setShowCreateGiveaway,
+    openCreateGiveawayForEvent,
     setShowRedeemGiveaway,
     setShowAvatarCustomization,
     setShowBankAccounts,
@@ -615,10 +626,10 @@ export function DashboardLayout() {
       handleGoLive,
       handleEndEvent,
       handleViewGiveaway,
-      handleUpdateEvent,
       signOut,
       updateProfile,
       setUsername,
+      openCreateGiveawayForEvent,
     ],
   );
 
@@ -677,6 +688,26 @@ export function DashboardLayout() {
             />
           )}
         </AnimatePresence>
+
+        {showEventJoinActions && selectedEvent && (
+          <EventJoinActionsSheet
+            isOpen={showEventJoinActions}
+            onClose={() => {
+              setShowEventJoinActions(false);
+              setSelectedEvent(null);
+            }}
+            event={selectedEvent}
+            onSpray={() => {
+              setShowEventJoinActions(false);
+              setShowSpraySetup(true);
+            }}
+            onDropGiveaway={() => {
+              openCreateGiveawayForEvent(selectedEvent.id, selectedEvent);
+              setShowEventJoinActions(false);
+              setSelectedEvent(null);
+            }}
+          />
+        )}
 
         {showSpraySetup && selectedEvent && (
           <SpraySetupSheet
@@ -829,14 +860,22 @@ export function DashboardLayout() {
         {showCreateGiveaway && (
           <CreateGiveawaySheet
             isOpen={showCreateGiveaway}
-            onClose={() => setShowCreateGiveaway(false)}
+            onClose={() => {
+              setShowCreateGiveaway(false);
+              setCreateGiveawayInitialEventId(undefined);
+              setCreateGiveawayInitialEvent(undefined);
+            }}
             onCreateGiveaway={handleCreateGiveaway}
             balance={ngnBalance}
-            liveEvents={myLiveEventsForGiveaway}
+            liveEvents={liveEventsForGiveaway}
+            initialEventId={createGiveawayInitialEventId}
+            initialEvent={createGiveawayInitialEvent}
             onPinNotSet={openPinSettings}
             kycLevel={kycLevel}
             onOpenKYC={() => {
               setShowCreateGiveaway(false);
+              setCreateGiveawayInitialEventId(undefined);
+              setCreateGiveawayInitialEvent(undefined);
               setShowKYC(true);
             }}
           />

@@ -81,6 +81,8 @@ export function mapDbEvent(e: Record<string, unknown>): EventData {
 export const useEvents = () => {
   const [allEvents, setAllEvents] = useState<EventData[]>([]);
   const [myEvents, setMyEvents] = useState<EventData[]>([]);
+  /** Live events the user hosts or has joined (for event giveaways). */
+  const [liveEventsForGiveaway, setLiveEventsForGiveaway] = useState<EventData[]>([]);
   /** True until the first `fetchMyEvents` run finishes (avoids empty-state flash on /events). */
   const [myEventsInitialLoading, setMyEventsInitialLoading] = useState(true);
   const myEventsFirstFetchDone = useRef(false);
@@ -101,6 +103,31 @@ export const useEvents = () => {
         .order("created_at", { ascending: false })
         .limit(50);
       if (data) setAllEvents(data.map(mapDbEvent));
+    }
+  }, []);
+
+  const fetchLiveEventsForGiveaway = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.rpc("get_my_live_events_for_giveaway");
+      if (error) throw error;
+      const rows = Array.isArray(data) ? data : [];
+      setLiveEventsForGiveaway(rows.map((row) => mapDbEvent(row as Record<string, unknown>)));
+    } catch {
+      try {
+        const appUserId = await getAppUserId();
+        if (!appUserId) {
+          setLiveEventsForGiveaway([]);
+          return;
+        }
+        const { data } = await supabase
+          .from("events")
+          .select("*")
+          .eq("host_id", appUserId)
+          .eq("status", "live");
+        setLiveEventsForGiveaway((data ?? []).map(mapDbEvent));
+      } catch {
+        setLiveEventsForGiveaway([]);
+      }
     }
   }, []);
 
@@ -134,15 +161,20 @@ export const useEvents = () => {
   useEffect(() => {
     void fetchEvents();
     void fetchMyEvents();
+    void fetchLiveEventsForGiveaway();
 
     const debouncedSync = debounceAsync(() => {
       void fetchEvents();
       void fetchMyEvents();
+      void fetchLiveEventsForGiveaway();
     }, 250);
 
     const channel = supabase
       .channel("event-changes")
       .on("postgres_changes", { event: "*", schema: "public", table: "events" }, () => {
+        debouncedSync();
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "event_participants" }, () => {
         debouncedSync();
       })
       .subscribe();
@@ -151,7 +183,7 @@ export const useEvents = () => {
       debouncedSync.cancel();
       supabase.removeChannel(channel);
     };
-  }, [fetchEvents, fetchMyEvents]);
+  }, [fetchEvents, fetchMyEvents, fetchLiveEventsForGiveaway]);
 
   const createEvent = useCallback(
     async (eventData: Omit<EventData, "id" | "eventCode" | "participants" | "totalSprayed" | "createdAt" | "updatedAt" | "emoji" | "gradient">) => {
@@ -195,15 +227,17 @@ export const useEvents = () => {
     await eventsApi.goLive(eventId);
     await fetchEvents();
     await fetchMyEvents();
+    await fetchLiveEventsForGiveaway();
     return allEvents.find((e) => e.id === eventId) ?? null;
-  }, [allEvents, fetchEvents, fetchMyEvents]);
+  }, [allEvents, fetchEvents, fetchMyEvents, fetchLiveEventsForGiveaway]);
 
   const endEvent = useCallback(async (eventId: string) => {
     await eventsApi.end(eventId);
     await fetchEvents();
     await fetchMyEvents();
+    await fetchLiveEventsForGiveaway();
     return allEvents.find((e) => e.id === eventId) ?? null;
-  }, [allEvents, fetchEvents, fetchMyEvents]);
+  }, [allEvents, fetchEvents, fetchMyEvents, fetchLiveEventsForGiveaway]);
 
   const deleteEvent = useCallback(async (eventId: string) => {
     await eventsApi.delete(eventId);
@@ -226,7 +260,8 @@ export const useEvents = () => {
   const joinEvent = useCallback(async (eventId: string) => {
     await eventsApi.join(eventId);
     await fetchEvents();
-  }, [fetchEvents]);
+    await fetchLiveEventsForGiveaway();
+  }, [fetchEvents, fetchLiveEventsForGiveaway]);
 
   const addSprayAmount = useCallback((_eventId: string, _amount: number) => {
     // Spray amounts are updated via the spray edge function + realtime
@@ -258,6 +293,11 @@ export const useEvents = () => {
     return myEvents.filter((e) => e.status === "live");
   }, [myEvents]);
 
+  /** Live events the user hosts or has joined — for attaching giveaways at an event. */
+  const getLiveEventsForGiveaway = useCallback((): EventData[] => {
+    return liveEventsForGiveaway;
+  }, [liveEventsForGiveaway]);
+
   const getScheduledEvents = useCallback((): EventData[] => {
     return allEvents.filter((e) => e.status === "scheduled");
   }, [allEvents]);
@@ -276,6 +316,7 @@ export const useEvents = () => {
     findEventByCode,
     getLiveEvents,
     getMyLiveEvents,
+    getLiveEventsForGiveaway,
     getScheduledEvents,
   };
 };

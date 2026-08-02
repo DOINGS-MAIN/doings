@@ -104,7 +104,7 @@ export default function HomePage() {
           <div className="w-12 h-12 rounded-2xl bg-primary/20 flex items-center justify-center text-2xl">🎯</div>
           <div className="text-center">
             <h3 className="font-bold text-foreground text-sm">Join Event</h3>
-            <p className="text-xs text-muted-foreground">Spray money</p>
+            <p className="text-xs text-muted-foreground">Spray or drop giveaways</p>
           </div>
         </motion.button>
 

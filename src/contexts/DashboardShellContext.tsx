@@ -95,6 +95,7 @@ export interface DashboardShellValue {
   setShowSendMoney: Dispatch<SetStateAction<boolean>>;
   setShowConvert: Dispatch<SetStateAction<boolean>>;
   setShowCreateGiveaway: Dispatch<SetStateAction<boolean>>;
+  openCreateGiveawayForEvent: (eventId?: string, event?: EventData) => void;
   setShowRedeemGiveaway: Dispatch<SetStateAction<boolean>>;
   setShowAvatarCustomization: Dispatch<SetStateAction<boolean>>;
   setShowBankAccounts: Dispatch<SetStateAction<boolean>>;
