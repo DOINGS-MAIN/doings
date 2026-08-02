@@ -6,7 +6,7 @@ const GIVEAWAY_STEPS = [
   {
     icon: Share2,
     title: "Anyone in the room drops",
-    body: "Host or guest — set the total, per-person amount, and spots. Doings generates a redeem code.",
+    body: "Host or guest: set the total, per-person amount, and spots. Doings generates a redeem code.",
   },
   {
     icon: QrCode,
@@ -82,7 +82,7 @@ export function LandingGiveawaySection() {
                 <span className="block text-primary">Guests redeem live.</span>
               </h2>
               <p className="mt-5 text-lg text-white/70 leading-relaxed max-w-lg">
-                Hosts and guests can run money drops during a live event — birthday surprises, owambe hype,
+                Hosts and guests can run money drops during a live event: birthday surprises, owambe hype,
                 or thank-you gifts. The code shows on the big screen; everyone scans and cash hits
                 their wallet.
               </p>

@@ -43,7 +43,7 @@ export const EventJoinActionsSheet = ({
             </div>
             <h3 className="text-xl font-bold text-foreground">You&apos;re in!</h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              {event.title} is live — spray the host or drop a giveaway for everyone.
+              {event.title} is live. Spray the host or drop a giveaway for everyone.
             </p>
           </div>
 
@@ -66,7 +66,7 @@ export const EventJoinActionsSheet = ({
           </div>
 
           <p className="text-center text-xs text-muted-foreground">
-            Giveaways show on the event screen — guests scan or enter your code to redeem.
+            Giveaways show on the event screen. Guests scan or enter your code to redeem.
           </p>
         </motion.div>
       </SheetContent>

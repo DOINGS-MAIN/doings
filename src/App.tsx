@@ -7,6 +7,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import { RequireAuth } from "@/components/RequireAuth";
 import { DashboardLayout } from "@/layouts/DashboardLayout";
 import LandingPage from "@/pages/LandingPage";
+import ContactPage from "@/pages/ContactPage";
 import LoginPage from "@/pages/LoginPage";
 import HomePage from "@/pages/dashboard/HomePage";
 import EventsPage from "@/pages/dashboard/EventsPage";
@@ -50,6 +51,7 @@ const App = () => (
         <BrowserRouter>
         <Routes>
           <Route path="/" element={<LandingPage />} />
+          <Route path="/contact" element={<ContactPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/join/:eventCode" element={<JoinEventLinkPage />} />
           <Route path="/redeem/:code" element={<RedeemGiveawayLinkPage />} />

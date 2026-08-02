@@ -10,9 +10,11 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { LandingGiveawaySection } from "@/components/landing/LandingGiveawaySection";
+import { LandingContactSection } from "@/components/landing/LandingContactSection";
 import { LandingProjectorShowcase } from "@/components/landing/LandingProjectorShowcase";
 import { useAuth } from "@/hooks/useAuth";
 import { landingImages } from "@/lib/landingImages";
+import { companyContact, companyFullAddress, companyTelHref, hasPublicAddress, hasPublicPhone } from "@/lib/companyContact";
 import { cn } from "@/lib/utils";
 
 const EVENT_TYPES = [
@@ -27,31 +29,31 @@ const EVENT_TYPES = [
 const STEPS = [
   {
     title: "Join the event",
-    body: "Scan the QR at the venue or open the WhatsApp link. Works in your browser — no app download.",
-    image: landingImages.steps.join,
-    imageAlt: "Guests at an African wedding celebration",
-    location: "Nigeria",
+    body: "Scan the QR at the venue or open the WhatsApp link. Works in your browser. No app download.",
+    image: landingImages.steps.join.src,
+    imageAlt: landingImages.steps.join.alt,
+    location: landingImages.steps.join.location,
   },
   {
     title: "Fund your wallet",
     body: "Add NGN by bank transfer. You control your balance before you spray or redeem a drop.",
-    image: landingImages.steps.fund,
-    imageAlt: "Yellow danfo bus on a Lagos street",
-    location: "Lagos, Nigeria",
+    image: landingImages.steps.fund.src,
+    imageAlt: landingImages.steps.fund.alt,
+    location: landingImages.steps.fund.location,
   },
   {
     title: "Spray on the projector",
-    body: "Pick who you are celebrating. Your name and amount hit the event screen — the hall reacts.",
-    image: landingImages.steps.spray,
-    imageAlt: "Wedding guests dancing at a Nigerian reception",
-    location: "Nigeria",
+    body: "Pick who you are celebrating. Your name and amount hit the event screen and the hall reacts.",
+    image: landingImages.steps.spray.src,
+    imageAlt: landingImages.steps.spray.alt,
+    location: landingImages.steps.spray.location,
   },
   {
     title: "Redeem giveaway drops",
     body: "When the host runs a drop, scan the code on the screen. Your share lands in your wallet.",
-    image: landingImages.steps.giveaway,
-    imageAlt: "Guest at a Nigerian celebration",
-    location: "Nigeria",
+    image: landingImages.steps.giveaway.src,
+    imageAlt: landingImages.steps.giveaway.alt,
+    location: landingImages.steps.giveaway.location,
   },
 ] as const;
 
@@ -59,7 +61,7 @@ const FAQ = [
   {
     question: "What is spraying?",
     answer:
-      "Spraying is celebrating someone with money at a live event — on the dance floor, at an owambe, during a performance. Doings does it digitally and shows your name on the projector.",
+      "Spraying is celebrating someone with money at a live event: on the dance floor, at an owambe, during a performance. Doings does it digitally and shows your name on the projector.",
   },
   {
     question: "How do giveaways work?",
@@ -79,7 +81,7 @@ const FAQ = [
   {
     question: "Can people join from abroad?",
     answer:
-      "Yes. Share the event link and guests abroad can spray or join drops — it still shows on the screen in the hall.",
+      "Yes. Share the event link and guests abroad can spray or join drops. It still shows on the screen in the hall.",
   },
 ] as const;
 
@@ -116,7 +118,36 @@ export default function LandingPage() {
   const { initialized, loading, isAuthenticated } = useAuth();
 
   useEffect(() => {
-    document.title = "Doings — Spray & giveaways at Nigerian events";
+    document.title = "Doings | Spray & giveaways at Nigerian events";
+
+    const schema = {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      name: companyContact.legalName,
+      alternateName: companyContact.productName,
+      url: companyContact.website,
+      email: companyContact.email,
+      ...(hasPublicPhone() ? { telephone: companyContact.phone } : {}),
+      ...(hasPublicAddress()
+        ? {
+            address: {
+              "@type": "PostalAddress",
+              streetAddress: companyContact.address.line1,
+              addressLocality: companyContact.address.line2,
+              addressCountry: "NG",
+            },
+          }
+        : {}),
+    };
+
+    const script = document.createElement("script");
+    script.type = "application/ld+json";
+    script.text = JSON.stringify(schema);
+    script.id = "doings-org-schema";
+    document.head.appendChild(script);
+    return () => {
+      document.getElementById("doings-org-schema")?.remove();
+    };
   }, []);
 
   if (!initialized || loading) {
@@ -147,6 +178,9 @@ export default function LandingPage() {
             </button>
             <button type="button" onClick={() => scrollTo("how")} className="hover:text-white transition-colors">
               How it works
+            </button>
+            <button type="button" onClick={() => scrollTo("contact")} className="hover:text-white transition-colors">
+              Contact
             </button>
           </nav>
           <Button asChild variant="gold" size="sm" className="rounded-full px-5">
@@ -188,7 +222,7 @@ export default function LandingPage() {
                   <span className="block text-primary">Watch it hit the screen.</span>
                 </h1>
                 <p className="text-lg md:text-xl text-white/80 max-w-xl leading-relaxed">
-                  Doings is for Nigerian events — weddings, birthdays, and live shows. Guests spray
+                  Doings is for Nigerian events: weddings, birthdays, and live shows. Guests spray
                   from their phones, hosts run giveaway drops, and everything shows on the projector
                   with your name on the projector, top sprayers on screen, and giveaway drops.
                 </p>
@@ -241,7 +275,7 @@ export default function LandingPage() {
                 <span className="text-primary block">is the point</span>
               </h2>
               <p className="text-lg text-white/70 leading-relaxed">
-                Every spray animates on the event screen — avatar, amount, and name. Top sprayers
+                Every spray animates on the event screen: avatar, amount, and name. Top sprayers
                 for this event stay visible on the right as totals update.
               </p>
             </div>
@@ -298,12 +332,12 @@ export default function LandingPage() {
                 <span className="text-primary block">now on screen</span>
               </h2>
               <p className="text-lg text-white/75 leading-relaxed max-w-lg">
-                You already know the energy — cash on the dance floor, the MC calling names, the
+                You already know the energy: cash on the dance floor, the MC calling names, the
                 crowd reacting. Doings keeps that feeling and adds a wallet, a projector view, and
                 giveaway drops anyone can redeem.
               </p>
               <blockquote className="border-l-2 border-primary pl-5 text-white/90 italic text-lg">
-                &ldquo;It feels like spraying at an owambe — but the whole hall sees your name on
+                &ldquo;It feels like spraying at an owambe, but the whole hall sees your name on
                 the screen.&rdquo;
               </blockquote>
             </motion.div>
@@ -320,7 +354,7 @@ export default function LandingPage() {
                 From WhatsApp link to screen
               </h2>
               <p className="text-white/65 text-lg">
-                Spray, redeem drops, and climb the top sprayers board — on the projector and in the app.
+                Spray, redeem drops, and climb the top sprayers board on the projector and in the app.
               </p>
             </div>
             <div className="space-y-16 md:space-y-20">
@@ -411,7 +445,7 @@ export default function LandingPage() {
                 <div className="flex items-center gap-4">
                   <img
                     src={voice.portrait}
-                    alt=""
+                    alt={voice.portraitAlt}
                     className="w-14 h-14 rounded-full object-cover ring-2 ring-primary/40"
                   />
                   <div>
@@ -424,6 +458,8 @@ export default function LandingPage() {
             ))}
           </div>
         </section>
+
+        <LandingContactSection />
 
         {/* FAQ */}
         <section id="faq" className="bg-[#0f1016] py-20 md:py-28">
@@ -468,12 +504,45 @@ export default function LandingPage() {
       </main>
 
       <footer className="border-t border-white/10 py-10 bg-[#0a0b0f]">
-        <div className="container flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-white/45">
-          <span className="landing-display text-2xl text-primary">DOINGS</span>
-          <a href="mailto:support@doingsapp.com" className="hover:text-white transition-colors">
-            support@doingsapp.com
-          </a>
-          <span>© {new Date().getFullYear()} Doings · Nigeria</span>
+        <div className="container space-y-6">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6 text-sm">
+            <div>
+              <p className="landing-display text-2xl text-primary mb-2">DOINGS</p>
+              <p className="text-white/55 leading-relaxed">
+                Operated by {companyContact.legalName}
+              </p>
+            </div>
+            <div>
+              <p className="font-semibold text-white mb-2">Email</p>
+              <a href={`mailto:${companyContact.email}`} className="text-white/70 hover:text-primary transition-colors">
+                {companyContact.email}
+              </a>
+            </div>
+            <div>
+              <p className="font-semibold text-white mb-2">Phone</p>
+              {hasPublicPhone() ? (
+                <a href={companyTelHref()} className="text-white/70 hover:text-primary transition-colors">
+                  {companyContact.phone}
+                </a>
+              ) : (
+                <p className="text-white/45">Update phone in src/lib/companyContact.ts</p>
+              )}
+            </div>
+            <div>
+              <p className="font-semibold text-white mb-2">Business address</p>
+              {hasPublicAddress() ? (
+                <p className="text-white/70 leading-relaxed">{companyFullAddress()}</p>
+              ) : (
+                <p className="text-white/45">Update address in src/lib/companyContact.ts</p>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-sm text-white/45 border-t border-white/10 pt-6">
+            <span>© {new Date().getFullYear()} {companyContact.productName} · Nigeria</span>
+            <a href={`mailto:${companyContact.email}`} className="hover:text-white transition-colors">
+              {companyContact.email}
+            </a>
+          </div>
         </div>
       </footer>
     </div>
