@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/PasswordInput";
 import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/hooks/useAuth";
@@ -108,9 +108,8 @@ export default function ResetPasswordPage() {
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="reset-pw">New password</Label>
-            <Input
+            <PasswordInput
               id="reset-pw"
-              type="password"
               autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -119,9 +118,8 @@ export default function ResetPasswordPage() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="reset-pw2">Confirm password</Label>
-            <Input
+            <PasswordInput
               id="reset-pw2"
-              type="password"
               autoComplete="new-password"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}

@@ -13,6 +13,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/PasswordInput";
 import { Badge } from "@/components/ui/badge";
 import {
   Select,
@@ -143,14 +144,12 @@ export const AdminSettings = () => {
         </CardHeader>
         <CardContent>
           <div className="flex gap-3 max-w-lg">
-            <Input
-              type="password"
+            <PasswordInput
               placeholder="Current password"
               value={changePwCurrent}
               onChange={(e) => setChangePwCurrent(e.target.value)}
             />
-            <Input
-              type="password"
+            <PasswordInput
               placeholder="New password"
               value={changePwNew}
               onChange={(e) => setChangePwNew(e.target.value)}

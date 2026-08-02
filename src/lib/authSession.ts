@@ -6,6 +6,31 @@ let cachedSession: Session | null | undefined;
 let inflightSession: Promise<Session | null> | null = null;
 let inflightRefresh: Promise<Session | null> | null = null;
 
+function isInvalidRefreshTokenError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const e = error as { message?: string; status?: number };
+  const msg = (e.message ?? "").toLowerCase();
+  return (
+    e.status === 400 ||
+    msg.includes("refresh token not found") ||
+    msg.includes("invalid refresh token") ||
+    msg.includes("refresh_token_not_found")
+  );
+}
+
+/** Drop expired/revoked refresh tokens from local storage so anon pages keep working. */
+async function clearStaleAuthSession(): Promise<null> {
+  cachedSession = null;
+  inflightSession = null;
+  inflightRefresh = null;
+  try {
+    await supabase.auth.signOut({ scope: "local" });
+  } catch {
+    /* ignore — storage may already be empty */
+  }
+  return null;
+}
+
 export function invalidateAuthSessionCache(): void {
   cachedSession = undefined;
   inflightSession = null;
@@ -19,13 +44,19 @@ export async function getCachedSession(): Promise<Session | null> {
 
   inflightSession = supabase.auth
     .getSession()
-    .then(({ data: { session } }) => {
-      cachedSession = session;
+    .then(({ data: { session }, error }) => {
       inflightSession = null;
+      if (error && isInvalidRefreshTokenError(error)) {
+        return clearStaleAuthSession();
+      }
+      cachedSession = session;
       return session;
     })
     .catch((err) => {
       inflightSession = null;
+      if (isInvalidRefreshTokenError(err)) {
+        return clearStaleAuthSession();
+      }
       throw err;
     });
 
@@ -55,10 +86,16 @@ export async function getValidSession(refreshSkewSec = 600): Promise<Session | n
         cachedSession = data.session;
         return data.session;
       }
+      if (error && isInvalidRefreshTokenError(error)) {
+        return clearStaleAuthSession();
+      }
       return previous;
     })
     .catch((err) => {
       inflightRefresh = null;
+      if (isInvalidRefreshTokenError(err)) {
+        return clearStaleAuthSession();
+      }
       throw err;
     });
 
@@ -79,10 +116,16 @@ export async function refreshCachedSession(): Promise<Session | null> {
         cachedSession = data.session;
         return data.session;
       }
+      if (error && isInvalidRefreshTokenError(error)) {
+        return clearStaleAuthSession();
+      }
       return cachedSession !== undefined ? cachedSession : null;
     })
     .catch((err) => {
       inflightRefresh = null;
+      if (isInvalidRefreshTokenError(err)) {
+        return clearStaleAuthSession();
+      }
       throw err;
     });
 
