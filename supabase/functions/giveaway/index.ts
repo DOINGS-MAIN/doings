@@ -12,7 +12,46 @@ type CreateBody = {
   is_private?: boolean;
   show_on_event_screen?: boolean;
   pin: string;
+  /** Optional client retry key: the same key never funds a second giveaway. */
+  idempotency_key?: string;
 };
+
+const CLIENT_IDEMPOTENCY_RE = /^[A-Za-z0-9_-]{8,100}$/;
+
+/** RPC validation failures that are the caller's input, not a server fault (400, not 500). */
+const CLIENT_ERROR_PATTERNS = [
+  "Insufficient",
+  "Minimum total",
+  "Minimum per person",
+  "evenly divisible",
+  "cannot exceed",
+  "Event giveaways must be type live",
+  "Join this live event",
+  "NGN wallet not found",
+  "value too long",
+];
+
+const GIVEAWAY_RETURN_COLUMNS =
+  "id, code, total_amount, per_person_amount, max_recipients, status, funding_transaction_id";
+
+/** The giveaway already funded by this idempotency key, if any. */
+async function findGiveawayByFundingKey(
+  supabase: ReturnType<typeof getServiceClient>,
+  idempotencyKey: string,
+): Promise<Record<string, unknown> | null> {
+  const { data: txn } = await supabase
+    .from("transactions")
+    .select("id")
+    .eq("idempotency_key", idempotencyKey)
+    .maybeSingle();
+  if (!txn) return null;
+  const { data: giveaway } = await supabase
+    .from("giveaways")
+    .select(GIVEAWAY_RETURN_COLUMNS)
+    .eq("funding_transaction_id", txn.id)
+    .maybeSingle();
+  return giveaway ?? null;
+}
 
 type RedeemBody = {
   code: string;
@@ -121,6 +160,18 @@ Deno.serve(async (req) => {
       .single();
     if (error || !data) return withCors({ error: "Giveaway not found" }, { status: 404 });
 
+    // Only the creator sees the code, redeemers and funding details.
+    if (data.creator_id !== user.id) {
+      const {
+        code: _code,
+        giveaway_redemptions: _redemptions,
+        funding_transaction_id: _funding,
+        refund_transaction_id: _refund,
+        ...publicFields
+      } = data;
+      return withCors(publicFields);
+    }
+
     const redemptions = (data.giveaway_redemptions ?? []) as Array<{
       id: string;
       user_id: string;
@@ -227,6 +278,19 @@ Deno.serve(async (req) => {
     const totalKobo = Math.round(body.total_amount * 100);
     const perPersonKobo = Math.round(body.per_person_amount * 100);
 
+    if (body.idempotency_key !== undefined && !CLIENT_IDEMPOTENCY_RE.test(String(body.idempotency_key))) {
+      return withCors({ error: "Invalid idempotency_key" }, { status: 400 });
+    }
+    const idempotencyKey = body.idempotency_key
+      ? `giveaway-fund-${user.id}-${body.idempotency_key}`
+      : `giveaway-fund-${user.id}-${crypto.randomUUID()}`;
+
+    // A retry with the same key returns the giveaway it already funded (never a second debit).
+    if (body.idempotency_key) {
+      const existing = await findGiveawayByFundingKey(supabase, idempotencyKey);
+      if (existing) return withCors({ ok: true, giveaway: existing, replayed: true }, { status: 200 });
+    }
+
     const { data, error } = await supabase.rpc("create_giveaway_funded", {
       p_creator_id: user.id,
       p_title: body.title,
@@ -236,12 +300,21 @@ Deno.serve(async (req) => {
       p_event_id: body.event_id ?? null,
       p_is_private: body.is_private ?? false,
       p_show_on_event_screen: body.show_on_event_screen ?? true,
-      p_idempotency_key: `giveaway-fund-${user.id}-${crypto.randomUUID()}`,
+      p_idempotency_key: idempotencyKey,
     });
 
     if (error) {
+      // A concurrent retry with the same key can fail several ways after the other request
+      // funded the giveaway (unique transaction key, uq_giveaways_funding_transaction from 072,
+      // or "Insufficient balance" once the first debit landed). Whatever the error, if this key
+      // already funded a giveaway, return it instead of an error the user would retry.
+      if (body.idempotency_key) {
+        const existing = await findGiveawayByFundingKey(supabase, idempotencyKey);
+        if (existing) return withCors({ ok: true, giveaway: existing, replayed: true }, { status: 200 });
+      }
+      const raw = String(error.message ?? "");
       const message = rpcErrorMessage(error);
-      const status = message.includes("Insufficient") ? 400 : 500;
+      const status = CLIENT_ERROR_PATTERNS.some((p) => raw.includes(p)) ? 400 : 500;
       return withCors({ error: message }, { status });
     }
 
