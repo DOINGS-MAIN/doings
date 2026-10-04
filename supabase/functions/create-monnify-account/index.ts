@@ -1,59 +1,17 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
-import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
-import {
-  getExistingReservedAccount,
-  provisionReservedAccount,
-} from "../_shared/psp/provisionReservedAccount.ts";
 
-/** @deprecated Use create-ngn-account — kept for backward compatibility */
-Deno.serve(async (req) => {
+/**
+ * Disabled (bundles model, 2026-10-04): users no longer get personal bank transfer accounts.
+ * Bundles are bought per purchase via checkout instead. Kept deployed (not deleted) so the
+ * current app's Fund Wallet gets a clear answer rather than a 404.
+ */
+Deno.serve((req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  if (req.method !== "POST") return withCors({ error: "Method not allowed" }, { status: 405 });
-
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader) return withCors({ error: "Missing authorization" }, { status: 401 });
-
-  const authUserId = await getAuthUserIdFromRequest(authHeader);
-  if (!authUserId) return withCors({ error: "Unauthorized" }, { status: 401 });
-
-  const supabase = getServiceClient();
-  const { data: user, error: userErr } = await supabase
-    .from("users")
-    .select("id, full_name, email, kyc_level")
-    .eq("auth_id", authUserId)
-    .single();
-
-  if (userErr || !user) return withCors({ error: "User not found" }, { status: 404 });
-  if (user.kyc_level < 2) return withCors({ error: "KYC level 2 required" }, { status: 403 });
-
-  const existing = await getExistingReservedAccount(supabase, user.id, "monnify");
-  if (existing) {
-    return withCors({ ok: true, already_exists: true, account: existing });
-  }
-
-  try {
-    const body = await req.json().catch(() => ({})) as { bvn?: string; nin?: string };
-    const { data: ngnWallet } = await supabase
-      .from("wallets")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("currency", "NGN")
-      .single();
-
-    if (!ngnWallet) return withCors({ error: "NGN wallet not found" }, { status: 500 });
-
-    const account = await provisionReservedAccount(supabase, {
-      userId: user.id,
-      userName: user.full_name || "Doings User",
-      email: user.email || "",
-      walletId: ngnWallet.id,
-      bvn: body.bvn,
-      nin: body.nin,
-      providerId: "monnify",
-    });
-
-    return withCors({ ok: true, account });
-  } catch (error) {
-    return withCors({ error: "Failed to create reserved account", detail: String(error) }, { status: 500 });
-  }
+  return withCors(
+    {
+      error: "Personal transfer accounts are no longer available. Buy bundles in the app instead.",
+      code: "va_disabled",
+    },
+    { status: 410 },
+  );
 });
