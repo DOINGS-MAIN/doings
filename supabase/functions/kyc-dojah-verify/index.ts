@@ -107,68 +107,14 @@ Deno.serve(async (req) => {
   const bvn = cleanDigits(body.bvn);
   const nin = cleanDigits(body.nin);
 
-  const platform = await getPlatformPaymentSettings(supabase);
-  const fundingProviderId = platform.walletFundingProviderId;
-  const needsBvnForVa = fundingProviderId === "monnify" || fundingProviderId === "flutterwave";
-
-  // Already L2 — skip Dojah; only provision VA if missing (e.g. prior VA failure).
+  // Already L2 — nothing to do. (Bundles model: no personal transfer accounts are created.)
   if (userRow.kyc_level >= 2) {
-    const existingVa = await getExistingReservedAccount(supabase, userRow.id, fundingProviderId);
-    if (existingVa) {
-      return withCors({
-        ok: true,
-        already_verified: true,
-        level: 2,
-        verified_name: userRow.full_name,
-        funding_provider: fundingProviderId,
-        reserved_account: formatReservedAccount(existingVa),
-      });
-    }
-
-    if (needsBvnForVa && bvn.length !== 11) {
-      return withCors({
-        error: "Your identity is already verified. Enter your BVN to create your transfer account.",
-        code: "bvn_required_for_va",
-      }, { status: 400 });
-    }
-
-    const { data: ngnWallet } = await supabase
-      .from("wallets")
-      .select("id")
-      .eq("user_id", userRow.id)
-      .eq("currency", "NGN")
-      .single();
-
-    if (!ngnWallet) {
-      return withCors({ error: "NGN wallet missing; contact support" }, { status: 500 });
-    }
-
-    try {
-      const reservedAccount = await tryProvisionFundingAccount(supabase, {
-        userId: userRow.id,
-        userName: userRow.full_name || "Doings User",
-        email: userRow.email || "",
-        walletId: ngnWallet.id,
-        bvn: bvn || undefined,
-        nin: nin || undefined,
-        providerId: fundingProviderId,
-      });
-
-      return withCors({
-        ok: true,
-        already_verified: true,
-        level: 2,
-        verified_name: userRow.full_name,
-        funding_provider: fundingProviderId,
-        reserved_account: reservedAccount ? formatReservedAccount(reservedAccount) : undefined,
-      });
-    } catch (e) {
-      return withCors({
-        error: "Could not create your bank transfer account. Try Fund Wallet or contact support.",
-        detail: String(e),
-        code: "va_provision_failed",
-      }, { status: 502 });
-    }
+    return withCors({
+      ok: true,
+      already_verified: true,
+      level: 2,
+      verified_name: userRow.full_name,
+    });
   }
 
   if (bvn.length !== 11) return withCors({ error: "BVN must be 11 digits" }, { status: 400 });
@@ -257,59 +203,11 @@ Deno.serve(async (req) => {
 
     await supabase.from("users").update({ full_name: verifiedFullName }).eq("id", userRow.id);
 
-    const { data: ngnWallet } = await supabase
-      .from("wallets")
-      .select("id")
-      .eq("user_id", userRow.id)
-      .eq("currency", "NGN")
-      .single();
-
-    if (!ngnWallet) {
-      return withCors({
-        ok: true,
-        level: 2,
-        verified_name: verifiedFullName,
-        funding_provider: fundingProviderId,
-        va_pending: true,
-        message: "Identity verified. NGN wallet missing — contact support to finish transfer account setup.",
-      });
-    }
-
-    let reservedAccount: ReservedAccountRow | null = null;
-    let vaError: string | undefined;
-
-    try {
-      reservedAccount = await tryProvisionFundingAccount(supabase, {
-        userId: userRow.id,
-        userName: verifiedFullName || userRow.full_name || "Doings User",
-        email: userRow.email || "",
-        walletId: ngnWallet.id,
-        bvn,
-        nin,
-        providerId: fundingProviderId,
-      });
-    } catch (e) {
-      vaError = String(e);
-    }
-
-    if (vaError) {
-      return withCors({
-        ok: true,
-        level: 2,
-        verified_name: verifiedFullName,
-        funding_provider: fundingProviderId,
-        va_pending: true,
-        va_error: vaError,
-        message: "Identity verified. Transfer account setup failed — open Fund Wallet to retry with your BVN.",
-      });
-    }
-
+    // Bundles model: verification no longer creates a personal transfer account.
     return withCors({
       ok: true,
       level: 2,
       verified_name: verifiedFullName,
-      funding_provider: fundingProviderId,
-      reserved_account: reservedAccount ? formatReservedAccount(reservedAccount) : undefined,
     });
   } catch (error) {
     return withCors({ error: "KYC verification failed", detail: String(error) }, { status: 500 });

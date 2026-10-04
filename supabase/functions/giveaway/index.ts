@@ -263,8 +263,9 @@ Deno.serve(async (req) => {
   }
 
   if (req.method === "POST" && action === "root") {
-    if (user.kyc_level < 2) {
-      return withCors({ error: "KYC level 2 required to create giveaways" }, { status: 403 });
+    // Bundles model: creating a giveaway needs a verified email (KYC level 1).
+    if (user.kyc_level < 1) {
+      return withCors({ error: "Verify your email to create giveaways" }, { status: 403 });
     }
 
     const body = (await req.json()) as CreateBody;
