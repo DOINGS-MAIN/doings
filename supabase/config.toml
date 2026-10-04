@@ -371,10 +371,10 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.cron-leaderboard]
-verify_jwt = false
+verify_jwt = true
 
 [functions.cron-reconciliation]
-verify_jwt = false
+verify_jwt = true
 
 [functions.public-projector]
 verify_jwt = false
