@@ -115,8 +115,9 @@ Deno.serve(async (req) => {
     if (isDepositEvent) {
       // Only confirmed deposits are credited (deposit.success / SUCCESS — the only shape Blockradar
       // has sent us); anything else is logged and skipped.
+      // The log stays unprocessed so a later deposit.success for the same hash is still credited.
       if (normalizedEvent !== "deposit.success" || normalizedStatus !== "success") {
-        await markWebhookProcessed(logId);
+        await markWebhookProcessed(logId, `Skipped: deposit not confirmed (${eventType ?? ""}/${data.status ?? ""})`);
         return withCors({ ok: true, skipped: true, reason: "deposit not confirmed", eventType, status: data.status });
       }
       const asset = normalizeAssetSymbol(data.asset);
@@ -171,7 +172,8 @@ Deno.serve(async (req) => {
       if (creditErr) throw creditErr;
 
       // Bundles model: USDC that arrives is converted to bundles (or waits for treasury float /
-      // stays as USDC below the minimum). Idempotent per tx hash; failures are retried by cron.
+      // stays as USDC below the minimum). Idempotent per tx hash; the DB parks failed conversions for
+      // the cron, and if the call itself fails the log stays unprocessed so a replay retries.
       await refreshMarketRateIfStale(supabase);
       const { data: conversion, error: convErr } = await supabase.rpc("convert_usdc_deposit_to_bundles", {
         p_user_id: walletData.user_id,
@@ -179,8 +181,12 @@ Deno.serve(async (req) => {
         p_amount_micro: amountMicro,
         p_tx_hash: txHash,
       });
-      if (convErr) console.error("convert_usdc_deposit_to_bundles:", convErr.message);
-      await markWebhookProcessed(logId);
+      if (convErr) {
+        console.error("convert_usdc_deposit_to_bundles:", convErr.message);
+        await markWebhookProcessed(logId, `Bundle conversion pending: ${convErr.message}`);
+      } else {
+        await markWebhookProcessed(logId);
+      }
       return withCors({ ok: true, bundles: convErr ? "retry" : (conversion as { status?: string })?.status });
     }
 

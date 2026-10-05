@@ -95,7 +95,11 @@ export async function settleNgnBundleOrder(
     p_currency: String(data.currency ?? ""),
     p_provider_ref: String(data.id ?? ""),
   });
-  if (error) throw error;
+  if (error) {
+    // A bndl_ reference we never created: acknowledge it rather than have the provider retry forever.
+    if ((error.message ?? "").includes("Bundle order not found")) return { status: "unknown_order" };
+    throw error;
+  }
   const result = out as { status: string; bundles?: number };
   return { status: result.status, bundles: result.bundles };
 }

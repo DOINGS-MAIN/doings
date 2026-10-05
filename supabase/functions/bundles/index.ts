@@ -105,7 +105,7 @@ Deno.serve(async (req) => {
         const { data: existing } = await supabase
           .from("wallet_addresses").select("address, network")
           .eq("wallet_id", wallet.id).eq("provider", "blockradar").eq("network", DEFAULT_STORAGE_NETWORK)
-          .maybeSingle();
+          .order("created_at", { ascending: true }).limit(1).maybeSingle();
         let address = existing?.address as string | undefined;
         if (!address) {
           const generated = await generateDepositAddress({ userId: user.id });
