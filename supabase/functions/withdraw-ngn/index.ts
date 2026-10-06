@@ -9,6 +9,8 @@ import { applyWithdrawalStatus } from "../_shared/psp/withdrawalFinalize.ts";
 import { mapByProvider } from "../_shared/psp/pspStatus.ts";
 import { calculateWithdrawalFeeKobo, getWithdrawalFeeSettings } from "../_shared/withdrawalFees.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
+import { verifyBankAccount } from "../_shared/psp/registry.ts";
+import { getKycLegalName, NAME_MISMATCH_MESSAGE, nameMatchesKyc } from "../_shared/sell.ts";
 
 type WithdrawBody = {
   /** Amount in naira (major units). Converted to kobo server-side. */
@@ -84,6 +86,20 @@ Deno.serve(async (req) => {
   }
   const providerId = platform.disbursementProviderId;
 
+  // Payouts only go to an account in the user's verified (BVN) name, resolved by the provider now.
+  let resolvedName = "";
+  try {
+    const resolved = await verifyBankAccount(providerId, body.bank_code, body.account_number, platform.pspEnv);
+    resolvedName = String(resolved.accountName ?? "").trim();
+  } catch {
+    return withCors({ error: "We couldn't verify that account" }, { status: 422 });
+  }
+  const legalName = await getKycLegalName(supabase, user.id);
+  if (!resolvedName || !legalName || !nameMatchesKyc(resolvedName, legalName)) {
+    return withCors({ error: NAME_MISMATCH_MESSAGE, account_name: resolvedName }, { status: 422 });
+  }
+  body.account_name = resolvedName;
+
   let txnId: string;
   try {
     const { data, error } = await supabase.rpc("lock_withdrawal", {
@@ -119,6 +135,7 @@ Deno.serve(async (req) => {
     return withCors({ error: "Failed to lock funds", detail: msg }, { status: 500 });
   }
 
+  let submitted = false;
   try {
     await logPspEvent(supabase, {
       transactionId: txnId,
@@ -133,6 +150,7 @@ Deno.serve(async (req) => {
       },
     });
 
+    submitted = true;
     const result = await submitTransfer({
       providerId,
       env: platform.pspEnv,
@@ -169,11 +187,13 @@ Deno.serve(async (req) => {
     const providerRef = "providerRef" in result ? result.providerRef : reference;
     const providerStatus = "providerStatus" in result ? result.providerStatus : "";
 
+    const { data: lockedRow } = await supabase.from("transactions").select("metadata").eq("id", txnId).maybeSingle();
     await supabase
       .from("transactions")
       .update({
         provider_ref: providerRef,
         metadata: {
+          ...((lockedRow?.metadata as Record<string, unknown> | null) ?? {}),
           bank_code: body.bank_code,
           account_number: body.account_number,
           account_name: body.account_name,
@@ -222,6 +242,12 @@ Deno.serve(async (req) => {
       reference,
       errorMessage: String(err),
     });
+    if (submitted) {
+      // The provider may have accepted the transfer: keep the funds held for webhook / reconcile.
+      await supabase.from("transactions").update({ status: "processing", updated_at: new Date().toISOString() })
+        .eq("id", txnId).eq("status", "pending");
+      return withCors({ ok: true, transaction_id: txnId, reference, status: "processing" });
+    }
     await supabase.rpc("fail_withdrawal", { p_transaction_id: txnId });
     return withCors({ error: "Disbursement failed, funds released", detail: String(err) }, { status: 502 });
   }

@@ -3,6 +3,7 @@ import { hmacHex } from "../_shared/crypto.ts";
 import { getServiceClient } from "../_shared/db.ts";
 import { insertWebhookLog, markWebhookProcessed } from "../_shared/webhook.ts";
 import { refreshMarketRateIfStale } from "../_shared/bundles.ts";
+import { finalizeRpcNames } from "../_shared/sell.ts";
 
 type BlockradarData = {
   address?: unknown;
@@ -211,12 +212,12 @@ Deno.serve(async (req) => {
 
       if (isSuccess || isFailed) {
         const supabase = getServiceClient();
-        let txn: { id: string; status: string } | null = null;
+        let txn: { id: string; status: string; metadata?: Record<string, unknown> | null } | null = null;
 
         for (const key of lookupKeys) {
           const { data: byRef } = await supabase
             .from("transactions")
-            .select("id, status")
+            .select("id, status, metadata")
             .eq("provider", "blockradar")
             .eq("provider_ref", key)
             .in("status", ["pending", "processing"])
@@ -230,7 +231,7 @@ Deno.serve(async (req) => {
         if (!txn && ourRef) {
           const { data: byMeta } = await supabase
             .from("transactions")
-            .select("id, status")
+            .select("id, status, metadata")
             .eq("provider", "blockradar")
             .eq("type", "withdrawal")
             .in("status", ["pending", "processing"])
@@ -240,7 +241,9 @@ Deno.serve(async (req) => {
         }
 
         if (txn?.id) {
-          const rpcName = isSuccess ? "complete_withdrawal" : "fail_withdrawal";
+          // Bundle sales finalise through their own RPCs (treasury legs / reserve).
+          const rpc = finalizeRpcNames(txn.metadata?.kind as string | undefined);
+          const rpcName = isSuccess ? rpc.complete : rpc.fail;
           const { error: rpcErr } = await supabase.rpc(rpcName, { p_transaction_id: txn.id });
           if (rpcErr) throw rpcErr;
 

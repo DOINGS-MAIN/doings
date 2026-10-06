@@ -34,6 +34,7 @@ Deno.serve(async (req) => {
     .select("id, provider, provider_ref, idempotency_key, status, created_at")
     .eq("type", "withdrawal")
     .eq("currency", "NGN")
+    .or("provider.is.null,provider.neq.blockradar") // USDC bundle sales hold NGN but pay out via Blockradar
     .in("status", ["pending", "processing"])
     .lt("created_at", cutoff)
     .order("created_at", { ascending: true })
@@ -58,8 +59,31 @@ Deno.serve(async (req) => {
     }
   }
 
+  // USDC bundle sales settle by Blockradar webhook only. Ones still open after 30 min are flagged
+  // for admin review — never failed automatically, since the USDC may already have been sent.
+  const usdcCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const { data: stuckUsdc } = await supabase
+    .from("transactions")
+    .select("id, metadata")
+    .eq("type", "withdrawal")
+    .eq("provider", "blockradar")
+    .in("status", ["pending", "processing"])
+    .lt("created_at", usdcCutoff)
+    .contains("metadata", { kind: "bundle_sale_usdc" })
+    .limit(BATCH_LIMIT);
+  let flagged = 0;
+  for (const row of stuckUsdc ?? []) {
+    const metadata = (row.metadata as Record<string, unknown> | null) ?? {};
+    if (metadata.needs_review) continue;
+    await supabase.from("transactions")
+      .update({ metadata: { ...metadata, needs_review: true }, updated_at: new Date().toISOString() })
+      .eq("id", row.id);
+    flagged += 1;
+  }
+
   return withCors({
     ok: true,
+    usdc_sales_flagged: flagged,
     reconciled_at: new Date().toISOString(),
     scanned: rows?.length ?? 0,
     stuck_after_minutes: STUCK_AFTER_MINUTES,
