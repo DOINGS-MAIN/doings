@@ -102,12 +102,12 @@ Deno.serve(async (req) => {
 
   let txnId: string;
   try {
-    const { data, error } = await supabase.rpc("lock_withdrawal", {
+    // Locks under the same per-user lock and daily limit as bundle sales (migration 083).
+    const { data, error } = await supabase.rpc("lock_ngn_withdrawal_checked", {
       p_wallet_id: wallet.id,
       p_user_id: user.id,
       p_amount: amountKobo,
       p_fee: withdrawalFee,
-      p_type: "withdrawal",
       p_description: `NGN withdrawal to ${body.bank_code}/${body.account_number}`,
       p_provider: providerId,
       p_provider_ref: reference,
@@ -131,6 +131,9 @@ Deno.serve(async (req) => {
     const msg = String(err);
     if (msg.includes("Insufficient")) {
       return withCors({ error: "Insufficient balance" }, { status: 400 });
+    }
+    if (msg.includes("Daily withdrawal limit exceeded")) {
+      return withCors({ error: "Daily withdrawal limit exceeded" }, { status: 403 });
     }
     return withCors({ error: "Failed to lock funds", detail: msg }, { status: 500 });
   }

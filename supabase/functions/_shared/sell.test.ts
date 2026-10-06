@@ -32,3 +32,14 @@ Deno.test("only a definite Blockradar 4xx counts as rejected (never timeouts / 5
   assertEquals(isDefiniteBlockradarRejection(new Error("connection reset | mode=direct")), false);
   assertEquals(isDefiniteBlockradarRejection("weird"), false);
 });
+
+Deno.test("solana addresses decode to exactly 32 bytes (Tron / BTC base58 rejected)", () => {
+  assertEquals(isSolanaAddress("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"), true);
+  assertEquals(isSolanaAddress("11111111111111111111111111111111"), true);
+  assertEquals(isSolanaAddress("TLa2f6VPqDgRE67v1736s7bJ8Ray5wYjU7"), false);
+  assertEquals(isSolanaAddress("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"), false);
+});
+
+Deno.test("a Blockradar 408 is not a definite refusal", () => {
+  assertEquals(isDefiniteBlockradarRejection(new Error("Blockradar request failed: 408 — timeout")), false);
+});

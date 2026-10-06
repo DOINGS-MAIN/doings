@@ -5,8 +5,29 @@ import { isSamePersonName } from "./name-match.ts";
 
 export const NAME_MISMATCH_MESSAGE = "This account isn't in your name. Contact support if this is wrong.";
 
+const BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+/** Byte length of a base58 string, or -1 if it isn't base58. */
+function base58ByteLength(s: string): number {
+  let n = BigInt(0);
+  for (const c of s) {
+    const i = BASE58.indexOf(c);
+    if (i < 0) return -1;
+    n = n * BigInt(58) + BigInt(i);
+  }
+  let leadingZeros = 0;
+  for (const c of s) {
+    if (c !== "1") break;
+    leadingZeros += 1;
+  }
+  const hex = n === BigInt(0) ? "" : n.toString(16);
+  return leadingZeros + Math.ceil(hex.length / 2);
+}
+
+/** A Solana address is base58 for exactly 32 bytes (Tron / Bitcoin base58 addresses are 25). */
 export function isSolanaAddress(s: string): boolean {
-  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s.trim());
+  const t = s.trim();
+  return t.length >= 32 && t.length <= 44 && base58ByteLength(t) === 32;
 }
 
 function tokens(name: string): string[] {
@@ -59,7 +80,7 @@ export function finalizeRpcNames(kind: string | undefined | null): { complete: s
 
 /**
  * sendUsdc throws "Blockradar request failed: <status> — …" on HTTP errors. Only a 4xx other than
- * 429 means Blockradar definitely refused the payout (safe to return the bundles); network errors,
+ * 408 / 429 means Blockradar definitely refused the payout (safe to return the bundles); network errors,
  * timeouts, 429 and 5xx are unknown outcomes and must wait for confirmation.
  */
 export function isDefiniteBlockradarRejection(err: unknown): boolean {
@@ -67,5 +88,5 @@ export function isDefiniteBlockradarRejection(err: unknown): boolean {
   const m = /Blockradar request failed: (\d{3})/.exec(msg);
   if (!m) return false;
   const status = Number(m[1]);
-  return status >= 400 && status < 500 && status !== 429;
+  return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }

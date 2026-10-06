@@ -324,10 +324,10 @@ Deno.serve(async (req) => {
       const txnId = sale.transaction_id;
       await supabase.from("transactions").update({ provider_ref: reference }).eq("id", txnId);
 
+      // Atomic jsonb patch, so a webhook writing to the same row concurrently isn't overwritten.
       const mergeMetadata = async (patch: Record<string, unknown>) => {
-        const { data: row } = await supabase.from("transactions").select("metadata").eq("id", txnId).maybeSingle();
-        const prev = (row?.metadata as Record<string, unknown> | null) ?? {};
-        await supabase.from("transactions").update({ metadata: { ...prev, ...patch }, updated_at: new Date().toISOString() }).eq("id", txnId);
+        const { error } = await supabase.rpc("merge_transaction_metadata", { p_transaction_id: txnId, p_patch: patch });
+        if (error) throw error;
       };
 
       // From here on the provider may have accepted the payout: errors never release the bundles.
