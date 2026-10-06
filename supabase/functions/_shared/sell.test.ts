@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { finalizeRpcNames, isSolanaAddress, nameMatchesKyc } from "./sell.ts";
+import { finalizeRpcNames, isDefiniteBlockradarRejection, isSolanaAddress, nameMatchesKyc } from "./sell.ts";
 
 Deno.test("solana addresses", () => {
   assertEquals(isSolanaAddress("7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV"), true);
@@ -22,4 +22,13 @@ Deno.test("finalize dispatch", () => {
   assertEquals(finalizeRpcNames("bundle_sale"), { complete: "complete_bundle_sale", fail: "fail_bundle_sale" });
   assertEquals(finalizeRpcNames("bundle_sale_usdc"), { complete: "complete_bundle_sale", fail: "fail_bundle_sale" });
   assertEquals(finalizeRpcNames(undefined), { complete: "complete_withdrawal", fail: "fail_withdrawal" });
+});
+
+Deno.test("only a definite Blockradar 4xx counts as rejected (never timeouts / 5xx / 429)", () => {
+  assertEquals(isDefiniteBlockradarRejection(new Error("Blockradar request failed: 400 — insufficient | mode=direct")), true);
+  assertEquals(isDefiniteBlockradarRejection(new Error("Blockradar request failed: 422 — bad address")), true);
+  assertEquals(isDefiniteBlockradarRejection(new Error("Blockradar request failed: 429 — slow down")), false);
+  assertEquals(isDefiniteBlockradarRejection(new Error("Blockradar request failed: 502 — relay")), false);
+  assertEquals(isDefiniteBlockradarRejection(new Error("connection reset | mode=direct")), false);
+  assertEquals(isDefiniteBlockradarRejection("weird"), false);
 });

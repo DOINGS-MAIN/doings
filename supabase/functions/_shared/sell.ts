@@ -56,3 +56,16 @@ export function finalizeRpcNames(kind: string | undefined | null): { complete: s
     ? { complete: "complete_bundle_sale", fail: "fail_bundle_sale" }
     : { complete: "complete_withdrawal", fail: "fail_withdrawal" };
 }
+
+/**
+ * sendUsdc throws "Blockradar request failed: <status> — …" on HTTP errors. Only a 4xx other than
+ * 429 means Blockradar definitely refused the payout (safe to return the bundles); network errors,
+ * timeouts, 429 and 5xx are unknown outcomes and must wait for confirmation.
+ */
+export function isDefiniteBlockradarRejection(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : "";
+  const m = /Blockradar request failed: (\d{3})/.exec(msg);
+  if (!m) return false;
+  const status = Number(m[1]);
+  return status >= 400 && status < 500 && status !== 429;
+}
