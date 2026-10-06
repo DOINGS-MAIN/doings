@@ -46,11 +46,10 @@ Deno.serve(async (req) => {
   }
 
   body.address = String(body.address).trim();
-  if (!isSolanaAddress(body.address)) {
+  const network = toBlockradarNetwork(body.network);
+  if (network === "solana" && !isSolanaAddress(body.address)) {
     return withCors({ error: "Invalid Solana address" }, { status: 400 });
   }
-
-  const network = toBlockradarNetwork(body.network);
   const amountMicro = Math.round(body.amount * 1_000_000);
   if (amountMicro < 1_000_000) return withCors({ error: "Minimum withdrawal is 1 USDC" }, { status: 400 });
 

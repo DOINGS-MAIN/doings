@@ -15,7 +15,10 @@ type WithdrawalRow = {
   idempotency_key: string;
   status: string;
   created_at: string;
+  metadata?: Record<string, unknown> | null;
 };
+
+const REVIEW_AFTER_MS = 60 * 60 * 1000;
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return withCors({ error: "Method not allowed" }, { status: 405 });
@@ -31,13 +34,14 @@ Deno.serve(async (req) => {
 
   const { data: rows, error } = await supabase
     .from("transactions")
-    .select("id, provider, provider_ref, idempotency_key, status, created_at")
+    .select("id, provider, provider_ref, idempotency_key, status, created_at, metadata")
     .eq("type", "withdrawal")
     .eq("currency", "NGN")
     .or("provider.is.null,provider.neq.blockradar") // USDC bundle sales hold NGN but pay out via Blockradar
     .in("status", ["pending", "processing"])
     .lt("created_at", cutoff)
-    .order("created_at", { ascending: true })
+    // Least recently checked first, so rows that stay unresolved can't starve newer ones.
+    .order("updated_at", { ascending: true })
     .limit(BATCH_LIMIT);
 
   if (error) {
@@ -57,10 +61,24 @@ Deno.serve(async (req) => {
     } catch (err) {
       results.push({ id: row.id, outcome: `error:${String(err)}` });
     }
+    // Still open: rotate it to the back of the queue, and flag it for admins after an hour (never
+    // failed automatically — the provider may have paid).
+    const { data: after } = await supabase.from("transactions").select("status, metadata").eq("id", row.id).maybeSingle();
+    if (after && (after.status === "pending" || after.status === "processing")) {
+      const metadata = (after.metadata as Record<string, unknown> | null) ?? {};
+      const stale = Date.now() - new Date(row.created_at).getTime() > REVIEW_AFTER_MS;
+      await supabase.from("transactions")
+        .update({
+          updated_at: new Date().toISOString(),
+          ...(stale && !metadata.needs_review ? { metadata: { ...metadata, needs_review: true } } : {}),
+        })
+        .eq("id", row.id);
+    }
   }
 
-  // USDC bundle sales settle by Blockradar webhook only. Ones still open after 30 min are flagged
-  // for admin review — never failed automatically, since the USDC may already have been sent.
+  // Blockradar payouts (USDC withdrawals and USDC bundle sales) settle by webhook only. Ones still
+  // open after 30 min are flagged for admin review — never failed automatically, since the USDC
+  // may already have been sent.
   const usdcCutoff = new Date(Date.now() - 30 * 60 * 1000).toISOString();
   const { data: stuckUsdc } = await supabase
     .from("transactions")
@@ -69,7 +87,8 @@ Deno.serve(async (req) => {
     .eq("provider", "blockradar")
     .in("status", ["pending", "processing"])
     .lt("created_at", usdcCutoff)
-    .contains("metadata", { kind: "bundle_sale_usdc" })
+    .is("metadata->needs_review", null)
+    .order("created_at", { ascending: true })
     .limit(BATCH_LIMIT);
   let flagged = 0;
   for (const row of stuckUsdc ?? []) {
@@ -83,7 +102,7 @@ Deno.serve(async (req) => {
 
   return withCors({
     ok: true,
-    usdc_sales_flagged: flagged,
+    blockradar_flagged: flagged,
     reconciled_at: new Date().toISOString(),
     scanned: rows?.length ?? 0,
     stuck_after_minutes: STUCK_AFTER_MINUTES,

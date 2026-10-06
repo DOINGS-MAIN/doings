@@ -228,6 +228,31 @@ Deno.serve(async (req) => {
         pin?: string;
         idempotency_key?: string;
       };
+      const clientKey = String(body.idempotency_key ?? "");
+      if (!/^[A-Za-z0-9_-]{8,64}$/.test(clientKey)) {
+        return withCors({ error: "Invalid idempotency_key" }, { status: 400 });
+      }
+      const reference = `SELL-${user.id.slice(0, 8)}-${clientKey}`;
+
+      // A retry of an attempt whose outcome the client never saw: answer with that sale before any
+      // check that could fail differently this time (PIN, rate limit, bank lookup).
+      const { data: prior } = await supabase
+        .from("transactions")
+        .select(SALE_COLUMNS)
+        .eq("idempotency_key", reference)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (prior) {
+        const view = saleView(prior);
+        return withCors({
+          ok: true,
+          transaction_id: prior.id,
+          status: prior.status === "pending" ? "processing" : prior.status,
+          payout_kobo: view.payout_kobo,
+          usdc_micro: view.usdc_micro,
+        });
+      }
+
       const pinCheck = await requireTransactionPin(supabase, user.id, body.pin);
       if (pinCheck) return pinCheck;
 
@@ -236,15 +261,10 @@ Deno.serve(async (req) => {
 
       const bundles = parseBundles(body.bundles);
       const currency = String(body.currency ?? "").toUpperCase();
-      const clientKey = String(body.idempotency_key ?? "");
       if (!bundles) return withCors({ error: "Enter how many bundles to sell" }, { status: 400 });
       if (currency !== "NGN" && currency !== "USDC") {
         return withCors({ error: "currency must be NGN or USDC" }, { status: 400 });
       }
-      if (!/^[A-Za-z0-9_-]{8,64}$/.test(clientKey)) {
-        return withCors({ error: "Invalid idempotency_key" }, { status: 400 });
-      }
-      const reference = `SELL-${user.id.slice(0, 8)}-${clientKey}`;
 
       const platform = await getPlatformPaymentSettings(supabase);
       let destination: Record<string, string>;
