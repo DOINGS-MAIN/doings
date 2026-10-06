@@ -50,7 +50,7 @@ async function getDailySpent(
     .eq("user_id", userId)
     .eq("currency", currency)
     .in("type", txTypes)
-    .in("status", ["completed", "pending"])
+    .in("status", ["completed", "pending", "processing"])
     .gte("created_at", startOfDay.toISOString());
 
   if (error) throw error;
