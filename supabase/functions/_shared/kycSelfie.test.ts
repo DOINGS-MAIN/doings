@@ -24,6 +24,7 @@ function deps(over: Partial<VerifyDeps> = {}) {
     consumeAttempt: async () => (calls.push("consume"), true),
     releaseAttempt: async () => void calls.push("release"),
     bvnLinkedElsewhere: async () => (calls.push("dup"), false),
+    consumeDojahBudget: async () => true,
     livenessMinScore: async () => 80,
     liveness: async () => (calls.push("liveness"), LIVE_OK),
     bvnSelfie: async () => (calls.push("match"), MATCH_OK),
@@ -129,4 +130,22 @@ Deno.test("a DOB Dojah sends in another format is stored as null, not a failed i
 Deno.test("losing the unique-index race → 409, not 500", async () => {
   const { d } = deps({ insertVerified: async () => "duplicate" });
   assertEquals(codeOf(await verifyBvnSelfie(body(), d)), "bvn_linked");
+});
+
+Deno.test("a 200 liveness reply that says no face / not live (no score) → 422 and counted", async () => {
+  for (const json of [
+    { entity: { liveness: { liveness_check: false } } },
+    { entity: { face: { face_detected: false } } },
+  ]) {
+    const { d, calls } = deps({ liveness: async () => ({ kind: "ok", json }) });
+    assertEquals(codeOf(await verifyBvnSelfie(body(), d)), "liveness_failed");
+    assertEquals(calls.includes("release"), false);
+  }
+});
+
+Deno.test("a hard per-user Dojah budget (never released) bounds paid calls", async () => {
+  const { d, calls } = deps({ consumeDojahBudget: async () => (calls.push("budget"), false) });
+  const out = await verifyBvnSelfie(body(), d);
+  assertEquals(codeOf(out), "attempt_limit");
+  assertEquals(calls, ["consume", "dup", "budget", "release"]);
 });

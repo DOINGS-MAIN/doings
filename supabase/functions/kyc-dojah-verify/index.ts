@@ -49,6 +49,7 @@ Deno.serve(async (req) => {
 
   const headers = dojahHeaders(dojahAppId, dojahSecret);
   const limitKey = `kyc-l2:${userRow.id}`;
+  const budgetKey = `kyc-dojah:${userRow.id}`;
 
   const deps: VerifyDeps = {
     hmac: (bvn) => kycHmac(bvn, hashSecret),
@@ -75,6 +76,15 @@ Deno.serve(async (req) => {
         .neq("user_id", userRow.id);
       if (error) throw error;
       return (count ?? 0) > 0;
+    },
+    consumeDojahBudget: async () => {
+      const { data, error } = await supabase.rpc("consume_rate_limit", {
+        p_key: budgetKey,
+        p_max: 15,
+        p_window_seconds: 86400,
+      });
+      if (error) throw error;
+      return data === true;
     },
     livenessMinScore: async () => {
       const { data, error } = await supabase

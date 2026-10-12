@@ -88,9 +88,13 @@ export type DojahCall =
   | { kind: "rejected"; status: number; json: unknown }
   | { kind: "unavailable" };
 
+/** 4xx replies that blame our account or request (keys, balance, size), never the user's input. */
+const OUR_FAULT_4XX = new Set([401, 402, 403, 408, 413, 429]);
+
 /**
- * POST JSON to Dojah with a timeout. Only a definite 4xx is "rejected". 408 / 429 / 5xx, timeouts,
- * network errors and non-JSON bodies are "unavailable" (the caller must not charge an attempt).
+ * POST JSON to Dojah with a timeout. Only a definite 4xx about the user's input is "rejected".
+ * 401/402/403/408/413/429, 5xx, timeouts, network errors and non-JSON bodies are "unavailable"
+ * (the caller must not charge an attempt).
  */
 export async function dojahPostJson(
   path: string,
@@ -116,8 +120,9 @@ export async function dojahPostJson(
     return { kind: "unavailable" };
   }
   if (res.ok) return { kind: "ok", json };
-  if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+  if (res.status >= 400 && res.status < 500 && !OUR_FAULT_4XX.has(res.status)) {
     return { kind: "rejected", status: res.status, json };
   }
+  console.error("Dojah unavailable", { path, status: res.status });
   return { kind: "unavailable" };
 }

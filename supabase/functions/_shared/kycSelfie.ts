@@ -34,6 +34,8 @@ export type VerifyDeps = {
   consumeAttempt(): Promise<boolean>;
   releaseAttempt(): Promise<void>;
   bvnLinkedElsewhere(bvnHmac: string): Promise<boolean>;
+  /** Hard per-user cap on paid Dojah requests; never released, so "unavailable" retries stay bounded. */
+  consumeDojahBudget(): Promise<boolean>;
   livenessMinScore(): Promise<number>;
   liveness(image: string): Promise<DojahCall>;
   bvnSelfie(bvn: string, image: string): Promise<DojahCall>;
@@ -74,6 +76,12 @@ export function parseLiveness(json: unknown): number | null {
   return Math.round((p <= 1 ? p * 100 : p) * 100) / 100;
 }
 
+/** A 200 liveness reply that itself says no face / not live (with no score to compare). */
+function livenessSaysNo(json: unknown): boolean {
+  const entity = entityOf(json);
+  return obj(entity.liveness).liveness_check === false || obj(entity.face).face_detected === false;
+}
+
 export function parseSelfieMatch(json: unknown): number | null {
   const v = obj(entityOf(json).selfie_verification).confidence_value;
   return typeof v === "number" && Number.isFinite(v) ? v : null;
@@ -108,11 +116,19 @@ export async function verifyBvnSelfie(body: Record<string, unknown>, deps: Verif
     return fail("unavailable");
   };
 
+  if (!(await deps.consumeDojahBudget())) {
+    await deps.releaseAttempt();
+    return fail("attempt_limit");
+  }
+
   const live = await deps.liveness(selfie);
   if (live.kind === "unavailable") return await unavailable();
   if (live.kind === "rejected") return fail("liveness_failed");
   const livenessScore = parseLiveness(live.json);
-  if (livenessScore === null) return await unavailable(); // format change on Dojah's side, not the user's fault
+  if (livenessScore === null) {
+    if (livenessSaysNo(live.json)) return fail("liveness_failed");
+    return await unavailable(); // format change on Dojah's side, not the user's fault (bounded by the budget)
+  }
   if (livenessScore < (await deps.livenessMinScore())) return fail("liveness_failed");
 
   const match = await deps.bvnSelfie(bvn, selfie);
