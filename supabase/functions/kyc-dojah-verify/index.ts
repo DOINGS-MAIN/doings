@@ -184,7 +184,7 @@ Deno.serve(async (req) => {
     // Persist KYC before VA provisioning so a PSP failure does not force re-verification.
     const bvnHash = await sha256Hex(bvn);
     const ninHash = await sha256Hex(nin);
-    const { error: kycInsErr } = await supabase.from("kyc_verifications").insert({
+    const { data: kycRow, error: kycInsErr } = await supabase.from("kyc_verifications").insert({
       user_id: userRow.id,
       level: 2,
       status: "verified",
@@ -196,10 +196,16 @@ Deno.serve(async (req) => {
       bvn_dob: bvnDob ?? body.dateOfBirth ?? null,
       nin_hash: ninHash,
       nin_last_four: nin.slice(-4),
-      raw_response: { bvn: bvnRaw, nin: ninRaw },
+      verification_method: "bvn_nin",
       verified_at: new Date().toISOString(),
-    });
+    }).select("id").single();
     if (kycInsErr) throw kycInsErr;
+
+    // Users can read their own kyc_verifications row, so Dojah payloads go to the server-only table.
+    const { error: payloadErr } = await supabase
+      .from("kyc_verification_payloads")
+      .insert({ kyc_id: kycRow.id, payload: { bvn: bvnRaw, nin: ninRaw } });
+    if (payloadErr) console.error("kyc payload insert failed", { user: userRow.id, code: payloadErr.code });
 
     await supabase.from("users").update({ full_name: verifiedFullName }).eq("id", userRow.id);
 
