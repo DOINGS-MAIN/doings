@@ -82,3 +82,42 @@ export async function dojahGetJson(path: string, params: Record<string, string>,
   const json = await res.json();
   return { res, json };
 }
+
+export type DojahCall =
+  | { kind: "ok"; json: unknown }
+  | { kind: "rejected"; status: number; json: unknown }
+  | { kind: "unavailable" };
+
+/**
+ * POST JSON to Dojah with a timeout. Only a definite 4xx is "rejected". 408 / 429 / 5xx, timeouts,
+ * network errors and non-JSON bodies are "unavailable" (the caller must not charge an attempt).
+ */
+export async function dojahPostJson(
+  path: string,
+  body: unknown,
+  headers: Record<string, string>,
+  timeoutMs = 20_000,
+): Promise<DojahCall> {
+  let res: Response;
+  try {
+    res = await fetch(`${dojahBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch {
+    return { kind: "unavailable" };
+  }
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
+    return { kind: "unavailable" };
+  }
+  if (res.ok) return { kind: "ok", json };
+  if (res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429) {
+    return { kind: "rejected", status: res.status, json };
+  }
+  return { kind: "unavailable" };
+}
