@@ -145,22 +145,11 @@ export const useKYC = () => {
     return { success: false, message: "Not confirmed yet. Open the link in your email, then tap again." };
   }, [fetchKYCState]);
 
-  const verifyLevel2 = useCallback(async (bvn: string, nin: string, dateOfBirth: string) => {
+  const verifyLevel2 = useCallback(async (bvn: string, selfieBase64: string) => {
     try {
-      const result = await kyc.verifyBvnAndNin(bvn, nin, dateOfBirth || undefined) as {
-        va_pending?: boolean;
-        message?: string;
-        va_error?: string;
-      };
+      await kyc.verifyBvnSelfie(bvn, selfieBase64);
       await fetchKYCState();
-      if (result.va_pending) {
-        return {
-          success: true,
-          message: result.message ||
-            "Identity verified. Open Fund Wallet to finish setting up your transfer account.",
-        };
-      }
-      return { success: true, message: "BVN, NIN, and bank transfer account are ready." };
+      return { success: true, message: "Identity verified. You can now sell and send." };
     } catch (err: unknown) {
       return { success: false, message: err instanceof Error ? err.message : "Verification failed" };
     }
