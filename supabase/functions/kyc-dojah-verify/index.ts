@@ -73,6 +73,7 @@ Deno.serve(async (req) => {
         .eq("bvn_hmac", bvnHmac)
         .eq("status", "verified")
         .eq("level", 2)
+        .is("superseded_at", null)
         .neq("user_id", userRow.id);
       if (error) throw error;
       return (count ?? 0) > 0;
@@ -98,6 +99,20 @@ Deno.serve(async (req) => {
     liveness: (image) => dojahPostJson("/api/v1/ml/liveness", { image }, headers),
     bvnSelfie: (bvn, image) => dojahPostJson("/api/v1/kyc/bvn/verify", { bvn, selfie_image: image }, headers),
     insertVerified: async (row, payload) => {
+      // Re-verification: the user's own older active record must step aside for the unique BVN index (086).
+      const { data: older, error: supErr } = await supabase
+        .from("kyc_verifications")
+        .update({ superseded_at: new Date().toISOString() })
+        .eq("user_id", userRow.id)
+        .eq("status", "verified")
+        .eq("level", 2)
+        .is("superseded_at", null)
+        .select("id");
+      if (supErr) throw supErr;
+      const restoreOlder = async () => {
+        const ids = (older ?? []).map((r) => r.id);
+        if (ids.length) await supabase.from("kyc_verifications").update({ superseded_at: null }).in("id", ids);
+      };
       const { data, error } = await supabase
         .from("kyc_verifications")
         .insert({
@@ -112,6 +127,7 @@ Deno.serve(async (req) => {
         .select("id")
         .single();
       if (error) {
+        await restoreOlder();
         if (error.code === "23505") return "duplicate";
         throw error;
       }
