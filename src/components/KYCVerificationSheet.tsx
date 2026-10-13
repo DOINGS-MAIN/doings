@@ -42,6 +42,7 @@ export const KYCVerificationSheet = ({
   const [bvn, setBvn] = useState("");
   const [selfie, setSelfie] = useState<string | null>(null);
   const [readingPhoto, setReadingPhoto] = useState(false);
+  const nativeCamera = typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
 
   const handleSelfieFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -328,17 +329,23 @@ export const KYCVerificationSheet = ({
                       className="mx-auto aspect-[3/4] w-40 rounded-xl object-cover"
                     />
                   ) : null}
-                  <label className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-input px-4 py-2 text-sm">
-                    <Camera className="h-4 w-4" />
-                    {readingPhoto ? "Reading photo…" : selfie ? "Retake selfie" : "Take a selfie"}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="user"
-                      className="sr-only"
-                      onChange={(e) => void handleSelfieFile(e)}
-                    />
-                  </label>
+                  {/* No uploads: capture="user" opens the front camera only on phones/tablets; desktop
+                      browsers ignore it and show a file picker, so desktops are sent to the phone. */}
+                  {nativeCamera ? (
+                    <label className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-input px-4 py-2 text-sm">
+                      <Camera className="h-4 w-4" />
+                      {readingPhoto ? "Reading photo…" : selfie ? "Retake selfie" : "Take a selfie"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="user"
+                        className="sr-only"
+                        onChange={(e) => void handleSelfieFile(e)}
+                      />
+                    </label>
+                  ) : (
+                    <p className="text-sm font-medium">Open Doings on your phone to take your selfie.</p>
+                  )}
                   <p className="text-xs text-muted-foreground">Face the camera in good light, no glasses or hat.</p>
                 </div>
 
