@@ -67,10 +67,18 @@ export function isJpegBase64Within(b64: string, maxBytes: number): boolean {
   return (b64.length * 3) / 4 - pad <= maxBytes;
 }
 
-/** Dojah liveness probability on a 0–100 scale (it may send 0–1). null when absent. */
+/**
+ * Live score 0–100. Dojah sends { spoof, confidence } where confidence is in that verdict
+ * (sandbox, 2026-10-13), so a spoof at 99.9 is a live score of 0.1. Older docs show
+ * liveness_probability (0–1 or 0–100); still read. null when neither is present.
+ */
 export function parseLiveness(json: unknown): number | null {
   const entity = entityOf(json);
   const l = obj(entity.liveness ?? entity);
+  if (typeof l.spoof === "boolean" && typeof l.confidence === "number" && Number.isFinite(l.confidence)) {
+    const live = l.spoof ? 100 - l.confidence : l.confidence;
+    return Math.max(0, Math.round(live * 100) / 100);
+  }
   const p = l.liveness_probability ?? l.probability ?? l.score;
   if (typeof p !== "number" || !Number.isFinite(p)) return null;
   return Math.round((p <= 1 ? p * 100 : p) * 100) / 100;
@@ -79,7 +87,8 @@ export function parseLiveness(json: unknown): number | null {
 /** A 200 liveness reply that itself says no face / not live (with no score to compare). */
 function livenessSaysNo(json: unknown): boolean {
   const entity = entityOf(json);
-  return obj(entity.liveness).liveness_check === false || obj(entity.face).face_detected === false;
+  const face = obj(entity.face);
+  return obj(entity.liveness).liveness_check === false || face.detected === false || face.face_detected === false;
 }
 
 export function parseSelfieMatch(json: unknown): number | null {
@@ -87,8 +96,15 @@ export function parseSelfieMatch(json: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+
+/** YYYY-MM-DD as is; Dojah's BVN "28-Jun-2000" converted; anything else null (never a failed insert). */
 function isoDateOrNull(s: string | null): string | null {
-  return s && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(s.trim());
+  const month = m ? MONTHS.indexOf(m[2].toLowerCase()) + 1 : 0;
+  return m && month ? `${m[3]}-${String(month).padStart(2, "0")}-${m[1].padStart(2, "0")}` : null;
 }
 
 function mentionsFace(json: unknown): boolean {

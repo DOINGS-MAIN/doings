@@ -1,6 +1,6 @@
 import { assertEquals } from "jsr:@std/assert";
 import type { DojahCall } from "./dojahClient.ts";
-import { verifyBvnSelfie, type VerifiedInsert, type VerifyDeps } from "./kycSelfie.ts";
+import { parseLiveness, verifyBvnSelfie, type VerifiedInsert, type VerifyDeps } from "./kycSelfie.ts";
 
 const BVN = "22222222222";
 const SELFIE = "/9j/" + "A".repeat(400); // JPEG magic (FF D8 FF) in base64
@@ -121,7 +121,7 @@ Deno.test("success inserts names, DOB, both scores and a trimmed payload, with n
 });
 
 Deno.test("a DOB Dojah sends in another format is stored as null, not a failed insert", async () => {
-  const odd: DojahCall = { kind: "ok", json: { entity: { first_name: "A", last_name: "B", date_of_birth: "31-Jan-1990", selfie_verification: { confidence_value: 95 } } } };
+  const odd: DojahCall = { kind: "ok", json: { entity: { first_name: "A", last_name: "B", date_of_birth: "31/01/1990", selfie_verification: { confidence_value: 95 } } } };
   const { d, inserted } = deps({ bvnSelfie: async () => odd });
   await verifyBvnSelfie(body(), d);
   assertEquals(inserted[0].row.bvn_dob, null);
@@ -148,4 +148,35 @@ Deno.test("a hard per-user Dojah budget (never released) bounds paid calls", asy
   const out = await verifyBvnSelfie(body(), d);
   assertEquals(codeOf(out), "attempt_limit");
   assertEquals(calls, ["consume", "dup", "budget", "release"]);
+});
+
+// Real Dojah sandbox shapes (2026-10-13): liveness = { spoof, confidence (of that verdict, 0–100) }; face.detected.
+
+Deno.test("parseLiveness reads Dojah's spoof verdict as a 0–100 live score", () => {
+  assertEquals(parseLiveness({ entity: { face: { detected: true }, liveness: { spoof: false, confidence: 97.5 } } }), 97.5);
+  assertEquals(parseLiveness({ entity: { face: { detected: true }, liveness: { spoof: true, confidence: 99.99720001220703 } } }), 0);
+  assertEquals(parseLiveness({ entity: { liveness: { spoof: true, confidence: 60 } } }), 40);
+});
+
+Deno.test("a sandbox-shaped spoof verdict → 422, counted; a live one passes to the match", async () => {
+  const spoof: DojahCall = { kind: "ok", json: { entity: { face: { detected: true }, liveness: { spoof: true, confidence: 99.9 } } } };
+  const a = deps({ liveness: async () => spoof });
+  assertEquals(codeOf(await verifyBvnSelfie(body(), a.d)), "liveness_failed");
+  assertEquals(a.calls.includes("release"), false);
+  const live: DojahCall = { kind: "ok", json: { entity: { face: { detected: true }, liveness: { spoof: false, confidence: 95 } } } };
+  const b = deps({ liveness: async () => live });
+  assertEquals((await verifyBvnSelfie(body(), b.d)).ok, true);
+});
+
+Deno.test("face.detected false (Dojah's field) → 422, counted", async () => {
+  const { d, calls } = deps({ liveness: async () => ({ kind: "ok", json: { entity: { face: { detected: false, message: "No face detected" } } } }) });
+  assertEquals(codeOf(await verifyBvnSelfie(body(), d)), "liveness_failed");
+  assertEquals(calls.includes("release"), false);
+});
+
+Deno.test("Dojah's DD-Mon-YYYY date of birth is stored as ISO", async () => {
+  const m: DojahCall = { kind: "ok", json: { entity: { first_name: "JOSHUA", middle_name: "THOMPSONBROWN", last_name: "ISAAC", date_of_birth: "28-Jun-2000", selfie_verification: { confidence_value: 99.81, match: true } } } };
+  const { d, inserted } = deps({ bvnSelfie: async () => m });
+  await verifyBvnSelfie(body(), d);
+  assertEquals(inserted[0].row.bvn_dob, "2000-06-28");
 });
