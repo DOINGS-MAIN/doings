@@ -19,6 +19,11 @@ Project: `ktaeljyhprsufoisqtll`
 
 Open each file, copy the full HTML, paste into the matching template in the dashboard.
 
+Both emails carry a 6-digit code (`{{ .Token }}`) as well as the link. The new app (DOINGSNEWFACE)
+asks for the code (`verifyOtp` with type `signup` / `recovery`); the link keeps working for the old
+app. Keep **Authentication → Providers → Email → Email OTP length** at **6** — the app's code
+boxes assume six digits.
+
 ## Redirect URLs
 
 **Authentication → URL Configuration**
