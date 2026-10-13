@@ -11,7 +11,10 @@ const WITHDRAWAL_LIMITS: Record<string, Record<number, number>> = {
   NGN: {
     0: 0,
     1: 0,
-    2: 200_000_000, // ₦2,000,000/day at full verification
+    // ₦2,000,000/day at full verification. Pre-check only: the database enforces
+    // platform_settings.withdrawal_daily_limit_l2_kobo atomically (lock_ngn_withdrawal_checked /
+    // create_bundle_sale), so keep the two in step.
+    2: 200_000_000,
   },
   USDC: {
     0: 0,
@@ -50,7 +53,7 @@ async function getDailySpent(
     .eq("user_id", userId)
     .eq("currency", currency)
     .in("type", txTypes)
-    .in("status", ["completed", "pending"])
+    .in("status", ["completed", "pending", "processing"])
     .gte("created_at", startOfDay.toISOString());
 
   if (error) throw error;

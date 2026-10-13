@@ -2,6 +2,8 @@ import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { hmacHex } from "../_shared/crypto.ts";
 import { getServiceClient } from "../_shared/db.ts";
 import { insertWebhookLog, markWebhookProcessed } from "../_shared/webhook.ts";
+import { refreshMarketRateIfStale } from "../_shared/bundles.ts";
+import { finalizeRpcNames } from "../_shared/sell.ts";
 
 type BlockradarData = {
   address?: unknown;
@@ -112,6 +114,13 @@ Deno.serve(async (req) => {
     const isWithdrawEvent = normalizedEvent.includes("withdraw");
 
     if (isDepositEvent) {
+      // Only confirmed deposits are credited (deposit.success / SUCCESS — the only shape Blockradar
+      // has sent us); anything else is logged and skipped.
+      // The log stays unprocessed so a later deposit.success for the same hash is still credited.
+      if (normalizedEvent !== "deposit.success" || normalizedStatus !== "success") {
+        await markWebhookProcessed(logId, `Skipped: deposit not confirmed (${eventType ?? ""}/${data.status ?? ""})`);
+        return withCors({ ok: true, skipped: true, reason: "deposit not confirmed", eventType, status: data.status });
+      }
       const asset = normalizeAssetSymbol(data.asset);
       if (asset !== "USDC") {
         await markWebhookProcessed(logId);
@@ -162,8 +171,24 @@ Deno.serve(async (req) => {
         },
       });
       if (creditErr) throw creditErr;
-      await markWebhookProcessed(logId);
-      return withCors({ ok: true });
+
+      // Bundles model: USDC that arrives is converted to bundles (or waits for treasury float /
+      // stays as USDC below the minimum). Idempotent per tx hash; the DB parks failed conversions for
+      // the cron, and if the call itself fails the log stays unprocessed so a replay retries.
+      await refreshMarketRateIfStale(supabase);
+      const { data: conversion, error: convErr } = await supabase.rpc("convert_usdc_deposit_to_bundles", {
+        p_user_id: walletData.user_id,
+        p_usdc_wallet_id: (addrRow as { wallet_id: string }).wallet_id,
+        p_amount_micro: amountMicro,
+        p_tx_hash: txHash,
+      });
+      if (convErr) {
+        console.error("convert_usdc_deposit_to_bundles:", convErr.message);
+        await markWebhookProcessed(logId, `Bundle conversion pending: ${convErr.message}`);
+      } else {
+        await markWebhookProcessed(logId);
+      }
+      return withCors({ ok: true, bundles: convErr ? "retry" : (conversion as { status?: string })?.status });
     }
 
     if (isWithdrawEvent) {
@@ -187,12 +212,12 @@ Deno.serve(async (req) => {
 
       if (isSuccess || isFailed) {
         const supabase = getServiceClient();
-        let txn: { id: string; status: string } | null = null;
+        let txn: { id: string; status: string; metadata?: Record<string, unknown> | null } | null = null;
 
         for (const key of lookupKeys) {
           const { data: byRef } = await supabase
             .from("transactions")
-            .select("id, status")
+            .select("id, status, metadata")
             .eq("provider", "blockradar")
             .eq("provider_ref", key)
             .in("status", ["pending", "processing"])
@@ -206,7 +231,7 @@ Deno.serve(async (req) => {
         if (!txn && ourRef) {
           const { data: byMeta } = await supabase
             .from("transactions")
-            .select("id, status")
+            .select("id, status, metadata")
             .eq("provider", "blockradar")
             .eq("type", "withdrawal")
             .in("status", ["pending", "processing"])
@@ -216,7 +241,9 @@ Deno.serve(async (req) => {
         }
 
         if (txn?.id) {
-          const rpcName = isSuccess ? "complete_withdrawal" : "fail_withdrawal";
+          // Bundle sales finalise through their own RPCs (treasury legs / reserve).
+          const rpc = finalizeRpcNames(txn.metadata?.kind as string | undefined);
+          const rpcName = isSuccess ? rpc.complete : rpc.fail;
           const { error: rpcErr } = await supabase.rpc(rpcName, { p_transaction_id: txn.id });
           if (rpcErr) throw rpcErr;
 

@@ -1,6 +1,7 @@
 import { mapFlutterwaveTransferStatus } from "./pspStatus.ts";
 import { flutterwaveApiRequest, flutterwaveResolveBankAccount } from "./flutterwaveClient.ts";
 import type { PspEnv, TransferStatusOutcome, TransferSubmitOutcome } from "./types.ts";
+import { classifyTransferSubmitFailure } from "./transferFailure.ts";
 
 export async function flutterwaveSubmitTransfer(input: {
   env: PspEnv;
@@ -60,7 +61,11 @@ export async function flutterwaveSubmitTransfer(input: {
     return { kind: "non_terminal", providerRef, providerStatus };
   }
 
-  const message = String((json as { message?: string }).message || "Flutterwave transfer failed");
+  const rawMessage = String((json as { message?: string }).message || "");
+  const message = rawMessage || `Flutterwave transfer failed (${status})`;
+  if (classifyTransferSubmitFailure(status, rawMessage) === "unknown") {
+    return { kind: "unknown", providerStatus: providerStatus || `HTTP_${status}`, message };
+  }
   return { kind: "rejected_terminal", providerStatus: providerStatus || "FAILED", message };
 }
 
@@ -74,7 +79,8 @@ export async function flutterwaveFetchTransferStatus(input: {
   });
 
   const list = (json as { data?: Array<{ id?: number; status?: string; reference?: string }> }).data;
-  const row = Array.isArray(list) ? list[0] : undefined;
+  // Only trust a row carrying our reference (never "the first transfer" if the filter is ignored).
+  const row = Array.isArray(list) ? list.find((r) => r?.reference === input.reference) : undefined;
   const providerStatus = String(row?.status || "").toUpperCase();
   const providerRef = row?.id != null ? String(row.id) : input.reference;
 

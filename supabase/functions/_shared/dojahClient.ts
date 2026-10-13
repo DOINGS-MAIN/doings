@@ -82,3 +82,47 @@ export async function dojahGetJson(path: string, params: Record<string, string>,
   const json = await res.json();
   return { res, json };
 }
+
+export type DojahCall =
+  | { kind: "ok"; json: unknown }
+  | { kind: "rejected"; status: number; json: unknown }
+  | { kind: "unavailable" };
+
+/** 4xx replies that blame our account or request (keys, balance, size), never the user's input. */
+const OUR_FAULT_4XX = new Set([401, 402, 403, 408, 413, 429]);
+
+/**
+ * POST JSON to Dojah with a timeout. Only a definite 4xx about the user's input is "rejected".
+ * 401/402/403/408/413/429, 5xx, timeouts, network errors and non-JSON bodies are "unavailable"
+ * (the caller must not charge an attempt).
+ */
+export async function dojahPostJson(
+  path: string,
+  body: unknown,
+  headers: Record<string, string>,
+  timeoutMs = 20_000,
+): Promise<DojahCall> {
+  let res: Response;
+  try {
+    res = await fetch(`${dojahBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`, {
+      method: "POST",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch {
+    return { kind: "unavailable" };
+  }
+  let json: unknown;
+  try {
+    json = await res.json();
+  } catch {
+    return { kind: "unavailable" };
+  }
+  if (res.ok) return { kind: "ok", json };
+  if (res.status >= 400 && res.status < 500 && !OUR_FAULT_4XX.has(res.status)) {
+    return { kind: "rejected", status: res.status, json };
+  }
+  console.error("Dojah unavailable", { path, status: res.status });
+  return { kind: "unavailable" };
+}

@@ -33,8 +33,9 @@ async function resolveSprayer(supabase: ReturnType<typeof getServiceClient>, aut
   if (sprayerErr || !sprayer) {
     return { error: withCors({ error: "User not found" }, { status: 404 }) };
   }
-  if (sprayer.kyc_level < 2) {
-    return { error: withCors({ error: "KYC level 2 required to spray", code: "KYC_REQUIRED" }, { status: 403 }) };
+  // Bundles model: spraying needs a verified email (KYC level 1).
+  if (sprayer.kyc_level < 1) {
+    return { error: withCors({ error: "Verify your email to spray", code: "KYC_REQUIRED" }, { status: 403 }) };
   }
   return { sprayer };
 }

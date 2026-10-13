@@ -5,6 +5,7 @@ import { sendUsdc } from "../_shared/blockradar.ts";
 import { toBlockradarNetwork } from "../_shared/blockradarNetwork.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
+import { isDefiniteBlockradarRejection, isSolanaAddress } from "../_shared/sell.ts";
 
 type WithdrawBody = {
   amount: number;
@@ -44,7 +45,11 @@ Deno.serve(async (req) => {
     return withCors({ error: "amount and address are required" }, { status: 400 });
   }
 
+  body.address = String(body.address).trim();
   const network = toBlockradarNetwork(body.network);
+  if (network === "solana" && !isSolanaAddress(body.address)) {
+    return withCors({ error: "Invalid Solana address" }, { status: 400 });
+  }
   const amountMicro = Math.round(body.amount * 1_000_000);
   if (amountMicro < 1_000_000) return withCors({ error: "Minimum withdrawal is 1 USDC" }, { status: 400 });
 
@@ -124,16 +129,24 @@ Deno.serve(async (req) => {
     });
   } catch (err) {
     const detail = String(err);
+    const rejected = isDefiniteBlockradarRejection(err);
     await supabase
       .from("transactions")
       .update({
+        // Keep the reference so a late withdraw webhook can still match this transaction.
         metadata: {
           address: body.address,
           network,
+          reference,
           error: detail.slice(0, 500),
         },
+        ...(rejected ? {} : { status: "processing" }),
       })
       .eq("id", txnId);
+    if (!rejected) {
+      // Unknown outcome (timeout / 5xx): the USDC may be on its way, so the funds stay held.
+      return withCors({ ok: true, transaction_id: txnId, reference, status: "processing" });
+    }
     await supabase.rpc("fail_withdrawal", { p_transaction_id: txnId });
     return withCors({ error: "USDC send failed, funds released", detail }, { status: 502 });
   }

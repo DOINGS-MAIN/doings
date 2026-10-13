@@ -1,4 +1,5 @@
 import { withCors } from "../_shared/cors.ts";
+import { refreshMarketRateIfStale } from "../_shared/bundles.ts";
 import { getServiceClient } from "../_shared/db.ts";
 
 const CRON_SECRET = Deno.env.get("CRON_SECRET") ?? "";
@@ -12,6 +13,12 @@ Deno.serve(async (req) => {
   }
 
   const supabase = getServiceClient();
+  await refreshMarketRateIfStale(supabase);
+  const { data: bundlesRetried, error: retryErr } = await supabase.rpc("retry_pending_bundle_orders");
+  if (retryErr) console.warn("retry_pending_bundle_orders:", retryErr.message);
+  const { data: bundlesExpired, error: expireErr } = await supabase.rpc("expire_stale_bundle_orders");
+  if (expireErr) console.warn("expire_stale_bundle_orders:", expireErr.message);
+
   const { data: cleanup, error: cleanupErr } = await supabase.rpc("cleanup_spray_holds");
   if (cleanupErr) {
     console.warn("cleanup_spray_holds:", cleanupErr.message);
@@ -49,6 +56,8 @@ Deno.serve(async (req) => {
     reconciled_at: new Date().toISOString(),
     discrepancies_found: count,
     spray_holds_cleaned: cleanup ?? null,
+    bundle_orders_credited: bundlesRetried ?? null,
+    bundle_orders_expired: bundlesExpired ?? null,
     discrepancies: count > 0 ? discrepancies : undefined,
   });
 });

@@ -371,10 +371,10 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.cron-leaderboard]
-verify_jwt = false
+verify_jwt = true
 
 [functions.cron-reconciliation]
-verify_jwt = false
+verify_jwt = true
 
 [functions.public-projector]
 verify_jwt = false
@@ -411,3 +411,6 @@ s3_region = "env(S3_REGION)"
 s3_access_key = "env(S3_ACCESS_KEY)"
 # Configures AWS_SECRET_ACCESS_KEY for S3 bucket
 s3_secret_key = "env(S3_SECRET_KEY)"
+
+[functions.sell]
+verify_jwt = true

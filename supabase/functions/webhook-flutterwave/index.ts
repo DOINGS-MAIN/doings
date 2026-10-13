@@ -6,6 +6,7 @@ import { insertWebhookLog, markWebhookProcessed } from "../_shared/webhook.ts";
 import { creditInboundDeposit } from "../_shared/walletInboundCredit.ts";
 import { applyWithdrawalStatus } from "../_shared/psp/withdrawalFinalize.ts";
 import { mapFlutterwaveTransferStatus } from "../_shared/psp/pspStatus.ts";
+import { BUNDLE_TX_REF_PREFIX, settleNgnBundleOrder } from "../_shared/bundles.ts";
 
 function pickString(obj: Record<string, unknown>, keys: string[]): string {
   for (const k of keys) {
@@ -88,7 +89,12 @@ Deno.serve(async (req) => {
       return withCors({ ok: true, duplicate: true });
     }
 
-    if ((secretHash || secretKey) && !signatureValid) {
+    // Fail closed: without a configured secret every request would pass verification.
+    if (!secretHash && !secretKey) {
+      await markWebhookProcessed(logId, "Webhook secret not configured");
+      return withCors({ error: "Webhook secret not configured" }, { status: 500 });
+    }
+    if (!signatureValid) {
       await markWebhookProcessed(logId, "Invalid signature");
       return withCors({ error: "Invalid signature" }, { status: 401 });
     }
@@ -134,6 +140,20 @@ Deno.serve(async (req) => {
       }
       await markWebhookProcessed(logId);
       return withCors({ ok: true, handled: "withdrawal" });
+    }
+
+    // Bundle checkout (hosted payment): any payment method. Credited only after Flutterwave's API
+    // confirms the transaction (settleNgnBundleOrder), never from this payload's amount.
+    const bundleTxRef = pickString(merged, ["tx_ref"]);
+    if (normalizedEvent.includes("charge") && bundleTxRef.startsWith(BUNDLE_TX_REF_PREFIX)) {
+      const transactionId = pickString(data, ["id"]);
+      const outcome = await settleNgnBundleOrder(supabase, { txRef: bundleTxRef, transactionId: transactionId || null });
+      if (outcome.status === "unverified") {
+        await markWebhookProcessed(logId, `Bundle order unverified: ${outcome.detail ?? ""}`);
+        return withCors({ error: "Could not verify payment" }, { status: 502 });
+      }
+      await markWebhookProcessed(logId);
+      return withCors({ ok: true, handled: "bundle_order", status: outcome.status });
     }
 
     // Inbound bank transfer to virtual account
