@@ -126,7 +126,8 @@ Deno.serve(async (req) => {
   try {
     const out = await verifyBvnSelfie(body, deps);
     if (!out.ok) {
-      console.info("kyc-dojah-verify refused", { user: userRow.id, code: out.code });
+      // Scores (numbers only) let us tune kyc_liveness_min_score; they never go to the client.
+      console.info("kyc-dojah-verify refused", { user: userRow.id, code: out.code, ...out.scores });
       return withCors({ error: out.error, code: out.code }, { status: out.status });
     }
     await supabase.from("users").update({ full_name: out.fullName }).eq("id", userRow.id);

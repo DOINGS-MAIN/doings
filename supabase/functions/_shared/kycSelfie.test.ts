@@ -180,3 +180,16 @@ Deno.test("Dojah's DD-Mon-YYYY date of birth is stored as ISO", async () => {
   await verifyBvnSelfie(body(), d);
   assertEquals(inserted[0].row.bvn_dob, "2000-06-28");
 });
+
+Deno.test("failed selfie checks carry their scores for the server log (never the BVN or image)", async () => {
+  const low: DojahCall = { kind: "ok", json: { entity: { face: { detected: true }, liveness: { spoof: true, confidence: 70 } } } };
+  const a = await verifyBvnSelfie(body(), deps({ liveness: async () => low }).d);
+  assertEquals(a, {
+    ok: false, status: 422, code: "liveness_failed",
+    error: "We couldn't confirm a live selfie. Retake it in good light, facing the camera.",
+    scores: { liveness: 30 },
+  });
+  const mismatch: DojahCall = { kind: "ok", json: { entity: { first_name: "J", last_name: "D", selfie_verification: { confidence_value: 71.5 } } } };
+  const b = await verifyBvnSelfie(body(), deps({ bvnSelfie: async () => mismatch }).d);
+  assertEquals((b as { scores?: unknown }).scores, { liveness: 93, match: 71.5 });
+});

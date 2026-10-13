@@ -42,13 +42,16 @@ export type VerifyDeps = {
   insertVerified(row: VerifiedInsert, payload: Record<string, unknown>): Promise<"ok" | "duplicate">;
 };
 
+/** Dojah scores of a failed check, for the server log only (pass-mark tuning); never sent to the client. */
+export type FailScores = { liveness?: number; match?: number };
+
 export type VerifyOutcome =
   | { ok: true; fullName: string }
-  | { ok: false; status: number; code: KycErrorCode; error: string };
+  | { ok: false; status: number; code: KycErrorCode; error: string; scores?: FailScores };
 
-function fail(code: KycErrorCode): VerifyOutcome {
+function fail(code: KycErrorCode, scores?: FailScores): VerifyOutcome {
   const [status, error] = KYC_ERRORS[code];
-  return { ok: false, status, code, error };
+  return scores ? { ok: false, status, code, error, scores } : { ok: false, status, code, error };
 }
 
 function obj(v: unknown): Record<string, unknown> {
@@ -145,7 +148,7 @@ export async function verifyBvnSelfie(body: Record<string, unknown>, deps: Verif
     if (livenessSaysNo(live.json)) return fail("liveness_failed");
     return await unavailable(); // format change on Dojah's side, not the user's fault (bounded by the budget)
   }
-  if (livenessScore < (await deps.livenessMinScore())) return fail("liveness_failed");
+  if (livenessScore < (await deps.livenessMinScore())) return fail("liveness_failed", { liveness: livenessScore });
 
   const match = await deps.bvnSelfie(bvn, selfie);
   if (match.kind === "unavailable") return await unavailable();
@@ -154,7 +157,9 @@ export async function verifyBvnSelfie(body: Record<string, unknown>, deps: Verif
   const id = parseDojahIdentityEntity(match.json);
   if (!id.firstName || !id.lastName) return fail("bvn_incomplete");
   const confidence = parseSelfieMatch(match.json);
-  if (confidence === null || confidence < FACE_MATCH_MIN) return fail("face_mismatch");
+  if (confidence === null || confidence < FACE_MATCH_MIN) {
+    return fail("face_mismatch", confidence === null ? { liveness: livenessScore } : { liveness: livenessScore, match: confidence });
+  }
 
   const dob = isoDateOrNull(id.dateOfBirth);
   const payload = {
