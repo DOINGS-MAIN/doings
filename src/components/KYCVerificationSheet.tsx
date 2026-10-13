@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Lock,
   Fingerprint,
+  Camera,
 } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
@@ -16,13 +17,14 @@ import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
 import { KYCLevel } from "@/types/finance";
+import { SelfieError, selfieFromFile } from "@/lib/selfie";
 
 interface KYCVerificationSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currentLevel: KYCLevel;
   onVerifyLevel1: (action: "resend" | "check") => Promise<{ success: boolean; message: string }>;
-  onVerifyLevel2: (bvn: string, nin: string, dateOfBirth: string) => Promise<{ success: boolean; message: string }>;
+  onVerifyLevel2: (bvn: string, selfieBase64: string) => Promise<{ success: boolean; message: string }>;
 }
 
 type Step = "overview" | "level1" | "level2" | "processing" | "success";
@@ -38,8 +40,23 @@ export const KYCVerificationSheet = ({
   const [isProcessing, setIsProcessing] = useState(false);
 
   const [bvn, setBvn] = useState("");
-  const [nin, setNin] = useState("");
-  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [selfie, setSelfie] = useState<string | null>(null);
+  const [readingPhoto, setReadingPhoto] = useState(false);
+  const nativeCamera = typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
+
+  const handleSelfieFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setReadingPhoto(true);
+    try {
+      setSelfie(await selfieFromFile(file));
+    } catch (err) {
+      toast.error(err instanceof SelfieError ? err.message : "We couldn't read that photo. Take a new selfie.");
+    } finally {
+      setReadingPhoto(false);
+    }
+  };
 
   const handleResendEmail = async () => {
     setIsProcessing(true);
@@ -73,11 +90,14 @@ export const KYCVerificationSheet = ({
   };
 
   const handleVerifyLevel2 = async () => {
+    if (!selfie) return;
     setIsProcessing(true);
     setStep("processing");
     try {
-      const result = await onVerifyLevel2(bvn, nin, dateOfBirth);
+      const result = await onVerifyLevel2(bvn, selfie);
       if (result.success) {
+        setBvn("");
+        setSelfie(null);
         setStep("success");
         toast.success(result.message);
       } else {
@@ -96,8 +116,7 @@ export const KYCVerificationSheet = ({
     setStep("overview");
     setIsProcessing(false);
     setBvn("");
-    setNin("");
-    setDateOfBirth("");
+    setSelfie(null);
     onOpenChange(false);
   };
 
@@ -114,8 +133,8 @@ export const KYCVerificationSheet = ({
     },
     {
       level: 2 as KYCLevel,
-      title: "BVN + NIN",
-      subtitle: "Dojah identity check & bank transfer account",
+      title: "BVN + Selfie",
+      subtitle: "Dojah identity check",
       icon: Fingerprint,
       benefits: ["Fund NGN (transfer account)", "USDC deposit address", "Send, spray, withdraw"],
       color: "text-primary",
@@ -283,9 +302,9 @@ export const KYCVerificationSheet = ({
                   <div className="w-16 h-16 mx-auto rounded-full bg-primary/20 flex items-center justify-center mb-3">
                     <CreditCard className="w-8 h-8 text-primary" />
                   </div>
-                  <h3 className="font-bold text-lg">BVN &amp; NIN</h3>
+                  <h3 className="font-bold text-lg">BVN &amp; selfie</h3>
                   <p className="text-sm text-muted-foreground">
-                    We verify both with Dojah, then create your Monnify transfer account in the same step.
+                    Dojah checks your BVN and matches a selfie to your BVN photo. We don't keep the photo.
                   </p>
                 </div>
 
@@ -302,28 +321,40 @@ export const KYCVerificationSheet = ({
                 </div>
 
                 <div className="space-y-2">
-                  <Label>NIN (11 digits)</Label>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="National Identification Number"
-                    value={nin}
-                    onChange={(e) => setNin(e.target.value.replace(/\D/g, "").slice(0, 11))}
-                    maxLength={11}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>Date of birth (optional)</Label>
-                  <Input type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
+                  <Label>Selfie</Label>
+                  {selfie ? (
+                    <img
+                      src={`data:image/jpeg;base64,${selfie}`}
+                      alt="Your selfie"
+                      className="mx-auto aspect-[3/4] w-40 rounded-xl object-cover"
+                    />
+                  ) : null}
+                  {/* No uploads: capture="user" opens the front camera only on phones/tablets; desktop
+                      browsers ignore it and show a file picker, so desktops are sent to the phone. */}
+                  {nativeCamera ? (
+                    <label className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-md border border-input px-4 py-2 text-sm">
+                      <Camera className="h-4 w-4" />
+                      {readingPhoto ? "Reading photo…" : selfie ? "Retake selfie" : "Take a selfie"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="user"
+                        className="sr-only"
+                        onChange={(e) => void handleSelfieFile(e)}
+                      />
+                    </label>
+                  ) : (
+                    <p className="text-sm font-medium">Open Doings on your phone to take your selfie.</p>
+                  )}
+                  <p className="text-xs text-muted-foreground">Face the camera in good light, no glasses or hat.</p>
                 </div>
 
                 <Button
                   className="w-full"
                   onClick={() => void handleVerifyLevel2()}
-                  disabled={bvn.length !== 11 || nin.length !== 11 || isProcessing}
+                  disabled={bvn.length !== 11 || !selfie || isProcessing || readingPhoto}
                 >
-                  Verify &amp; create transfer account
+                  Verify identity
                 </Button>
 
                 <Button variant="ghost" className="w-full" onClick={() => setStep("overview")}>

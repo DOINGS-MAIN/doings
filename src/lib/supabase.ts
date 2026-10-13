@@ -170,8 +170,8 @@ export const auth = {
 // ── KYC ──
 export const kyc = {
   /** Dojah BVN + NIN (no selfie); on success server also provisions Monnify reserved account when missing. */
-  verifyBvnAndNin: (bvn: string, nin: string, dateOfBirth?: string) =>
-    invoke("kyc-dojah-verify", { body: { bvn, nin, dateOfBirth } }),
+  verifyBvnSelfie: (bvn: string, selfieBase64: string) =>
+    invoke("kyc-dojah-verify", { body: { bvn, selfie_image: selfieBase64 } }),
 };
 
 // ── Wallet ──
