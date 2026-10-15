@@ -145,3 +145,196 @@ GRANT EXECUTE ON FUNCTION public.floor_settings() TO service_role;
 GRANT EXECUTE ON FUNCTION public.floor_settings_errors(jsonb) TO service_role;
 GRANT EXECUTE ON FUNCTION public.get_spray_floor_settings() TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.set_spray_floor_settings(jsonb) TO authenticated, service_role;
+
+-- ── B. Settle core, queue, stop, leave ─────────────────────────────────────────────────────
+
+-- Replaced by the real function in section C; defined here so B compiles on its own.
+CREATE OR REPLACE FUNCTION public.advance_event_floor(p_event_id uuid)
+RETURNS boolean LANGUAGE sql AS $$ SELECT false $$;
+
+-- Ping screens to re-read the floor. Never lets a realtime problem break money code.
+CREATE OR REPLACE FUNCTION public._floor_ping(p_event_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  PERFORM realtime.send(jsonb_build_object('at', now()), 'floor_changed', 'floor:' || p_event_id::text, false);
+EXCEPTION WHEN others THEN
+  RAISE WARNING 'floor ping failed: %', SQLERRM;
+END;
+$$;
+
+-- Charge p_charged_kobo (0 = release) for a queued/on_floor hold. Same ledger writes and idempotency
+-- keys as settle_spray_hold (live definition, 2026-10-15) so totals, Top Sprayers and the host
+-- credit behave the same. Lock order: hold -> sprayer wallet (no event row lock). Allows a
+-- non-live event so turns can be settled after the host ends it. Closed rows are a no-op.
+CREATE OR REPLACE FUNCTION public._settle_floor_hold(p_hold_id uuid, p_charged_kobo bigint, p_release_reason text DEFAULT NULL)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_hold RECORD;
+  v_host uuid;
+  v_receiver_wallet uuid;
+  v_transfer_id uuid;
+  v_sender_txn_id uuid;
+  v_receiver_txn_id uuid;
+  v_idem_key text;
+  v_note_count int;
+  v_metadata jsonb;
+  v_settlement public.spray_settlement_type;
+BEGIN
+  SELECT * INTO v_hold FROM public.spray_holds WHERE id = p_hold_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Spray hold not found'; END IF;
+  IF v_hold.status NOT IN ('queued', 'on_floor') THEN RETURN; END IF;
+  IF p_charged_kobo < 0 OR p_charged_kobo > v_hold.planned_amount_kobo
+     OR p_charged_kobo % (v_hold.denomination * 100) <> 0 THEN
+    RAISE EXCEPTION 'Invalid floor charge';
+  END IF;
+  IF v_hold.status = 'queued' AND p_charged_kobo <> 0 THEN RAISE EXCEPTION 'Queued spray cannot be charged'; END IF;
+
+  PERFORM 1 FROM public.wallets WHERE id = v_hold.wallet_id FOR UPDATE;
+
+  -- Release the hold before the debit so the available balance includes the reserved funds.
+  UPDATE public.wallets
+     SET locked_balance = locked_balance - v_hold.planned_amount_kobo, updated_at = now()
+   WHERE id = v_hold.wallet_id;
+
+  IF p_charged_kobo = 0 THEN
+    UPDATE public.spray_holds
+       SET status = 'released', settlement_type = 'cancelled', charged_amount_kobo = 0,
+           release_reason = p_release_reason, settled_at = now()
+     WHERE id = p_hold_id;
+    RETURN;
+  END IF;
+
+  SELECT host_id INTO v_host FROM public.events WHERE id = v_hold.event_id;
+  SELECT id INTO v_receiver_wallet FROM public.wallets WHERE user_id = v_host AND currency = 'NGN';
+  IF v_receiver_wallet IS NULL THEN RAISE EXCEPTION 'Receiver wallet not found'; END IF;
+
+  v_settlement := CASE WHEN p_charged_kobo = v_hold.planned_amount_kobo THEN 'full' ELSE 'partial' END;
+  v_note_count := p_charged_kobo / (v_hold.denomination * 100);
+  v_idem_key := 'spray-hold-' || p_hold_id::text;
+  v_metadata := v_hold.metadata || jsonb_build_object(
+    'hold_id', p_hold_id, 'settlement', v_settlement::text, 'floor', true,
+    'planned_amount_kobo', v_hold.planned_amount_kobo, 'charged_amount_kobo', p_charged_kobo,
+    'floor_seconds', v_hold.floor_seconds);
+
+  v_sender_txn_id := public.debit_wallet(
+    v_hold.wallet_id, v_hold.sprayer_id, p_charged_kobo, 0, 'spray',
+    'Spray at event ' || v_hold.event_id::text || ' (sent)', 'internal', v_idem_key || '-send', v_metadata);
+
+  v_receiver_txn_id := public.credit_wallet(
+    v_receiver_wallet, v_host, p_charged_kobo, 0, 'receive',
+    'Spray at event ' || v_hold.event_id::text || ' (received)', 'internal', NULL, v_idem_key || '-recv', v_metadata);
+
+  INSERT INTO public.transfers (
+    sender_wallet_id, receiver_wallet_id, sender_user_id, receiver_user_id, currency, amount, fee,
+    status, sender_transaction_id, receiver_transaction_id, description)
+  SELECT v_hold.wallet_id, v_receiver_wallet, v_hold.sprayer_id, v_host, w.currency, p_charged_kobo, 0,
+         'completed', v_sender_txn_id, v_receiver_txn_id, 'Spray at event ' || v_hold.event_id::text
+    FROM public.wallets w WHERE w.id = v_hold.wallet_id
+  RETURNING id INTO v_transfer_id;
+
+  INSERT INTO public.spray_records (event_id, sprayer_id, receiver_id, transaction_id, amount, denomination, note_count, metadata)
+  VALUES (v_hold.event_id, v_hold.sprayer_id, v_host, v_sender_txn_id, p_charged_kobo, v_hold.denomination, v_note_count,
+          COALESCE(v_metadata, '{}'::jsonb));
+
+  UPDATE public.spray_holds
+     SET status = 'settled', settlement_type = v_settlement, charged_amount_kobo = p_charged_kobo,
+         transfer_id = v_transfer_id, release_reason = NULL, settled_at = now()
+   WHERE id = p_hold_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.queue_floor_spray(
+  p_event_id uuid, p_sprayer_id uuid, p_amount_kobo bigint, p_denomination int, p_note_count int)
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_event RECORD;
+  v_wallet RECORD;
+  v_settings jsonb := public.floor_settings();
+  v_hold_id uuid;
+BEGIN
+  IF p_amount_kobo <= 0 THEN RAISE EXCEPTION 'Spray amount must be positive'; END IF;
+  IF p_denomination NOT IN (200, 500, 1000) THEN RAISE EXCEPTION 'Invalid denomination'; END IF;
+  IF p_note_count <= 0 OR p_amount_kobo <> p_denomination::bigint * 100 * p_note_count THEN
+    RAISE EXCEPTION 'amount must be divisible by denomination';
+  END IF;
+
+  SELECT id, host_id, status INTO v_event FROM public.events WHERE id = p_event_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Event not found'; END IF;
+  IF v_event.status <> 'live' THEN RAISE EXCEPTION 'Event is not live'; END IF;
+  IF v_event.host_id = p_sprayer_id THEN RAISE EXCEPTION 'Host cannot spray own event'; END IF;
+
+  IF EXISTS (SELECT 1 FROM public.spray_holds WHERE event_id = p_event_id AND sprayer_id = p_sprayer_id
+                AND status IN ('queued', 'on_floor')) THEN
+    RAISE EXCEPTION 'FLOOR_ALREADY_IN';
+  END IF;
+
+  SELECT id, balance, locked_balance INTO v_wallet
+    FROM public.wallets WHERE user_id = p_sprayer_id AND currency = 'NGN' FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Wallet not found'; END IF;
+  IF v_wallet.balance - v_wallet.locked_balance < p_amount_kobo THEN RAISE EXCEPTION 'Insufficient balance'; END IF;
+
+  UPDATE public.wallets SET locked_balance = locked_balance + p_amount_kobo, updated_at = now() WHERE id = v_wallet.id;
+
+  BEGIN
+    INSERT INTO public.spray_holds (
+      event_id, sprayer_id, wallet_id, planned_amount_kobo, denomination, note_count, metadata,
+      status, queued_at, floor_band_seconds, expires_at)
+    VALUES (
+      p_event_id, p_sprayer_id, v_wallet.id, p_amount_kobo, p_denomination, p_note_count, '{"floor": true}'::jsonb,
+      'queued', clock_timestamp(), public.floor_band_seconds(v_settings, p_amount_kobo),
+      now() + make_interval(secs => (v_settings->>'max_wait_seconds')::int))
+    RETURNING id INTO v_hold_id;
+  EXCEPTION WHEN unique_violation THEN
+    RAISE EXCEPTION 'FLOOR_ALREADY_IN';
+  END;
+
+  PERFORM public.advance_event_floor(p_event_id);
+  PERFORM public._floor_ping(p_event_id);
+  RETURN v_hold_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.stop_floor_spray(p_hold_id uuid, p_sprayer_id uuid)
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_hold RECORD;
+BEGIN
+  SELECT id, event_id, sprayer_id, status, note_count, denomination, floor_seconds, floor_started_at
+    INTO v_hold FROM public.spray_holds WHERE id = p_hold_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Spray hold not found'; END IF;
+  IF v_hold.sprayer_id <> p_sprayer_id THEN RAISE EXCEPTION 'Not authorized for this spray hold'; END IF;
+  IF v_hold.status = 'on_floor' THEN
+    PERFORM public._settle_floor_hold(p_hold_id,
+      public.floor_charged_kobo(v_hold.note_count, v_hold.denomination, v_hold.floor_seconds,
+                                public._floor_elapsed_ms(v_hold.floor_started_at)));
+    PERFORM public.advance_event_floor(v_hold.event_id);
+    PERFORM public._floor_ping(v_hold.event_id);
+  END IF;
+  RETURN v_hold.event_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.leave_floor_queue(p_hold_id uuid, p_sprayer_id uuid)
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_hold RECORD;
+BEGIN
+  SELECT id, event_id, sprayer_id, status INTO v_hold FROM public.spray_holds WHERE id = p_hold_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Spray hold not found'; END IF;
+  IF v_hold.sprayer_id <> p_sprayer_id THEN RAISE EXCEPTION 'Not authorized for this spray hold'; END IF;
+  IF v_hold.status = 'queued' THEN
+    PERFORM public._settle_floor_hold(p_hold_id, 0, 'left');
+    PERFORM public._floor_ping(v_hold.event_id);
+  END IF;
+  RETURN v_hold.event_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public._floor_ping(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._settle_floor_hold(uuid, bigint, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.queue_floor_spray(uuid, uuid, bigint, int, int) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.stop_floor_spray(uuid, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.leave_floor_queue(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._floor_ping(uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public._settle_floor_hold(uuid, bigint, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.queue_floor_spray(uuid, uuid, bigint, int, int) TO service_role;
+GRANT EXECUTE ON FUNCTION public.stop_floor_spray(uuid, uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.leave_floor_queue(uuid, uuid) TO service_role;

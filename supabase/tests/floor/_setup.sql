@@ -6,6 +6,8 @@ BEGIN
   INSERT INTO auth.users (id, instance_id, aud, role, email, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at)
   VALUES (v_auth, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', p_email, now(), '{}', '{}', now(), now());
   SELECT id INTO v_id FROM public.users WHERE auth_id = v_auth;
+  -- the email-confirmed KYC trigger fires before the user row exists, so set level 1 here
+  UPDATE public.users SET kyc_level = 1 WHERE id = v_id;
   UPDATE public.wallets SET balance = p_balance_kobo, locked_balance = 0 WHERE user_id = v_id AND currency = 'NGN';
   RETURN v_id;
 END $$;
