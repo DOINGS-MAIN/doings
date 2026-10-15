@@ -80,7 +80,8 @@ BEGIN
          floor_seconds = 120
    WHERE id = (SELECT v FROM t WHERE k = 'b2');
   UPDATE public.events SET status = 'ended' WHERE id = ev;
-  ASSERT public.advance_event_floor(ev), 'event end changes rows';
+  -- the end trigger settles the floor; an explicit advance afterwards has nothing left to do
+  ASSERT NOT public.advance_event_floor(ev), 'already settled by the end trigger';
   SELECT * INTO r FROM public.spray_holds WHERE id = (SELECT v FROM t WHERE k = 'b2');
   ASSERT r.status = 'settled' AND r.charged_amount_kobo = 1000000, format('half of 20 notes = 10 × ₦1,000, got %s', r.charged_amount_kobo);
   SELECT * INTO r FROM public.spray_holds WHERE id = (SELECT v FROM t WHERE k = 'b20');

@@ -34,6 +34,17 @@ export function floorErrorResponse(message: string): { status: number; error: st
   if (message.includes("Insufficient balance")) return { status: 400, error: "Insufficient balance" };
   if (message.includes("Host cannot spray")) return { status: 400, error: "Host cannot spray own event" };
   if (message.includes("Not authorized")) return { status: 403, error: "Not authorized for this spray" };
-  if (message.includes("not found")) return { status: 404, error: "Spray not found" };
+  if (message.includes("Spray hold not found")) return { status: 404, error: "Spray not found" };
+  if (message.includes("Event not found")) return { status: 404, error: "Event not found" };
   return { status: 500, error: "Spray failed" };
+}
+
+/**
+ * Stop and Leave get their own, larger bucket: a 429 on Stop would keep the charge running, so they
+ * must never be starved by queue attempts. Both are idempotent and cheap.
+ */
+export function floorRateLimit(action: FloorAction["action"], userId: string) {
+  return action === "queue"
+    ? { key: `spray:${userId}`, maxRequests: 30, windowMs: 60_000 }
+    : { key: `spray-floor:${userId}`, maxRequests: 60, windowMs: 60_000 };
 }

@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { floorErrorResponse, parseFloorAction } from "./floor.ts";
+import { floorErrorResponse, floorRateLimit, parseFloorAction } from "./floor.ts";
 
 const EV = "11111111-1111-4111-8111-111111111101";
 const HOLD = "22222222-2222-4222-8222-222222222202";
@@ -36,5 +36,13 @@ Deno.test("floorErrorResponse maps database errors", () => {
   assertEquals(floorErrorResponse("Host cannot spray own event"), { status: 400, error: "Host cannot spray own event" });
   assertEquals(floorErrorResponse("Not authorized for this spray hold"), { status: 403, error: "Not authorized for this spray" });
   assertEquals(floorErrorResponse("Spray hold not found"), { status: 404, error: "Spray not found" });
+  assertEquals(floorErrorResponse("Event not found"), { status: 404, error: "Event not found" });
+  assertEquals(floorErrorResponse("Receiver wallet not found"), { status: 500, error: "Spray failed" });
   assertEquals(floorErrorResponse("boom"), { status: 500, error: "Spray failed" });
+});
+
+Deno.test("floorRateLimit: stop and leave get their own bucket", () => {
+  assertEquals(floorRateLimit("queue", "u1"), { key: "spray:u1", maxRequests: 30, windowMs: 60_000 });
+  assertEquals(floorRateLimit("stop", "u1"), { key: "spray-floor:u1", maxRequests: 60, windowMs: 60_000 });
+  assertEquals(floorRateLimit("leave", "u1"), { key: "spray-floor:u1", maxRequests: 60, windowMs: 60_000 });
 });

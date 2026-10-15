@@ -1,6 +1,6 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { getAuthUserIdFromRequest, getAuthedClient, getServiceClient } from "../_shared/db.ts";
-import { floorErrorResponse, parseFloorAction } from "../_shared/floor.ts";
+import { floorErrorResponse, floorRateLimit, parseFloorAction } from "../_shared/floor.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
 import {
@@ -147,7 +147,7 @@ async function handleFloorAction(
   const parsed = parseFloorAction(raw);
   if ("error" in parsed) return withCors({ error: parsed.error }, { status: 400 });
 
-  const rl = await checkRateLimit(RATE_LIMITS.spray(sprayerId));
+  const rl = await checkRateLimit(floorRateLimit(parsed.action, sprayerId));
   if (!rl.allowed) return withCors({ error: "Too many spray attempts. Try again shortly." }, { status: 429 });
 
   let eventId: string;

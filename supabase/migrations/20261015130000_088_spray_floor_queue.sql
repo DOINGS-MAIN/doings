@@ -11,7 +11,7 @@ ALTER TABLE public.spray_holds
   ADD COLUMN IF NOT EXISTS floor_slot SMALLINT CHECK (floor_slot BETWEEN 1 AND 8),
   ADD COLUMN IF NOT EXISTS floor_started_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS floor_ends_at TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS release_reason TEXT CHECK (release_reason IN ('left', 'max_wait', 'event_ended'));
+  ADD COLUMN IF NOT EXISTS release_reason TEXT CHECK (release_reason IN ('left', 'max_wait', 'event_ended', 'event_ended_on_floor'));
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_spray_holds_floor_slot
   ON public.spray_holds (event_id, floor_slot) WHERE status = 'on_floor';
@@ -76,11 +76,11 @@ DECLARE
   v_count int;
   v_min_band int := NULL;
 BEGIN
-  IF jsonb_typeof(p->'bands') <> 'array' THEN RETURN 'bands must be a list'; END IF;
+  IF jsonb_typeof(p->'bands') IS DISTINCT FROM 'array' THEN RETURN 'bands must be a list'; END IF;
   v_count := jsonb_array_length(p->'bands');
   IF v_count < 1 OR v_count > 6 THEN RETURN 'Use 1 to 6 bands'; END IF;
   FOR v_band IN SELECT value FROM jsonb_array_elements(p->'bands') LOOP
-    IF jsonb_typeof(v_band->'from_ngn') <> 'number' OR jsonb_typeof(v_band->'seconds') <> 'number' THEN
+    IF jsonb_typeof(v_band->'from_ngn') IS DISTINCT FROM 'number' OR jsonb_typeof(v_band->'seconds') IS DISTINCT FROM 'number' THEN
       RETURN 'Each band needs from_ngn and seconds';
     END IF;
     IF v_prev < 0 AND (v_band->>'from_ngn')::numeric <> 0 THEN
@@ -95,12 +95,12 @@ BEGIN
     v_prev := (v_band->>'from_ngn')::numeric;
     v_min_band := LEAST(COALESCE(v_min_band, (v_band->>'seconds')::int), (v_band->>'seconds')::int);
   END LOOP;
-  IF jsonb_typeof(p->'busy_threshold') <> 'number' OR (p->>'busy_threshold')::numeric < 1 THEN RETURN 'busy_threshold must be at least 1'; END IF;
-  IF jsonb_typeof(p->'busy_shrink_pct') <> 'number' OR (p->>'busy_shrink_pct')::numeric NOT BETWEEN 0 AND 70 THEN RETURN 'busy_shrink_pct must be 0 to 70'; END IF;
-  IF jsonb_typeof(p->'min_seconds') <> 'number' OR (p->>'min_seconds')::numeric < 15 OR (p->>'min_seconds')::numeric > v_min_band THEN
+  IF jsonb_typeof(p->'busy_threshold') IS DISTINCT FROM 'number' OR (p->>'busy_threshold')::numeric < 1 THEN RETURN 'busy_threshold must be at least 1'; END IF;
+  IF jsonb_typeof(p->'busy_shrink_pct') IS DISTINCT FROM 'number' OR (p->>'busy_shrink_pct')::numeric NOT BETWEEN 0 AND 70 THEN RETURN 'busy_shrink_pct must be 0 to 70'; END IF;
+  IF jsonb_typeof(p->'min_seconds') IS DISTINCT FROM 'number' OR (p->>'min_seconds')::numeric < 15 OR (p->>'min_seconds')::numeric > v_min_band THEN
     RETURN 'min_seconds must be from 15 to the shortest band';
   END IF;
-  IF jsonb_typeof(p->'max_wait_seconds') <> 'number' OR (p->>'max_wait_seconds')::numeric NOT BETWEEN 300 AND 7200 THEN
+  IF jsonb_typeof(p->'max_wait_seconds') IS DISTINCT FROM 'number' OR (p->>'max_wait_seconds')::numeric NOT BETWEEN 300 AND 7200 THEN
     RETURN 'max_wait_seconds must be 300 to 7200';
   END IF;
   RETURN NULL;
@@ -179,7 +179,7 @@ BEGIN
   SELECT * INTO v_hold FROM public.spray_holds WHERE id = p_hold_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Spray hold not found'; END IF;
   IF v_hold.status NOT IN ('queued', 'on_floor') THEN RETURN; END IF;
-  IF p_charged_kobo < 0 OR p_charged_kobo > v_hold.planned_amount_kobo
+  IF p_charged_kobo IS NULL OR p_charged_kobo < 0 OR p_charged_kobo > v_hold.planned_amount_kobo
      OR p_charged_kobo % (v_hold.denomination * 100) <> 0 THEN
     RAISE EXCEPTION 'Invalid floor charge';
   END IF;
@@ -295,7 +295,7 @@ RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_hold RECORD;
 BEGIN
   SELECT id, event_id, sprayer_id, status, note_count, denomination, floor_seconds, floor_started_at
-    INTO v_hold FROM public.spray_holds WHERE id = p_hold_id;
+    INTO v_hold FROM public.spray_holds WHERE id = p_hold_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Spray hold not found'; END IF;
   IF v_hold.sprayer_id <> p_sprayer_id THEN RAISE EXCEPTION 'Not authorized for this spray hold'; END IF;
   IF v_hold.status = 'on_floor' THEN
@@ -313,7 +313,8 @@ CREATE OR REPLACE FUNCTION public.leave_floor_queue(p_hold_id uuid, p_sprayer_id
 RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_hold RECORD;
 BEGIN
-  SELECT id, event_id, sprayer_id, status INTO v_hold FROM public.spray_holds WHERE id = p_hold_id;
+  -- Locked so a promotion to the floor cannot slip in between this check and the release.
+  SELECT id, event_id, sprayer_id, status INTO v_hold FROM public.spray_holds WHERE id = p_hold_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Spray hold not found'; END IF;
   IF v_hold.sprayer_id <> p_sprayer_id THEN RAISE EXCEPTION 'Not authorized for this spray hold'; END IF;
   IF v_hold.status = 'queued' THEN
@@ -357,6 +358,7 @@ CREATE OR REPLACE FUNCTION public.advance_event_floor(p_event_id uuid)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   v_status public.event_status;
+  v_ended_at timestamptz;
   v_settings jsonb;
   v_changed boolean := false;
   v_slot int;
@@ -371,14 +373,16 @@ BEGIN
     RETURN false;
   END IF;
 
-  SELECT status INTO v_status FROM public.events WHERE id = p_event_id;
+  SELECT status, ended_at INTO v_status, v_ended_at FROM public.events WHERE id = p_event_id;
 
   IF v_status IS DISTINCT FROM 'live' THEN
     FOR r IN SELECT id, note_count, denomination, floor_seconds, floor_started_at
                FROM public.spray_holds WHERE event_id = p_event_id AND status = 'on_floor' LOOP
+      -- Charge only up to the moment the event ended, however late this runs.
       PERFORM public._floor_try_settle(r.id,
-        public.floor_charged_kobo(r.note_count, r.denomination, r.floor_seconds, public._floor_elapsed_ms(r.floor_started_at)),
-        'event_ended');
+        public.floor_charged_kobo(r.note_count, r.denomination, r.floor_seconds,
+          floor(extract(epoch FROM (LEAST(now(), COALESCE(v_ended_at, now())) - r.floor_started_at)) * 1000)::bigint),
+        'event_ended_on_floor');
     END LOOP;
     FOR r IN SELECT id FROM public.spray_holds WHERE event_id = p_event_id AND status = 'queued' LOOP
       PERFORM public._floor_try_settle(r.id, 0, 'event_ended');
@@ -426,6 +430,37 @@ BEGIN
   RETURN v_changed;
 END;
 $$;
+
+-- When an event stops being live: stamp ended_at (the charge cap) and settle the floor at once,
+-- instead of waiting for the next read (screens stop reading once the event has ended).
+CREATE OR REPLACE FUNCTION public._events_floor_end_stamp()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.status = 'live' AND NEW.status = 'ended' AND NEW.ended_at IS NULL THEN
+    NEW.ended_at := now();
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public._events_floor_end_settle()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  PERFORM public.advance_event_floor(NEW.id);
+  RETURN NULL;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS tr_events_floor_end_stamp ON public.events;
+CREATE TRIGGER tr_events_floor_end_stamp BEFORE UPDATE OF status ON public.events
+  FOR EACH ROW EXECUTE FUNCTION public._events_floor_end_stamp();
+DROP TRIGGER IF EXISTS tr_events_floor_end ON public.events;
+CREATE TRIGGER tr_events_floor_end AFTER UPDATE OF status ON public.events
+  FOR EACH ROW WHEN (OLD.status = 'live' AND NEW.status IS DISTINCT FROM 'live')
+  EXECUTE FUNCTION public._events_floor_end_settle();
+
+REVOKE ALL ON FUNCTION public._events_floor_end_stamp() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._events_floor_end_settle() FROM PUBLIC, anon, authenticated;
 
 -- Backstop for cron-reconciliation: rooms nobody is watching still end turns and fill slots.
 CREATE OR REPLACE FUNCTION public.advance_live_floors()
