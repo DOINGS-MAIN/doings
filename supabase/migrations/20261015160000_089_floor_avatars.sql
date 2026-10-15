@@ -1,27 +1,43 @@
 -- Dance floor avatars and moves (part 3). Spec: DOINGSNEWFACE docs/superpowers/specs/2026-10-15-dance-floor-avatars-design.md
--- Each dancer in get_event_floor now carries their own floor avatar (only their own avatars-bucket
--- file) and up to 3 chosen moves. Everything else in get_event_floor is unchanged from 088.
+-- Floor avatars live in their own public bucket that only the server (streamoji function) writes to.
+-- get_event_floor returns each dancer's object path (never a URL: guests can edit their own
+-- avatar_data, so nothing in it is trusted beyond a version number) and up to 3 chosen moves.
 
--- A floor avatar URL is only trusted when it is this user's own avatars-bucket file.
-CREATE OR REPLACE FUNCTION public._floor_model_url(p_url text, p_auth uuid)
+-- Server-only bucket: public read, no client write policies, 2.5 MB, GLB only.
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES ('avatar-floor', 'avatar-floor', true, 2621440, ARRAY['model/gltf-binary'])
+ON CONFLICT (id) DO UPDATE
+  SET public = true, file_size_limit = 2621440, allowed_mime_types = ARRAY['model/gltf-binary'];
+
+-- Atomic merge into users.avatar_data (no read-modify-write races between saves).
+CREATE OR REPLACE FUNCTION public.merge_avatar_data(p_auth_id uuid, p_patch jsonb)
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = public AS $$
+  UPDATE public.users
+     SET avatar_data = COALESCE(avatar_data, '{}'::jsonb) || p_patch
+   WHERE auth_id = p_auth_id
+$$;
+
+-- "<auth_id>.glb?v=<version>" when the version is a plain number; the app adds its own storage host.
+CREATE OR REPLACE FUNCTION public._floor_model_path(p_auth uuid, p_version jsonb)
 RETURNS text LANGUAGE sql IMMUTABLE AS $$
   SELECT CASE
-    WHEN p_url ~ ('^https://[^/]+/storage/v1/object/public/avatars/' || p_auth::text || '/avatar-floor\.glb(\?v=[0-9]+)?$')
-    THEN p_url
+    WHEN jsonb_typeof(p_version) = 'number' AND (p_version #>> '{}') ~ '^[0-9]{1,16}$'
+    THEN p_auth::text || '.glb?v=' || (p_version #>> '{}')
   END
 $$;
 
--- Up to 3 move slugs, else none.
+-- Up to 3 move slugs, else none. Nested CASE: never evaluates array functions on a non-array.
 CREATE OR REPLACE FUNCTION public._floor_moves(p jsonb)
 RETURNS jsonb LANGUAGE sql IMMUTABLE AS $$
   SELECT CASE
-    WHEN jsonb_typeof(p) = 'array'
-     AND jsonb_array_length(p) <= 3
-     AND NOT EXISTS (
-       SELECT 1 FROM jsonb_array_elements(p) e
-        WHERE jsonb_typeof(e) <> 'string' OR NOT ((e #>> '{}') ~ '^[a-z0-9-]{1,40}$'))
-    THEN p
-    ELSE '[]'::jsonb
+    WHEN jsonb_typeof(p) IS DISTINCT FROM 'array' THEN '[]'::jsonb
+    ELSE CASE
+      WHEN jsonb_array_length(p) <= 3 AND NOT EXISTS (
+        SELECT 1 FROM jsonb_array_elements(p) e
+         WHERE jsonb_typeof(e) <> 'string' OR NOT ((e #>> '{}') ~ '^[a-z0-9-]{1,40}$'))
+      THEN p
+      ELSE '[]'::jsonb
+    END
   END
 $$;
 
@@ -58,8 +74,8 @@ BEGIN
            'denomination', sh.denomination, 'note_count', sh.note_count,
            'started_at', sh.floor_started_at, 'ends_at', sh.floor_ends_at,
            'floor_seconds', sh.floor_seconds, 'is_me', sh.sprayer_id IS NOT DISTINCT FROM v_me,
-           'model_url', public._floor_model_url(u.avatar_data->'model3d'->>'floorUrl', u.auth_id),
-           'moves', public._floor_moves(COALESCE(u.avatar_data->'danceMoves', '[]'::jsonb)))
+           'model_path', public._floor_model_path(u.auth_id, u.avatar_data->'floorVersion'),
+           'moves', public._floor_moves(u.avatar_data->'danceMoves'))
          ORDER BY sh.floor_slot), '[]'::jsonb)
     INTO v_floor
     FROM public.spray_holds sh JOIN public.users u ON u.id = sh.sprayer_id
@@ -98,9 +114,11 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public._floor_model_url(text, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.merge_avatar_data(uuid, jsonb) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._floor_model_path(uuid, jsonb) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public._floor_moves(jsonb) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public._floor_model_url(text, uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.merge_avatar_data(uuid, jsonb) TO service_role;
+GRANT EXECUTE ON FUNCTION public._floor_model_path(uuid, jsonb) TO service_role;
 GRANT EXECUTE ON FUNCTION public._floor_moves(jsonb) TO service_role;
 REVOKE ALL ON FUNCTION public.get_event_floor(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_event_floor(uuid) TO anon, authenticated, service_role;

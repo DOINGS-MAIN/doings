@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { MAX_FLOOR_BYTES, validateFloorGlb, validateMoves } from "./avatar.ts";
+import { MAX_FLOOR_BYTES, readCapped, validateFloorGlb, validateMoves } from "./avatar.ts";
 
 function glb(json: unknown, opts: { magic?: number; version?: number; lie?: number; pad?: number } = {}) {
   const text = new TextEncoder().encode(JSON.stringify(json));
@@ -33,6 +33,8 @@ Deno.test("validateFloorGlb rejects bad files (Review Focus 2)", () => {
   assertEquals(bad(glb(good, { pad: MAX_FLOOR_BYTES })), "too_large");
   const broken = glb(good); broken[20] = 0x7b; broken[21] = 0x7b;
   assertEquals(bad(broken), "invalid_model");
+  assertEquals(bad(glb(null)), "invalid_model"); // JSON chunk "null"
+  assertEquals(bad(glb([1, 2])), "invalid_model");
 });
 
 Deno.test("validateMoves", () => {
@@ -43,4 +45,16 @@ Deno.test("validateMoves", () => {
   assertEquals(validateMoves(["Hip Hop"]), null);
   assertEquals(validateMoves("hip-hop"), null);
   assertEquals(validateMoves([1]), null);
+});
+
+function stream(chunks: number[]) {
+  return new ReadableStream<Uint8Array>({
+    start(c) { for (const n of chunks) c.enqueue(new Uint8Array(n)); c.close(); },
+  });
+}
+
+Deno.test("readCapped stops at the limit even without a content-length (Review Focus 2)", async () => {
+  assertEquals((await readCapped(stream([10, 20]), 100))?.byteLength, 30);
+  assertEquals(await readCapped(stream([60, 60]), 100), null);
+  assertEquals((await readCapped(null, 100))?.byteLength, 0);
 });

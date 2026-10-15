@@ -1,9 +1,10 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
-import { MAX_FLOOR_BYTES, validateFloorGlb, validateMoves } from "../_shared/avatar.ts";
+import { MAX_FLOOR_BYTES, readCapped, validateFloorGlb, validateMoves } from "../_shared/avatar.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 
 const AUTH_URL = "https://us-central1-streamoji-265f4.cloudfunctions.net/getAuthToken";
 const BUCKET = "avatars";
+const FLOOR_BUCKET = "avatar-floor";
 
 function credentials() {
   const clientId = Deno.env.get("STREAMOJI_CLIENT_ID")?.trim();
@@ -56,14 +57,10 @@ async function mergeAvatarData(
   if (updateError) throw new Error(updateError.message);
 }
 
-/** Merge fields into users.avatar_data without touching the rest (floorUrl, danceMoves). */
-async function patchAvatarData(authUserId: string, patch: (current: Record<string, unknown>) => Record<string, unknown>) {
-  const supabase = getServiceClient();
-  const { data: row, error } = await supabase.from("users").select("avatar_data").eq("auth_id", authUserId).maybeSingle();
+/** Atomic merge into users.avatar_data (floorVersion, danceMoves): no lost updates between saves. */
+async function mergeAvatarFields(authUserId: string, patch: Record<string, unknown>) {
+  const { error } = await getServiceClient().rpc("merge_avatar_data", { p_auth_id: authUserId, p_patch: patch });
   if (error) throw new Error(error.message);
-  const current = row?.avatar_data && typeof row.avatar_data === "object" ? row.avatar_data as Record<string, unknown> : {};
-  const { error: updateError } = await supabase.from("users").update({ avatar_data: patch(current) }).eq("auth_id", authUserId);
-  if (updateError) throw new Error(updateError.message);
 }
 
 function isImage(bytes: Uint8Array, contentType: string): boolean {
@@ -120,25 +117,23 @@ Deno.serve(async (req) => {
     // Dance floor (new app): neither action needs Streamoji credentials.
     const url = new URL(req.url);
     if (url.searchParams.get("action") === "floor") {
-      // Refuse an oversized upload before reading it.
+      // Refuse an oversized upload before reading it, and stop reading at the cap whatever it says.
       if (Number(req.headers.get("content-length") ?? 0) > MAX_FLOOR_BYTES) {
         return withCors({ error: "Avatar file is too large", code: "too_large" }, { status: 413 });
       }
-      const bytes = new Uint8Array(await req.arrayBuffer());
+      const bytes = await readCapped(req.body, MAX_FLOOR_BYTES);
+      if (!bytes) return withCors({ error: "Avatar file is too large", code: "too_large" }, { status: 413 });
       const check = validateFloorGlb(bytes);
       if (!check.ok) return withCors({ error: check.error, code: check.code }, { status: check.code === "too_large" ? 413 : 400 });
+      // Server-only bucket: guests can't write here directly, so the floor only ever loads checked files.
       const supabase = getServiceClient();
-      const path = `${authUserId}/avatar-floor.glb`;
-      const { error: uploadError } = await supabase.storage.from(BUCKET).upload(path, bytes, {
+      const version = Date.now();
+      const { error: uploadError } = await supabase.storage.from(FLOOR_BUCKET).upload(`${authUserId}.glb`, bytes, {
         upsert: true, contentType: "model/gltf-binary", cacheControl: "3600",
       });
       if (uploadError) return withCors({ error: uploadError.message }, { status: 500 });
-      const floorUrl = `${supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl}?v=${Date.now()}`;
-      await patchAvatarData(authUserId, (cur) => ({
-        ...cur,
-        model3d: { ...(cur.model3d && typeof cur.model3d === "object" ? cur.model3d : {}), floorUrl },
-      }));
-      return withCors({ ok: true, floorUrl });
+      await mergeAvatarFields(authUserId, { floorVersion: version });
+      return withCors({ ok: true, floorPath: `${authUserId}.glb?v=${version}` });
     }
 
     const body = (await req.json().catch(() => null)) as Record<string, unknown> | null;
@@ -148,7 +143,7 @@ Deno.serve(async (req) => {
     if (action === "moves") {
       const moves = validateMoves(body?.moves);
       if (!moves) return withCors({ error: "Pick up to 3 moves", code: "invalid_moves" }, { status: 400 });
-      await patchAvatarData(authUserId, (cur) => ({ ...cur, danceMoves: moves }));
+      await mergeAvatarFields(authUserId, { danceMoves: moves });
       return withCors({ ok: true, moves });
     }
 
@@ -229,7 +224,6 @@ Deno.serve(async (req) => {
         avatarCode: null,
         subtype: null,
       };
-      // Replaces model3d, so a stale floorUrl from an older avatar is dropped (the app re-uploads it).
       await mergeAvatarData(authUserId, model3d, thumbnailUrl);
       return withCors({ ok: true, model3d, photoUrl: thumbnailUrl });
     }

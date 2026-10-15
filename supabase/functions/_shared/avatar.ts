@@ -19,6 +19,7 @@ export function validateFloorGlb(bytes: Uint8Array): Check {
   } catch {
     return invalid;
   }
+  if (!json || typeof json !== "object" || Array.isArray(json)) return invalid;
   if (!Array.isArray(json.skins) || json.skins.length === 0) return invalid;
   if (!Array.isArray(json.nodes) || !json.nodes.some((n) => (n as { name?: unknown })?.name === "Hips")) return invalid;
   return { ok: true };
@@ -32,4 +33,29 @@ export function validateMoves(raw: unknown): string[] | null {
     if (!out.includes(m)) out.push(m);
   }
   return out.length > 3 ? null : out;
+}
+
+/** Reads a request body, giving up (null) as soon as it passes `max` bytes, whatever the content-length says. */
+export async function readCapped(body: ReadableStream<Uint8Array> | null, max: number): Promise<Uint8Array | null> {
+  if (!body) return new Uint8Array(0);
+  const reader = body.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const p of parts) {
+    out.set(p, offset);
+    offset += p.byteLength;
+  }
+  return out;
 }
