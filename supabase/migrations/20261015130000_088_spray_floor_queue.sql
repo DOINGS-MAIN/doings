@@ -148,10 +148,6 @@ GRANT EXECUTE ON FUNCTION public.set_spray_floor_settings(jsonb) TO authenticate
 
 -- ── B. Settle core, queue, stop, leave ─────────────────────────────────────────────────────
 
--- Replaced by the real function in section C; defined here so B compiles on its own.
-CREATE OR REPLACE FUNCTION public.advance_event_floor(p_event_id uuid)
-RETURNS boolean LANGUAGE sql AS $$ SELECT false $$;
-
 -- Ping screens to re-read the floor. Never lets a realtime problem break money code.
 CREATE OR REPLACE FUNCTION public._floor_ping(p_event_id uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
@@ -338,3 +334,115 @@ GRANT EXECUTE ON FUNCTION public._settle_floor_hold(uuid, bigint, text) TO servi
 GRANT EXECUTE ON FUNCTION public.queue_floor_spray(uuid, uuid, bigint, int, int) TO service_role;
 GRANT EXECUTE ON FUNCTION public.stop_floor_spray(uuid, uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.leave_floor_queue(uuid, uuid) TO service_role;
+
+-- ── C. Advancing the floor ─────────────────────────────────────────────────────────────────
+
+-- Settle inside advance without letting one bad row (e.g. a sprayer whose verification was revoked)
+-- break the floor for everyone: the row's changes roll back to the savepoint, it stays where it
+-- was, the failure is logged, and the next advance retries it.
+CREATE OR REPLACE FUNCTION public._floor_try_settle(p_hold_id uuid, p_charged_kobo bigint, p_release_reason text DEFAULT NULL)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  PERFORM public._settle_floor_hold(p_hold_id, p_charged_kobo, p_release_reason);
+  RETURN true;
+EXCEPTION WHEN others THEN
+  RAISE WARNING 'floor settle failed for hold %: %', p_hold_id, SQLERRM;
+  RETURN false;
+END;
+$$;
+
+-- Idempotent. Ends finished turns, releases stale/ended holds, fills free slots (lowest first,
+-- FIFO). Only one run per event acts at a time (try-lock: a concurrent run is already doing it).
+CREATE OR REPLACE FUNCTION public.advance_event_floor(p_event_id uuid)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_status public.event_status;
+  v_settings jsonb;
+  v_changed boolean := false;
+  v_slot int;
+  v_waiting int;
+  v_secs int;
+  r RECORD;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM public.spray_holds WHERE event_id = p_event_id AND status IN ('queued', 'on_floor')) THEN
+    RETURN false;
+  END IF;
+  IF NOT pg_try_advisory_xact_lock(hashtext('floor:' || p_event_id::text)) THEN
+    RETURN false;
+  END IF;
+
+  SELECT status INTO v_status FROM public.events WHERE id = p_event_id;
+
+  IF v_status IS DISTINCT FROM 'live' THEN
+    FOR r IN SELECT id, note_count, denomination, floor_seconds, floor_started_at
+               FROM public.spray_holds WHERE event_id = p_event_id AND status = 'on_floor' LOOP
+      PERFORM public._floor_try_settle(r.id,
+        public.floor_charged_kobo(r.note_count, r.denomination, r.floor_seconds, public._floor_elapsed_ms(r.floor_started_at)),
+        'event_ended');
+    END LOOP;
+    FOR r IN SELECT id FROM public.spray_holds WHERE event_id = p_event_id AND status = 'queued' LOOP
+      PERFORM public._floor_try_settle(r.id, 0, 'event_ended');
+    END LOOP;
+    PERFORM public._floor_ping(p_event_id);
+    RETURN true;
+  END IF;
+
+  v_settings := public.floor_settings();
+
+  FOR r IN SELECT id, planned_amount_kobo FROM public.spray_holds
+            WHERE event_id = p_event_id AND status = 'on_floor' AND floor_ends_at <= now() LOOP
+    IF public._floor_try_settle(r.id, r.planned_amount_kobo) THEN v_changed := true; END IF;
+  END LOOP;
+
+  FOR r IN SELECT id FROM public.spray_holds
+            WHERE event_id = p_event_id AND status = 'queued' AND expires_at <= now() LOOP
+    IF public._floor_try_settle(r.id, 0, 'max_wait') THEN v_changed := true; END IF;
+  END LOOP;
+
+  LOOP
+    SELECT s INTO v_slot FROM generate_series(1, 8) AS s
+     WHERE NOT EXISTS (SELECT 1 FROM public.spray_holds
+                        WHERE event_id = p_event_id AND status = 'on_floor' AND floor_slot = s)
+     ORDER BY s LIMIT 1;
+    EXIT WHEN v_slot IS NULL;
+
+    SELECT id, floor_band_seconds INTO r FROM public.spray_holds
+     WHERE event_id = p_event_id AND status = 'queued'
+     ORDER BY queued_at, id LIMIT 1 FOR UPDATE;
+    EXIT WHEN NOT FOUND;
+
+    SELECT count(*) INTO v_waiting FROM public.spray_holds
+     WHERE event_id = p_event_id AND status = 'queued' AND id <> r.id;
+    v_secs := public.floor_turn_seconds(v_settings, r.floor_band_seconds, v_waiting);
+
+    UPDATE public.spray_holds
+       SET status = 'on_floor', floor_slot = v_slot, floor_seconds = v_secs,
+           floor_started_at = now(), floor_ends_at = now() + make_interval(secs => v_secs)
+     WHERE id = r.id;
+    v_changed := true;
+  END LOOP;
+
+  IF v_changed THEN PERFORM public._floor_ping(p_event_id); END IF;
+  RETURN v_changed;
+END;
+$$;
+
+-- Backstop for cron-reconciliation: rooms nobody is watching still end turns and fill slots.
+CREATE OR REPLACE FUNCTION public.advance_live_floors()
+RETURNS int LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_event uuid; v_count int := 0;
+BEGIN
+  FOR v_event IN SELECT DISTINCT event_id FROM public.spray_holds WHERE status IN ('queued', 'on_floor') LOOP
+    PERFORM public.advance_event_floor(v_event);
+    v_count := v_count + 1;
+  END LOOP;
+  RETURN v_count;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public._floor_try_settle(uuid, bigint, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.advance_event_floor(uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.advance_live_floors() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public._floor_try_settle(uuid, bigint, text) TO service_role;
+GRANT EXECUTE ON FUNCTION public.advance_event_floor(uuid) TO service_role;
+GRANT EXECUTE ON FUNCTION public.advance_live_floors() TO service_role;
