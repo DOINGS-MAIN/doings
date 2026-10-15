@@ -446,3 +446,101 @@ REVOKE ALL ON FUNCTION public.advance_live_floors() FROM PUBLIC, anon, authentic
 GRANT EXECUTE ON FUNCTION public._floor_try_settle(uuid, bigint, text) TO service_role;
 GRANT EXECUTE ON FUNCTION public.advance_event_floor(uuid) TO service_role;
 GRANT EXECUTE ON FUNCTION public.advance_live_floors() TO service_role;
+
+-- ── D. Reading the floor ───────────────────────────────────────────────────────────────────
+
+-- Seconds until the person at p_position (1-based, in line) steps on: walk the current turn ends
+-- and the people ahead with their band seconds. An estimate (people ahead can stop early).
+CREATE OR REPLACE FUNCTION public.floor_eta_seconds(p_event_id uuid, p_position int)
+RETURNS int LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_t int[]; v_band int;
+BEGIN
+  SELECT array_agg(GREATEST(0, ceil(extract(epoch FROM (floor_ends_at - now()))))::int)
+    INTO v_t FROM public.spray_holds WHERE event_id = p_event_id AND status = 'on_floor';
+  v_t := COALESCE(v_t, '{}'::int[]);
+  WHILE COALESCE(array_length(v_t, 1), 0) < 8 LOOP v_t := v_t || 0; END LOOP;
+  FOR v_band IN SELECT floor_band_seconds FROM public.spray_holds
+                 WHERE event_id = p_event_id AND status = 'queued'
+                 ORDER BY queued_at, id LIMIT GREATEST(p_position - 1, 0) LOOP
+    SELECT array_agg(x ORDER BY x) INTO v_t FROM unnest(v_t) AS x;
+    v_t[1] := v_t[1] + v_band;
+  END LOOP;
+  RETURN (SELECT min(x) FROM unnest(v_t) AS x);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_event_floor(p_event_id uuid)
+RETURNS jsonb LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_event RECORD;
+  v_me uuid;
+  v_settings jsonb;
+  v_floor jsonb;
+  v_waiting int;
+  v_my RECORD;
+  v_me_json jsonb := NULL;
+  v_pos int;
+  v_eta int;
+BEGIN
+  SELECT id, host_id, is_private INTO v_event FROM public.events WHERE id = p_event_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Event not found'; END IF;
+
+  SELECT id INTO v_me FROM public.users WHERE auth_id = auth.uid();
+  IF v_event.is_private AND NOT (
+       v_me IS NOT NULL AND (v_me = v_event.host_id OR EXISTS (
+         SELECT 1 FROM public.event_participants WHERE event_id = p_event_id AND user_id = v_me))) THEN
+    RAISE EXCEPTION 'Not authorized';
+  END IF;
+
+  PERFORM public.advance_event_floor(p_event_id);
+  v_settings := public.floor_settings();
+
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+           'hold_id', sh.id, 'slot', sh.floor_slot,
+           'name', COALESCE(NULLIF(trim(u.full_name), ''), '@' || NULLIF(trim(u.username), ''), 'Guest'),
+           'avatar_url', u.avatar_url, 'amount_kobo', sh.planned_amount_kobo,
+           'denomination', sh.denomination, 'note_count', sh.note_count,
+           'started_at', sh.floor_started_at, 'ends_at', sh.floor_ends_at,
+           'floor_seconds', sh.floor_seconds, 'is_me', sh.sprayer_id IS NOT DISTINCT FROM v_me)
+         ORDER BY sh.floor_slot), '[]'::jsonb)
+    INTO v_floor
+    FROM public.spray_holds sh JOIN public.users u ON u.id = sh.sprayer_id
+   WHERE sh.event_id = p_event_id AND sh.status = 'on_floor';
+
+  SELECT count(*) INTO v_waiting FROM public.spray_holds WHERE event_id = p_event_id AND status = 'queued';
+
+  IF v_me IS NOT NULL THEN
+    SELECT * INTO v_my FROM public.spray_holds
+     WHERE event_id = p_event_id AND sprayer_id = v_me AND queued_at IS NOT NULL
+       AND (status IN ('queued', 'on_floor') OR settled_at > now() - interval '2 minutes')
+     ORDER BY queued_at DESC LIMIT 1;
+    IF FOUND THEN
+      IF v_my.status = 'queued' THEN
+        SELECT count(*) + 1 INTO v_pos FROM public.spray_holds
+         WHERE event_id = p_event_id AND status = 'queued' AND (queued_at, id) < (v_my.queued_at, v_my.id);
+        v_eta := public.floor_eta_seconds(p_event_id, v_pos);
+      END IF;
+      v_me_json := jsonb_build_object(
+        'hold_id', v_my.id, 'status', v_my.status, 'amount_kobo', v_my.planned_amount_kobo,
+        'position', v_pos, 'eta_seconds', v_eta, 'charged_kobo', v_my.charged_amount_kobo,
+        'release_reason', v_my.release_reason);
+    END IF;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'server_now', clock_timestamp(),
+    'floor', v_floor,
+    'waiting_count', v_waiting,
+    'next_eta_seconds', public.floor_eta_seconds(p_event_id, v_waiting + 1),
+    'bands', v_settings->'bands',
+    'busy', jsonb_build_object('threshold', (v_settings->>'busy_threshold')::int,
+                               'shrink_pct', (v_settings->>'busy_shrink_pct')::int,
+                               'min_seconds', (v_settings->>'min_seconds')::int),
+    'me', v_me_json);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.floor_eta_seconds(uuid, int) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.get_event_floor(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.floor_eta_seconds(uuid, int) TO service_role;
+GRANT EXECUTE ON FUNCTION public.get_event_floor(uuid) TO anon, authenticated, service_role;
