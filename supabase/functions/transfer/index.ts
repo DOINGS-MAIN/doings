@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
     .single();
 
   if (senderErr || !sender) return withCors({ error: "User not found" }, { status: 404 });
-  if (sender.kyc_level < 2) return withCors({ error: "Complete BVN and NIN verification to send money" }, { status: 403 });
+  if (sender.kyc_level < 2) return withCors({ error: "Complete identity verification (BVN + selfie) to send money" }, { status: 403 });
 
   const body = (await req.json()) as TransferBody;
   const pinCheck = await requireTransactionPin(supabase, sender.id, body.pin);
