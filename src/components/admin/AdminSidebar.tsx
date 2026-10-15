@@ -14,6 +14,7 @@ import {
   Activity,
   ArrowLeftRight,
   Sparkles,
+  Music,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -39,7 +40,8 @@ const navItems = [
   { path: "/admin/webhooks", label: "Webhooks", icon: Webhook, permission: "webhooks" },
   { path: "/admin/payment-rails", label: "Payment Rails", icon: Route, permission: "payment_rails" },
   { path: "/admin/fx", label: "FX & Convert", icon: ArrowLeftRight, permission: "payment_rails" },
-  { path: "/admin/spray-theatre", label: "Spray Theatre", icon: Sparkles, permission: "payment_rails" },
+  { path: "/admin/dance-floor", label: "Dance Floor", icon: Music, permission: "dance_floor" },
+  { path: "/admin/spray-theatre", label: "Spray Theatre (old app)", icon: Sparkles, permission: "payment_rails" },
   { path: "/admin/kyc", label: "KYC Review", icon: FileCheck, permission: "kyc" },
   { path: "/admin/events", label: "Event Moderation", icon: Calendar, permission: "events" },
 ];

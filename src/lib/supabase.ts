@@ -515,4 +515,12 @@ export const admin = {
         p_queue_compression_tiers: payload.queueCompressionTiers,
       }),
   },
+  danceFloor: {
+    /** Floor time bands, busy-floor rule and max wait (new app's floor queue). */
+    getSettings: () => supabase.rpc("get_spray_floor_settings"),
+    setSettings: (settings: Record<string, unknown>) => supabase.rpc("set_spray_floor_settings", { p: settings }),
+    listAvatars: (search: string | null) => supabase.rpc("admin_list_floor_avatars", { p_search: search, p_limit: 100 }),
+    removeAvatar: (userId: string, reason: string) =>
+      supabase.rpc("admin_clear_floor_avatar", { p_user_id: userId, p_reason: reason }),
+  },
 };
