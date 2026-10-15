@@ -1,5 +1,6 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
-import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
+import { getAuthUserIdFromRequest, getAuthedClient, getServiceClient } from "../_shared/db.ts";
+import { floorErrorResponse, floorRateLimit, parseFloorAction } from "../_shared/floor.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
 import {
@@ -21,6 +22,7 @@ type SprayBody = {
   hold_id?: string;
   settlement?: SpraySettlement;
   sprayed_amount?: number;
+  action?: string;
 };
 
 async function resolveSprayer(supabase: ReturnType<typeof getServiceClient>, authUserId: string) {
@@ -135,6 +137,59 @@ async function settleHoldAndRespond(
   });
 }
 
+/** Dance floor: queue (hold + line), stop (server-charged), leave (release). Returns the caller's floor view. */
+async function handleFloorAction(
+  supabase: ReturnType<typeof getServiceClient>,
+  authHeader: string,
+  sprayerId: string,
+  raw: Record<string, unknown>,
+) {
+  const parsed = parseFloorAction(raw);
+  if ("error" in parsed) return withCors({ error: parsed.error }, { status: 400 });
+
+  const rl = await checkRateLimit(floorRateLimit(parsed.action, sprayerId));
+  if (!rl.allowed) return withCors({ error: "Too many spray attempts. Try again shortly." }, { status: 429 });
+
+  let eventId: string;
+  try {
+    if (parsed.action === "queue") {
+      const amountKobo = parsed.amount * 100;
+      const settings = await loadSprayTheatreSettings(supabase);
+      if (amountKobo > settings.max_single_spray_ngn_kobo) {
+        return withCors({
+          error: `Maximum spray is ₦${settings.max_single_spray_ngn.toLocaleString()}`,
+          code: "SPRAY_MAX_EXCEEDED",
+        }, { status: 400 });
+      }
+      const pinCheck = await requireTransactionPin(supabase, sprayerId, parsed.pin);
+      if (pinCheck) return pinCheck;
+      const { error } = await supabase.rpc("queue_floor_spray", {
+        p_event_id: parsed.eventId,
+        p_sprayer_id: sprayerId,
+        p_amount_kobo: amountKobo,
+        p_denomination: parsed.denomination,
+        p_note_count: parsed.amount / parsed.denomination,
+      });
+      if (error) throw new Error(error.message);
+      eventId = parsed.eventId;
+    } else {
+      const fn = parsed.action === "stop" ? "stop_floor_spray" : "leave_floor_queue";
+      const { data, error } = await supabase.rpc(fn, { p_hold_id: parsed.holdId, p_sprayer_id: sprayerId });
+      if (error) throw new Error(error.message);
+      eventId = data as string;
+    }
+  } catch (err) {
+    const mapped = floorErrorResponse(err instanceof Error ? err.message : String(err));
+    if (mapped.status === 500) console.error("floor action failed:", err);
+    return withCors({ error: mapped.error, ...(mapped.code ? { code: mapped.code } : {}) }, { status: mapped.status });
+  }
+
+  // Read as the caller so `me` (position, ETA) is theirs.
+  const { data: floor, error: floorErr } = await getAuthedClient(authHeader).rpc("get_event_floor", { p_event_id: eventId });
+  if (floorErr) console.warn("get_event_floor after action:", floorErr.message);
+  return withCors({ ok: true, floor: floorErr ? null : floor });
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return withCors({ error: "Method not allowed" }, { status: 405 });
@@ -151,6 +206,11 @@ Deno.serve(async (req) => {
   const sprayer = sprayerResult.sprayer!;
 
   const body = (await req.json()) as SprayBody;
+
+  // Dance floor requests (new app). The shapes below are the old app's and stay unchanged.
+  if (typeof body.action === "string") {
+    return await handleFloorAction(supabase, authHeader, sprayer.id, body as unknown as Record<string, unknown>);
+  }
 
   // ── Settle an existing hold (Phase 2) ──
   if (body.hold_id && body.settlement) {
