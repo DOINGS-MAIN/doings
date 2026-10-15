@@ -23,6 +23,8 @@ Deno.serve(async (req) => {
   if (cleanupErr) {
     console.warn("cleanup_spray_holds:", cleanupErr.message);
   }
+  const { data: floorsAdvanced, error: floorErr } = await supabase.rpc("advance_live_floors");
+  if (floorErr) console.warn("advance_live_floors:", floorErr.message);
 
   const { data: discrepancies, error } = await supabase.rpc("reconcile_wallets");
 
@@ -56,6 +58,7 @@ Deno.serve(async (req) => {
     reconciled_at: new Date().toISOString(),
     discrepancies_found: count,
     spray_holds_cleaned: cleanup ?? null,
+    floors_advanced: floorsAdvanced ?? null,
     bundle_orders_credited: bundlesRetried ?? null,
     bundle_orders_expired: bundlesExpired ?? null,
     discrepancies: count > 0 ? discrepancies : undefined,
