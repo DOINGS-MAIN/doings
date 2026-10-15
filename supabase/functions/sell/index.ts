@@ -106,7 +106,7 @@ Deno.serve(async (req) => {
     .maybeSingle();
   if (!user) return withCors({ error: "User not found" }, { status: 404 });
   if (user.kyc_level < 2) {
-    return withCors({ error: "Complete identity verification (BVN + NIN) to sell bundles" }, { status: 403 });
+    return withCors({ error: "Complete identity verification (BVN + selfie) to sell bundles" }, { status: 403 });
   }
 
   const url = new URL(req.url);

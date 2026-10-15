@@ -65,7 +65,7 @@ Deno.serve(async (req) => {
 
   if (!user) return withCors({ error: "User not found" }, { status: 404 });
   if (user.kyc_level < 2) {
-    return withCors({ error: "Complete BVN and NIN verification to convert" }, { status: 403 });
+    return withCors({ error: "Complete identity verification (BVN + selfie) to convert" }, { status: 403 });
   }
 
   if (req.method === "GET") {
