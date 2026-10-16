@@ -232,8 +232,8 @@ export interface AdminStats {
 // Role permissions
 export const ROLE_PERMISSIONS: Record<AdminRole, string[]> = {
   super_admin: ["*"],
-  finance: ["dashboard", "transactions", "reports", "payment_rails", "payments", "webhooks", "queue", "psp_events"],
-  support: ["dashboard", "users", "transactions.view", "payments", "webhooks", "queue", "psp_events"],
+  finance: ["dashboard", "transactions", "reports", "payment_rails", "payments", "webhooks", "queue", "psp_events", "dance_floor"],
+  support: ["dashboard", "users", "transactions.view", "payments", "webhooks", "queue", "psp_events", "dance_floor", "floor_avatars"],
   compliance: ["dashboard", "kyc", "users.view"],
   moderation: ["dashboard", "events", "users.view"],
 };
