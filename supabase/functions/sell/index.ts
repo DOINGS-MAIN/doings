@@ -359,7 +359,7 @@ Deno.serve(async (req) => {
           if (result.kind === "rejected_terminal") {
             await mergeMetadata({ failure_reason: result.message });
             await supabase.rpc("fail_bundle_sale", { p_transaction_id: txnId });
-            return withCors({ error: "The bank transfer was rejected. Your bundles are back in your purse." }, { status: 502 });
+            return withCors({ error: "The bank transfer was rejected. Your bundles are back in your bag." }, { status: 502 });
           }
           const providerRef = "providerRef" in result ? result.providerRef : reference;
           const providerStatus = "providerStatus" in result ? result.providerStatus : "";
@@ -402,7 +402,7 @@ Deno.serve(async (req) => {
         if (currency === "USDC" && isDefiniteBlockradarRejection(err)) {
           await mergeMetadata({ failure_reason: String(err).slice(0, 300) }).catch(() => {});
           await supabase.rpc("fail_bundle_sale", { p_transaction_id: txnId });
-          return withCors({ error: "The USDC payout was rejected. Your bundles are back in your purse." }, { status: 502 });
+          return withCors({ error: "The USDC payout was rejected. Your bundles are back in your bag." }, { status: 502 });
         }
         console.error("sell payout outcome unknown:", txnId, String(err));
         await mergeMetadata({ submit_error: String(err).slice(0, 300) }).catch(() => {});
