@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { cleanSearch, orIlike, parsePaging } from "./adminSearch.ts";
+import { cleanSearch, orIlike, parsePaging, quoteValue } from "./adminSearch.ts";
 
 Deno.test("cleanSearch trims, caps at 100, and empties blanks", () => {
   assertEquals(cleanSearch("  ada  "), "ada");
@@ -38,4 +38,10 @@ Deno.test("parsePaging never returns NaN, zero or out-of-range values", () => {
   assertEquals(p("limit=10000"), { page: 1, limit: 100, from: 0, to: 99 });
   assertEquals(p("page=2.7&limit=10.2"), { page: 2, limit: 10, from: 10, to: 19 });
   assertEquals(p("limit=5000", { maxLimit: 1000 }), { page: 1, limit: 1000, from: 0, to: 999 });
+});
+
+Deno.test("quoteValue makes an exact-match value safe inside or()", () => {
+  assertEquals(quoteValue("ref-123"), '"ref-123"');
+  assertEquals(quoteValue("a,b(c)"), '"a,b(c)"');
+  assertEquals(quoteValue('x"y\\z'), '"x\\"y\\\\z"');
 });

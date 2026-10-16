@@ -29,3 +29,9 @@ export function parsePaging(
   const from = (page - 1) * limit;
   return { page, limit, from, to: from + limit - 1 };
 }
+
+// A value for an exact-match condition inside `.or()` (e.g. `reference.eq.<value>`), quoted so
+// commas, brackets and quotes in it stay literal.
+export function quoteValue(value: string): string {
+  return `"${value.replace(/[\\"]/g, (c) => `\\${c}`)}"`;
+}
