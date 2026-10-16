@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { checkWithdrawalLimit } from "../_shared/limits.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
@@ -38,11 +39,13 @@ Deno.serve(async (req) => {
   const supabase = getServiceClient();
   const { data: user, error: userErr } = await supabase
     .from("users")
-    .select("id, kyc_level")
+    .select("id, kyc_level, status")
     .eq("auth_id", authUserId)
     .single();
 
   if (userErr || !user) return withCors({ error: "User not found" }, { status: 404 });
+  const blocked = accountBlock(user.status);
+  if (blocked) return withCors(blocked, { status: 403 });
   if (user.kyc_level < 2) return withCors({ error: "KYC level 2 (BVN) required for withdrawals" }, { status: 403 });
 
   const body = (await req.json()) as WithdrawBody;

@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { generateDepositAddress } from "../_shared/blockradar.ts";
 import { DEFAULT_STORAGE_NETWORK } from "../_shared/blockradarNetwork.ts";
@@ -46,7 +47,7 @@ Deno.serve(async (req) => {
   const supabase = getServiceClient();
   const { data: user } = await supabase
     .from("users")
-    .select("id, kyc_level, email, full_name, username")
+    .select("id, kyc_level, email, full_name, username, status")
     .eq("auth_id", authUserId)
     .maybeSingle();
   if (!user) return withCors({ error: "User not found" }, { status: 404 });
@@ -86,6 +87,8 @@ Deno.serve(async (req) => {
 
     // ── Checkout ──
     if (req.method === "POST" && rest[0] === "checkout") {
+      const blocked = accountBlock(user.status);
+      if (blocked) return withCors(blocked, { status: 403 });
       const body = await req.json().catch(() => ({})) as Record<string, unknown>;
       const bundles = parseBundles(body.bundles);
       if (!bundles) return withCors({ error: "Enter how many bundles to buy" }, { status: 400 });

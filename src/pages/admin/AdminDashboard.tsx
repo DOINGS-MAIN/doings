@@ -183,9 +183,7 @@ export const AdminDashboard = () => {
                 >
                   <div>
                     <p className="font-medium text-sm text-foreground">{kyc.userName}</p>
-                    <p className="text-xs text-muted-foreground capitalize">
-                      {kyc.idType.replace("_", " ")}
-                    </p>
+                    <p className="text-xs text-muted-foreground">Level {kyc.level}</p>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {formatDistanceToNow(kyc.submittedAt, { addSuffix: true })}

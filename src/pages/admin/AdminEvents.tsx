@@ -47,12 +47,16 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAdminData } from "@/hooks/useAdminData";
-import { AdminEvent } from "@/types/admin";
+import { useAdminAuth } from "@/hooks/useAdminAuth";
+import { AdminEvent, can } from "@/types/admin";
 import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 export const AdminEvents = () => {
   const { events, flagEvent, unflagEvent, endEvent } = useAdminData();
+  const { session } = useAdminAuth();
+  const canFlag = can(session?.role, "events.flag");
+  const canEnd = can(session?.role, "events.end");
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [selectedEvent, setSelectedEvent] = useState<AdminEvent | null>(null);
@@ -116,26 +120,32 @@ export const AdminEvents = () => {
     }
   };
 
-  const handleFlag = () => {
+  const runAction = async (action: () => Promise<void>, success: string) => {
+    try {
+      await action();
+      toast.success(success);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "That didn't work");
+    }
+  };
+
+  const handleFlag = async () => {
     if (!selectedEvent) return;
-    flagEvent(selectedEvent.id, flagReason);
-    toast.success("Event flagged for review");
+    const event = selectedEvent;
     setSelectedEvent(null);
     setActionType(null);
     setFlagReason("");
+    await runAction(() => flagEvent(event.id, flagReason.trim()), "Event flagged for review");
   };
 
-  const handleUnflag = (event: AdminEvent) => {
-    unflagEvent(event.id);
-    toast.success("Event unflagged");
-  };
+  const handleUnflag = (event: AdminEvent) => runAction(() => unflagEvent(event.id), "Event unflagged");
 
-  const handleEndEvent = () => {
+  const handleEndEvent = async () => {
     if (!selectedEvent) return;
-    endEvent(selectedEvent.id);
-    toast.success("Event ended successfully");
+    const event = selectedEvent;
     setSelectedEvent(null);
     setActionType(null);
+    await runAction(() => endEvent(event.id), "Event ended");
   };
 
   const EventTable = ({ eventList }: { eventList: AdminEvent[] }) => (
@@ -171,6 +181,9 @@ export const AdminEvents = () => {
                     <div>
                       <p className="font-medium text-foreground">{event.name}</p>
                       <p className="text-xs text-muted-foreground font-mono">{event.code}</p>
+                      {event.flagged && event.flagReason && (
+                        <p className="text-xs text-destructive mt-0.5">{event.flagReason}</p>
+                      )}
                     </div>
                   </div>
                 </TableCell>
@@ -203,8 +216,8 @@ export const AdminEvents = () => {
                         <Eye className="w-4 h-4 mr-2" />
                         View Details
                       </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      {event.flagged ? (
+                      {(canFlag || (canEnd && event.status === "live")) && <DropdownMenuSeparator />}
+                      {!canFlag ? null : event.flagged ? (
                         <DropdownMenuItem onClick={() => handleUnflag(event)}>
                           <FlagOff className="w-4 h-4 mr-2" />
                           Remove Flag
@@ -221,7 +234,7 @@ export const AdminEvents = () => {
                           Flag Event
                         </DropdownMenuItem>
                       )}
-                      {event.status === "live" && (
+                      {canEnd && event.status === "live" && (
                         <DropdownMenuItem 
                           onClick={() => {
                             setSelectedEvent(event);

@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
@@ -110,7 +111,7 @@ Deno.serve(async (req) => {
   const supabase = getServiceClient();
   const { data: user, error: userErr } = await supabase
     .from("users")
-    .select("id, kyc_level")
+    .select("id, kyc_level, status")
     .eq("auth_id", authUserId)
     .single();
 
@@ -211,6 +212,8 @@ Deno.serve(async (req) => {
   }
 
   if (req.method === "POST" && action === "redeem") {
+    const blocked = accountBlock(user.status);
+    if (blocked) return withCors(blocked, { status: 403 });
     const body = (await req.json()) as RedeemBody;
     if (!body.code) return withCors({ error: "code is required" }, { status: 400 });
 
@@ -263,6 +266,8 @@ Deno.serve(async (req) => {
   }
 
   if (req.method === "POST" && action === "root") {
+    const blocked = accountBlock(user.status);
+    if (blocked) return withCors(blocked, { status: 403 });
     // Bundles model: creating a giveaway needs a verified email (KYC level 1).
     if (user.kyc_level < 1) {
       return withCors({ error: "Verify your email to create giveaways" }, { status: 403 });

@@ -33,7 +33,8 @@ import { AdminChangePassword } from "./pages/admin/AdminChangePassword";
 import { AdminSettings } from "./pages/admin/AdminSettings";
 import { AdminPaymentRails } from "./pages/admin/AdminPaymentRails";
 import { AdminFxSettings } from "./pages/admin/AdminFxSettings";
-import { AdminSprayTheatreSettings } from "./pages/admin/AdminSprayTheatreSettings";
+import { AdminTeam } from "./pages/admin/AdminTeam";
+import { AdminAuditLog } from "./pages/admin/AdminAuditLog";
 import { AdminDanceFloor } from "./pages/admin/AdminDanceFloor";
 import { AdminAds } from "./pages/admin/AdminAds";
 import { AdminPaymentsOverview } from "./pages/admin/AdminPaymentsOverview";
@@ -87,11 +88,12 @@ const App = () => (
               <Route path="webhooks" element={<AdminWebhooks />} />
               <Route path="payment-rails" element={<AdminPaymentRails />} />
               <Route path="fx" element={<AdminFxSettings />} />
-              <Route path="spray-theatre" element={<AdminSprayTheatreSettings />} />
               <Route path="dance-floor" element={<AdminDanceFloor />} />
               <Route path="ads" element={<AdminAds />} />
               <Route path="kyc" element={<AdminKYC />} />
               <Route path="events" element={<AdminEvents />} />
+              <Route path="team" element={<AdminTeam />} />
+              <Route path="audit" element={<AdminAuditLog />} />
               <Route path="settings" element={<AdminSettings />} />
             </Route>
           </Route>

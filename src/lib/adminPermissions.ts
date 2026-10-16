@@ -1,30 +1,21 @@
-import { AdminRole, ROLE_PERMISSIONS } from "@/types/admin";
-
-function hasPermission(role: AdminRole, permission: string): boolean {
-  const permissions = ROLE_PERMISSIONS[role] ?? [];
-  return (
-    permissions.includes("*") ||
-    permissions.includes(permission) ||
-    permissions.some((p) => permission.startsWith(p.replace(".view", "")))
-  );
-}
+import { AdminRole, can } from "@/types/admin";
 
 export function canViewPayments(role: AdminRole): boolean {
-  return hasPermission(role, "payments") || hasPermission(role, "transactions");
+  return can(role, "payments") || can(role, "transactions.view");
 }
 
 export function canWritePayments(role: AdminRole): boolean {
-  return role === "super_admin" || role === "finance";
+  return can(role, "transactions.write");
 }
 
 export function canViewWebhooks(role: AdminRole): boolean {
-  return hasPermission(role, "webhooks");
+  return can(role, "webhooks.view");
 }
 
 export function canWriteWebhooks(role: AdminRole): boolean {
-  return canWritePayments(role);
+  return can(role, "webhooks.write");
 }
 
 export function canManagePaymentRails(role: AdminRole): boolean {
-  return canWritePayments(role);
+  return can(role, "payment_rails");
 }

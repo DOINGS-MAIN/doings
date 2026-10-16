@@ -4,17 +4,22 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.8
 import { getPlatformPaymentSettings } from "../_shared/psp/platformSettings.ts";
 import { probeProviderHealth } from "../_shared/psp/registry.ts";
 import { reprocessWebhookLog } from "../_shared/reprocessWebhook.ts";
+import { can, escapeLikePattern, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
 
 const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") ?? "15");
 
 const RESERVED_ACTIONS = new Set([
-  "suspend", "unsuspend", "ban", "flag", "unflag", "approve", "reject", "end",
-  "invite", "disable", "enable", "refund", "reprocess", "export", "probe-all", "health",
+  "suspend", "unsuspend", "ban", "unban", "flag", "unflag", "approve", "reject", "end",
+  "invite", "accept", "disable", "enable", "role", "refund", "reprocess", "export", "probe-all", "health",
 ]);
 
-function canWritePayments(role: string): boolean {
-  return role === "super_admin" || role === "finance";
-}
+// Bans last until an admin lifts them (100 years).
+const AUTH_BAN_DURATION = "876000h";
+
+// Explicit user detail columns: never PIN hashes or other secrets.
+const USER_DETAIL_COLUMNS =
+  "id, auth_id, phone, email, full_name, username, avatar_url, kyc_level, status, suspended_reason, suspended_at, suspended_by, " +
+  "date_of_birth, address, referral_code, referred_by, last_active_at, transaction_pin_set_at, transaction_pin_locked_until, created_at, updated_at";
 
 function csvEscape(value: unknown): string {
   const s = value == null ? "" : String(value);
@@ -138,16 +143,59 @@ async function requireAdmin(req: Request) {
   if (!authUserId) throw { status: 401, message: "Unauthorized" };
 
   const supabase = getServiceClient();
-  const { data: adminRole } = await supabase
+  const { data: rows, error } = await supabase
     .from("admin_roles")
-    .select("role, status")
+    .select("id, role, status")
     .eq("user_id", authUserId)
-    .eq("status", "active")
+    .in("status", ["active", "invited"]);
+  if (error) throw { status: 500, message: "Admin lookup failed" };
+
+  const active = (rows ?? []).find((r) => r.status === "active");
+  const invited = (rows ?? []).find((r) => r.status === "invited");
+  if (!active && !invited) throw { status: 403, message: "Not an admin" };
+
+  return {
+    authId: authUserId,
+    role: active ? active.role as string : "",
+    activeRowId: active ? active.id as string : null,
+    invitedRowId: active ? null : invited!.id as string,
+    supabase,
+  };
+}
+
+// The auth user id for an email: app users first, then a scan of auth users.
+async function findAuthUserIdByEmail(supabase: SupabaseClient, email: string): Promise<string | null> {
+  const { data: appUser } = await supabase
+    .from("users")
+    .select("auth_id")
+    .ilike("email", escapeLikePattern(email))
+    .not("auth_id", "is", null)
+    .limit(1)
     .maybeSingle();
+  if (appUser?.auth_id) {
+    // The sign-in email is the authority; the profile email is only a shortcut to it.
+    const { data: authUser } = await supabase.auth.admin.getUserById(appUser.auth_id as string);
+    if ((authUser?.user?.email ?? "").toLowerCase() === email) return appUser.auth_id as string;
+  }
 
-  if (!adminRole) throw { status: 403, message: "Not an admin" };
+  for (let page = 1; page <= 50; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw error;
+    const match = data.users.find((u) => (u.email ?? "").toLowerCase() === email);
+    if (match) return match.id;
+    if (data.users.length < 1000) break;
+  }
+  return null;
+}
 
-  return { authId: authUserId, role: adminRole.role as string, supabase };
+async function countActiveSuperAdmins(supabase: SupabaseClient): Promise<number> {
+  const { count, error } = await supabase
+    .from("admin_roles")
+    .select("id", { count: "exact", head: true })
+    .eq("role", "super_admin")
+    .eq("status", "active");
+  if (error) throw error;
+  return count ?? 0;
 }
 
 Deno.serve(async (req) => {
@@ -161,10 +209,33 @@ Deno.serve(async (req) => {
     return withCors({ error: e.message ?? "Unauthorized" }, { status: e.status ?? 401 });
   }
 
-  const { supabase, authId, role } = admin;
+  const { supabase, authId, role, activeRowId, invitedRowId } = admin;
   const route = parseRoute(req.url);
+  const routeAction = "action" in route ? route.action : undefined;
+  const routeId = "id" in route ? route.id : undefined;
 
   try {
+    // ── ACCEPT INVITE ── called on every admin sign-in: activates a pending invite, else records the login.
+    if (route.resource === "team" && req.method === "POST" && routeAction === "accept") {
+      if (!invitedRowId) {
+        await supabase.from("admin_roles").update({ last_login_at: new Date().toISOString() }).eq("id", activeRowId!);
+        return withCors({ ok: true });
+      }
+      const { error } = await supabase
+        .from("admin_roles")
+        .update({ status: "active", must_change_password: false, last_login_at: new Date().toISOString() })
+        .eq("id", invitedRowId)
+        .eq("status", "invited");
+      if (error) throw error;
+      await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "accept_admin_invite", p_target_type: "admin", p_target_id: invitedRowId });
+      return withCors({ ok: true });
+    }
+    if (invitedRowId) return withCors({ error: "Accept your admin invite first" }, { status: 403 });
+
+    const perm = permissionFor(route.resource, req.method, routeAction, !!routeId);
+    if (!perm) return withCors({ error: "Not found" }, { status: 404 });
+    if (!can(role, perm)) return withCors({ error: "Your admin role can't do this" }, { status: 403 });
+
     // ── STATS ──
     if (route.resource === "stats" && req.method === "GET") {
       const today = new Date();
@@ -223,7 +294,7 @@ Deno.serve(async (req) => {
       if (req.method === "GET" && route.id) {
         const { data, error } = await supabase
           .from("users")
-          .select("*, wallets(id, currency, balance, locked_balance)")
+          .select(`${USER_DETAIL_COLUMNS}, wallets(id, currency, balance, locked_balance)`)
           .eq("id", route.id)
           .single();
         if (error) throw error;
@@ -242,23 +313,52 @@ Deno.serve(async (req) => {
       }
 
       if (req.method === "POST" && route.action === "unsuspend" && route.id) {
-        const { error } = await supabase
+        // Only lifts a suspension; a ban is lifted with unban (which also clears the sign-in ban).
+        const { data, error } = await supabase
           .from("users")
           .update({ status: "active", suspended_reason: null, suspended_at: null, suspended_by: null })
-          .eq("id", route.id);
+          .eq("id", route.id)
+          .eq("status", "suspended")
+          .select("id");
         if (error) throw error;
+        if (!data?.length) return withCors({ error: "User is not suspended" }, { status: 409 });
         await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "unsuspend_user", p_target_type: "user", p_target_id: route.id });
         return withCors({ ok: true });
       }
 
       if (req.method === "POST" && route.action === "ban" && route.id) {
-        const body = await req.json();
-        const { error } = await supabase
+        const body = await req.json().catch(() => ({})) as { reason?: string };
+        const { data, error } = await supabase
           .from("users")
           .update({ status: "banned", suspended_reason: body.reason ?? "Banned by admin", suspended_at: new Date().toISOString(), suspended_by: authId })
-          .eq("id", route.id);
+          .eq("id", route.id)
+          .select("auth_id");
         if (error) throw error;
+        if (!data?.length) return withCors({ error: "User not found" }, { status: 404 });
+        const banAuthId = data[0].auth_id as string | null;
+        if (banAuthId) {
+          const { error: banErr } = await supabase.auth.admin.updateUserById(banAuthId, { ban_duration: AUTH_BAN_DURATION });
+          if (banErr) throw banErr;
+        }
         await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "ban_user", p_target_type: "user", p_target_id: route.id, p_details: { reason: body.reason } });
+        return withCors({ ok: true });
+      }
+
+      if (req.method === "POST" && route.action === "unban" && route.id) {
+        const { data, error } = await supabase
+          .from("users")
+          .update({ status: "active", suspended_reason: null, suspended_at: null, suspended_by: null })
+          .eq("id", route.id)
+          .eq("status", "banned")
+          .select("auth_id");
+        if (error) throw error;
+        if (!data?.length) return withCors({ error: "User is not banned" }, { status: 409 });
+        const unbanAuthId = data[0].auth_id as string | null;
+        if (unbanAuthId) {
+          const { error: banErr } = await supabase.auth.admin.updateUserById(unbanAuthId, { ban_duration: "none" });
+          if (banErr) throw banErr;
+        }
+        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "unban_user", p_target_type: "user", p_target_id: route.id });
         return withCors({ ok: true });
       }
     }
@@ -414,7 +514,6 @@ Deno.serve(async (req) => {
       }
 
       if (req.method === "POST" && route.action === "flag" && route.id) {
-        if (!canWritePayments(role)) return withCors({ error: "Finance or super admin required" }, { status: 403 });
         const body = await req.json();
         const { error } = await supabase
           .from("transactions")
@@ -432,7 +531,6 @@ Deno.serve(async (req) => {
       }
 
       if (req.method === "POST" && route.action === "unflag" && route.id) {
-        if (!canWritePayments(role)) return withCors({ error: "Finance or super admin required" }, { status: 403 });
         const { error } = await supabase
           .from("transactions")
           .update({
@@ -449,7 +547,6 @@ Deno.serve(async (req) => {
       }
 
       if (req.method === "POST" && route.action === "refund" && route.id) {
-        if (!canWritePayments(role)) return withCors({ error: "Finance or super admin required" }, { status: 403 });
         const body = await req.json().catch(() => ({})) as { reason?: string };
         const { data: refundTxnId, error } = await supabase.rpc("admin_refund_transaction", {
           p_transaction_id: route.id,
@@ -461,44 +558,25 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── KYC ──
+    // ── KYC ── read-only: verification is automated (Dojah), admins only see results.
     if (route.resource === "kyc") {
       if (req.method === "GET" && !route.id) {
         const url = new URL(req.url);
-        const status = url.searchParams.get("status") ?? "pending";
+        const status = url.searchParams.get("status");
         const page = Number(url.searchParams.get("page") ?? 1);
         const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 100);
 
-        const { data, count, error } = await supabase
+        let query = supabase
           .from("kyc_verifications")
           .select("id, user_id, level, status, provider, bvn_last_four, nin_last_four, selfie_match_confidence, submitted_at, verified_at, reviewed_by, rejection_reason, created_at", { count: "exact" })
-          .eq("status", status)
           .order("created_at", { ascending: false })
           .range((page - 1) * limit, page * limit - 1);
+        if (status && status !== "all") query = query.eq("status", status);
 
+        const { data, count, error } = await query;
         if (error) throw error;
-        return withCors({ submissions: data, total: count, page, limit });
-      }
-
-      if (req.method === "POST" && route.action === "approve" && route.id) {
-        const { error } = await supabase
-          .from("kyc_verifications")
-          .update({ status: "verified", reviewed_by: authId, reviewed_at: new Date().toISOString(), verified_at: new Date().toISOString() })
-          .eq("id", route.id);
-        if (error) throw error;
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "approve_kyc", p_target_type: "kyc", p_target_id: route.id });
-        return withCors({ ok: true });
-      }
-
-      if (req.method === "POST" && route.action === "reject" && route.id) {
-        const body = await req.json();
-        const { error } = await supabase
-          .from("kyc_verifications")
-          .update({ status: "rejected", reviewed_by: authId, reviewed_at: new Date().toISOString(), rejection_reason: body.reason ?? "Rejected by admin" })
-          .eq("id", route.id);
-        if (error) throw error;
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "reject_kyc", p_target_type: "kyc", p_target_id: route.id, p_details: { reason: body.reason } });
-        return withCors({ ok: true });
+        const submissions = await attachUserFields(supabase, data ?? []);
+        return withCors({ submissions, total: count, page, limit });
       }
     }
 
@@ -512,7 +590,10 @@ Deno.serve(async (req) => {
 
         let query = supabase
           .from("events")
-          .select("id, host_id, title, code, type, status, is_public, max_participants, created_at, started_at, ended_at", { count: "exact" })
+          .select(
+            "id, host_id, title, event_code, type, status, is_private, max_participants, participant_count, total_sprayed, flagged, flag_reason, created_at, started_at, ended_at, scheduled_at",
+            { count: "exact" },
+          )
           .order("created_at", { ascending: false })
           .range((page - 1) * limit, page * limit - 1);
 
@@ -520,7 +601,34 @@ Deno.serve(async (req) => {
 
         const { data, count, error } = await query;
         if (error) throw error;
-        return withCors({ events: data, total: count, page, limit });
+        const hosts = await loadUsersById(supabase, (data ?? []).map((e) => e.host_id as string));
+        const events = (data ?? []).map((e) => ({ ...e, host_name: hosts.get(e.host_id as string)?.full_name ?? "" }));
+        return withCors({ events, total: count, page, limit });
+      }
+
+      if (req.method === "POST" && route.action === "flag" && route.id) {
+        const body = await req.json().catch(() => ({})) as { reason?: string };
+        const { data, error } = await supabase
+          .from("events")
+          .update({ flagged: true, flag_reason: body.reason ?? "Flagged by admin", flagged_by: authId, flagged_at: new Date().toISOString() })
+          .eq("id", route.id)
+          .select("id");
+        if (error) throw error;
+        if (!data?.length) return withCors({ error: "Event not found" }, { status: 404 });
+        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "flag_event", p_target_type: "event", p_target_id: route.id, p_details: { reason: body.reason } });
+        return withCors({ ok: true });
+      }
+
+      if (req.method === "POST" && route.action === "unflag" && route.id) {
+        const { data, error } = await supabase
+          .from("events")
+          .update({ flagged: false, flag_reason: null, flagged_by: null, flagged_at: null })
+          .eq("id", route.id)
+          .select("id");
+        if (error) throw error;
+        if (!data?.length) return withCors({ error: "Event not found" }, { status: 404 });
+        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "unflag_event", p_target_type: "event", p_target_id: route.id });
+        return withCors({ ok: true });
       }
 
       if (req.method === "POST" && route.action === "end" && route.id) {
@@ -534,7 +642,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── TEAM ──
+    // ── TEAM ── (super admins only, via the matrix)
     if (route.resource === "team") {
       if (req.method === "GET") {
         const { data, error } = await supabase
@@ -542,58 +650,102 @@ Deno.serve(async (req) => {
           .select("id, user_id, role, status, invited_email, last_login_at, created_at")
           .order("created_at", { ascending: false });
         if (error) throw error;
-        return withCors({ team: data });
+        const team = await Promise.all((data ?? []).map(async (m) => {
+          let email = (m.invited_email as string | null) ?? "";
+          if (!email) {
+            const { data: u } = await supabase.auth.admin.getUserById(m.user_id as string);
+            email = u?.user?.email ?? "";
+          }
+          return { ...m, email };
+        }));
+        return withCors({ team });
       }
 
       if (req.method === "POST" && route.action === "invite") {
-        if (role !== "super_admin") return withCors({ error: "Only super admins can invite team members" }, { status: 403 });
-        const body = await req.json();
-        if (!body.email || !body.role) return withCors({ error: "email and role are required" }, { status: 400 });
+        const body = await req.json().catch(() => ({})) as { email?: string; role?: string };
+        const email = (body.email ?? "").trim().toLowerCase();
+        if (!email || !body.role) return withCors({ error: "email and role are required" }, { status: 400 });
+        if (!isAdminRole(body.role)) return withCors({ error: "Unknown role" }, { status: 400 });
 
-        const { data: authUser } = await supabase.auth.admin.createUser({
-          email: body.email,
-          password: crypto.randomUUID(),
-          email_confirm: true,
-          user_metadata: { role: body.role, invited: true },
-        });
+        let inviteeId = await findAuthUserIdByEmail(supabase, email);
+        if (inviteeId) {
+          const { data: existing } = await supabase.from("admin_roles").select("id").eq("user_id", inviteeId).limit(1);
+          if (existing?.length) return withCors({ error: "This person is already on the team" }, { status: 409 });
+        } else {
+          const origin = req.headers.get("origin");
+          const { data: invited, error: inviteErr } = await supabase.auth.admin.inviteUserByEmail(email, {
+            redirectTo: origin ? `${origin}/admin/change-password` : undefined,
+            data: { admin_invite: true },
+          });
+          if (inviteErr || !invited?.user) {
+            return withCors({ error: "Couldn't send the invite", detail: inviteErr?.message }, { status: 502 });
+          }
+          inviteeId = invited.user.id;
+        }
 
-        if (!authUser?.user) return withCors({ error: "Failed to create auth user" }, { status: 500 });
-
-        const { error } = await supabase.from("admin_roles").insert({
-          user_id: authUser.user.id,
+        const { data: row, error } = await supabase.from("admin_roles").insert({
+          user_id: inviteeId,
           role: body.role,
           invited_by: authId,
-          invited_email: body.email,
+          invited_email: email,
           status: "invited",
           must_change_password: true,
-        });
+        }).select("id").single();
         if (error) throw error;
 
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "invite_admin", p_target_type: "admin", p_details: { email: body.email, role: body.role } });
+        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "invite_admin", p_target_type: "admin", p_target_id: row.id, p_details: { email, role: body.role } });
         return withCors({ ok: true }, { status: 201 });
       }
 
-      if (req.method === "POST" && route.action === "disable" && route.id) {
-        if (role !== "super_admin") return withCors({ error: "Only super admins can disable team members" }, { status: 403 });
-        const { error } = await supabase.from("admin_roles").update({ status: "disabled" }).eq("id", route.id);
-        if (error) throw error;
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "disable_admin", p_target_type: "admin", p_target_id: route.id });
-        return withCors({ ok: true });
-      }
+      if (req.method === "POST" && route.id && ["disable", "enable", "role"].includes(route.action ?? "")) {
+        const { data: target, error: targetErr } = await supabase
+          .from("admin_roles")
+          .select("id, user_id, role, status")
+          .eq("id", route.id)
+          .maybeSingle();
+        if (targetErr) throw targetErr;
+        if (!target) return withCors({ error: "Team member not found" }, { status: 404 });
 
-      if (req.method === "POST" && route.action === "enable" && route.id) {
-        if (role !== "super_admin") return withCors({ error: "Only super admins can enable team members" }, { status: 403 });
-        const { error } = await supabase.from("admin_roles").update({ status: "active" }).eq("id", route.id);
+        if (route.action === "enable") {
+          const { error } = await supabase.from("admin_roles").update({ status: "active" }).eq("id", route.id);
+          if (error) throw error;
+          await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "enable_admin", p_target_type: "admin", p_target_id: route.id });
+          return withCors({ ok: true });
+        }
+
+        const body = route.action === "role"
+          ? await req.json().catch(() => ({})) as { role?: string }
+          : {};
+        if (route.action === "role" && !body.role) return withCors({ error: "role is required" }, { status: 400 });
+
+        // Only an active super admin counts towards "the last one".
+        const reason = teamChangeAllowed({
+          actorAuthId: authId,
+          targetUserId: target.user_id as string,
+          targetRole: target.status === "active" ? target.role as string : "inactive",
+          newRole: route.action === "role" ? body.role : undefined,
+          disable: route.action === "disable",
+          activeSuperAdmins: await countActiveSuperAdmins(supabase),
+        });
+        if (reason) return withCors({ error: reason }, { status: 409 });
+
+        if (route.action === "disable") {
+          const { error } = await supabase.from("admin_roles").update({ status: "disabled" }).eq("id", route.id);
+          if (error) throw error;
+          await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "disable_admin", p_target_type: "admin", p_target_id: route.id });
+          return withCors({ ok: true });
+        }
+
+        const { error } = await supabase.from("admin_roles").update({ role: body.role }).eq("id", route.id);
+        if (error?.code === "23505") return withCors({ error: "This person already has that role" }, { status: 409 });
         if (error) throw error;
+        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "change_admin_role", p_target_type: "admin", p_target_id: route.id, p_details: { from: target.role, to: body.role } });
         return withCors({ ok: true });
       }
     }
 
     // ── PAYMENT RAILS ──
     if (route.resource === "payment-rails") {
-      if (role !== "super_admin" && role !== "finance") {
-        return withCors({ error: "Finance or super admin access required" }, { status: 403 });
-      }
 
       if (req.method === "GET" && route.action === "health" && route.id) {
         const platform = await getPlatformPaymentSettings(supabase);
@@ -640,7 +792,6 @@ Deno.serve(async (req) => {
       }
 
       if (req.method === "POST" && route.action === "probe-all") {
-        if (!canWritePayments(role)) return withCors({ error: "Finance or super admin required" }, { status: 403 });
         const platform = await getPlatformPaymentSettings(supabase);
         const { data: providers } = await supabase.from("psp_providers").select("id").in("status", ["active", "sandbox_only"]);
         const results: Record<string, unknown>[] = [];
@@ -671,9 +822,6 @@ Deno.serve(async (req) => {
 
     // ── PAYMENTS OVERVIEW ──
     if (route.resource === "payments" && req.method === "GET" && !route.id) {
-      if (role !== "super_admin" && role !== "finance" && role !== "support") {
-        return withCors({ error: "Access denied" }, { status: 403 });
-      }
 
       const now = new Date();
       const todayStart = new Date(now);
@@ -807,9 +955,6 @@ Deno.serve(async (req) => {
 
     // ── WEBHOOK LOGS ──
     if (route.resource === "webhooks") {
-      if (role !== "super_admin" && role !== "finance" && role !== "support") {
-        return withCors({ error: "Access denied" }, { status: 403 });
-      }
 
       if (req.method === "GET" && route.id) {
         const { data, error } = await supabase
@@ -870,7 +1015,6 @@ Deno.serve(async (req) => {
       }
 
       if (req.method === "POST" && route.action === "reprocess" && route.id) {
-        if (!canWritePayments(role)) return withCors({ error: "Finance or super admin required" }, { status: 403 });
 
         const { data: webhook, error } = await supabase
           .from("webhook_logs")
@@ -905,9 +1049,6 @@ Deno.serve(async (req) => {
 
     // ── REVIEW QUEUE ──
     if (route.resource === "queue" && req.method === "GET") {
-      if (role !== "super_admin" && role !== "finance" && role !== "support") {
-        return withCors({ error: "Access denied" }, { status: 403 });
-      }
 
       const cutoff = new Date(Date.now() - STUCK_AFTER_MINUTES * 60 * 1000).toISOString();
 
@@ -946,9 +1087,6 @@ Deno.serve(async (req) => {
 
     // ── PSP EVENTS ──
     if (route.resource === "psp-events" && req.method === "GET") {
-      if (role !== "super_admin" && role !== "finance" && role !== "support") {
-        return withCors({ error: "Access denied" }, { status: 403 });
-      }
 
       const url = new URL(req.url);
       const page = Number(url.searchParams.get("page") ?? 1);
@@ -997,14 +1135,27 @@ Deno.serve(async (req) => {
       const page = Number(url.searchParams.get("page") ?? 1);
       const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 100);
 
-      const { data, count, error } = await supabase
+      const action = url.searchParams.get("action");
+      const adminId = url.searchParams.get("admin_id");
+
+      let query = supabase
         .from("admin_audit_log")
-        .select("*", { count: "exact" })
+        .select("id, admin_user_id, action, target_type, target_id, details, created_at", { count: "exact" })
         .order("created_at", { ascending: false })
         .range((page - 1) * limit, page * limit - 1);
+      if (action) query = query.eq("action", action);
+      if (adminId) query = query.eq("admin_user_id", adminId);
 
+      const { data, count, error } = await query;
       if (error) throw error;
-      return withCors({ logs: data, total: count, page, limit });
+
+      const emails = new Map<string, string>();
+      await Promise.all([...new Set((data ?? []).map((r) => r.admin_user_id as string))].map(async (id) => {
+        const { data: u } = await supabase.auth.admin.getUserById(id);
+        emails.set(id, u?.user?.email ?? "");
+      }));
+      const logs = (data ?? []).map((r) => ({ ...r, admin_email: emails.get(r.admin_user_id as string) ?? "" }));
+      return withCors({ logs, total: count, page, limit });
     }
 
     return withCors({ error: "Not found" }, { status: 404 });

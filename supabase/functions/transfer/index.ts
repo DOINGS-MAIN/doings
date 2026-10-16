@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient, resolveAppUserId } from "../_shared/db.ts";
 import { checkTransferLimit } from "../_shared/limits.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
@@ -32,11 +33,13 @@ Deno.serve(async (req) => {
 
   const { data: sender, error: senderErr } = await supabase
     .from("users")
-    .select("id, kyc_level")
+    .select("id, kyc_level, status")
     .eq("id", senderId)
     .single();
 
   if (senderErr || !sender) return withCors({ error: "User not found" }, { status: 404 });
+  const blocked = accountBlock(sender.status);
+  if (blocked) return withCors(blocked, { status: 403 });
   if (sender.kyc_level < 2) return withCors({ error: "Complete identity verification (BVN + selfie) to send money" }, { status: 403 });
 
   const body = (await req.json()) as TransferBody;
