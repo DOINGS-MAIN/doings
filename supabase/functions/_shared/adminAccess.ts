@@ -86,3 +86,8 @@ export function teamChangeAllowed(p: {
   if (p.targetRole === "super_admin" && p.activeSuperAdmins <= 1) return "You can't remove the last active super admin";
   return null;
 }
+
+// Escapes LIKE wildcards so an ilike filter matches the value exactly (case-insensitively).
+export function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+}

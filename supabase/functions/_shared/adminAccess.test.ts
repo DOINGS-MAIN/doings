@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { can, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed } from "./adminAccess.ts";
+import { can, escapeLikePattern, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed } from "./adminAccess.ts";
 
 const ROLES = ["super_admin", "finance", "support", "compliance", "moderation"] as const;
 
@@ -112,4 +112,11 @@ Deno.test("teamChangeAllowed allows normal changes", () => {
 
 Deno.test("teamChangeAllowed refuses unknown roles", () => {
   assertEquals(typeof teamChangeAllowed({ ...base, newRole: "god" }), "string");
+});
+
+Deno.test("escapeLikePattern makes an email match only itself in ilike", () => {
+  assertEquals(escapeLikePattern("john_doe@x.com"), "john\\_doe@x.com");
+  assertEquals(escapeLikePattern("100%@x.com"), "100\\%@x.com");
+  assertEquals(escapeLikePattern("a\\b@x.com"), "a\\\\b@x.com");
+  assertEquals(escapeLikePattern("plain@x.com"), "plain@x.com");
 });

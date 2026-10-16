@@ -4,7 +4,7 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.8
 import { getPlatformPaymentSettings } from "../_shared/psp/platformSettings.ts";
 import { probeProviderHealth } from "../_shared/psp/registry.ts";
 import { reprocessWebhookLog } from "../_shared/reprocessWebhook.ts";
-import { can, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
+import { can, escapeLikePattern, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
 
 const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") ?? "15");
 
@@ -167,11 +167,15 @@ async function findAuthUserIdByEmail(supabase: SupabaseClient, email: string): P
   const { data: appUser } = await supabase
     .from("users")
     .select("auth_id")
-    .ilike("email", email)
+    .ilike("email", escapeLikePattern(email))
     .not("auth_id", "is", null)
     .limit(1)
     .maybeSingle();
-  if (appUser?.auth_id) return appUser.auth_id as string;
+  if (appUser?.auth_id) {
+    // The sign-in email is the authority; the profile email is only a shortcut to it.
+    const { data: authUser } = await supabase.auth.admin.getUserById(appUser.auth_id as string);
+    if ((authUser?.user?.email ?? "").toLowerCase() === email) return appUser.auth_id as string;
+  }
 
   for (let page = 1; page <= 50; page++) {
     const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
