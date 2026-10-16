@@ -593,7 +593,9 @@ Deno.serve(async (req) => {
 
         const { data, count, error } = await query;
         if (error) throw error;
-        return withCors({ events: data, total: count, page, limit });
+        const hosts = await loadUsersById(supabase, (data ?? []).map((e) => e.host_id as string));
+        const events = (data ?? []).map((e) => ({ ...e, host_name: hosts.get(e.host_id as string)?.full_name ?? "" }));
+        return withCors({ events, total: count, page, limit });
       }
 
       if (req.method === "POST" && route.action === "flag" && route.id) {
