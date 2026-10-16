@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { formatDbError, isUniqueViolation } from "../_shared/errors.ts";
 
@@ -26,7 +27,7 @@ Deno.serve(async (req) => {
   const supabase = getServiceClient();
   const { data: user, error: userErr } = await supabase
     .from("users")
-    .select("id")
+    .select("id, status")
     .eq("auth_id", authUserId)
     .single();
   if (userErr || !user) return withCors({ error: "User not found" }, { status: 404 });
@@ -36,6 +37,8 @@ Deno.serve(async (req) => {
   // - `event_code`: DB trigger `generate_event_code()` assigns a unique 6-char code if omitted.
   // - `max_participants`: NULL = unlimited; integer > 0 = cap (enforced on POST /:id/join).
   if (method === "POST" && !path) {
+    const blocked = accountBlock(user.status);
+    if (blocked) return withCors(blocked, { status: 403 });
     const body = (await req.json()) as Record<string, unknown>;
     let event_date: string | null = (body.event_date as string) ?? null;
     let event_time: string | null = (body.event_time as string) ?? null;
@@ -232,6 +235,8 @@ Deno.serve(async (req) => {
 
   // POST /:id/go-live
   if (method === "POST" && action === "go-live") {
+    const blocked = accountBlock(user.status);
+    if (blocked) return withCors(blocked, { status: 403 });
     if (hostEvent.status === "live") return withCors({ ok: true, already_live: true });
     if (hostEvent.status === "ended") return withCors({ error: "Cannot reopen an ended event" }, { status: 400 });
 

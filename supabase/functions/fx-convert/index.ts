@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient, resolveAppUserId } from "../_shared/db.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
@@ -21,6 +22,9 @@ Deno.serve(async (req) => {
   const supabase = getServiceClient();
   const userId = await resolveAppUserId(authHeader);
   if (!userId) return withCors({ error: "User not found" }, { status: 404 });
+  const { data: account } = await supabase.from("users").select("status").eq("id", userId).maybeSingle();
+  const blocked = accountBlock(account?.status);
+  if (blocked) return withCors(blocked, { status: 403 });
 
   const body = (await req.json()) as ConvertBody;
   if (!body.quote_id || !body.pin) {

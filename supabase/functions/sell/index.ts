@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
@@ -101,10 +102,14 @@ Deno.serve(async (req) => {
   const supabase = getServiceClient();
   const { data: user } = await supabase
     .from("users")
-    .select("id, kyc_level")
+    .select("id, kyc_level, status")
     .eq("auth_id", authUserId)
     .maybeSingle();
   if (!user) return withCors({ error: "User not found" }, { status: 404 });
+  if (req.method === "POST") {
+    const blocked = accountBlock(user.status);
+    if (blocked) return withCors(blocked, { status: 403 });
+  }
   if (user.kyc_level < 2) {
     return withCors({ error: "Complete identity verification (BVN + selfie) to sell bundles" }, { status: 403 });
   }

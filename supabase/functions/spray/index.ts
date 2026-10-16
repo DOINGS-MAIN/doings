@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getAuthedClient, getServiceClient } from "../_shared/db.ts";
 import { floorErrorResponse, floorRateLimit, parseFloorAction } from "../_shared/floor.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
@@ -28,13 +29,15 @@ type SprayBody = {
 async function resolveSprayer(supabase: ReturnType<typeof getServiceClient>, authUserId: string) {
   const { data: sprayer, error: sprayerErr } = await supabase
     .from("users")
-    .select("id, kyc_level")
+    .select("id, kyc_level, status")
     .eq("auth_id", authUserId)
     .single();
 
   if (sprayerErr || !sprayer) {
     return { error: withCors({ error: "User not found" }, { status: 404 }) };
   }
+  const blocked = accountBlock(sprayer.status);
+  if (blocked) return { error: withCors(blocked, { status: 403 }) };
   // Bundles model: spraying needs a verified email (KYC level 1).
   if (sprayer.kyc_level < 1) {
     return { error: withCors({ error: "Verify your email to spray", code: "KYC_REQUIRED" }, { status: 403 }) };
