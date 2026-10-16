@@ -55,9 +55,11 @@ END $$;
 -- guests see only live ads, highest priority first, no admin fields
 SELECT pg_temp.auth_as((SELECT v FROM t WHERE k = 'guest'));
 DO $$
-DECLARE r jsonb := public.get_ads('home_banner');
+-- Only this test's ads: real ads may be live on the shared project.
+DECLARE r jsonb := (SELECT coalesce(jsonb_agg(e ORDER BY ord), '[]') FROM jsonb_array_elements(public.get_ads('home_banner')) WITH ORDINALITY AS x(e, ord)
+                    WHERE (e->>'id')::uuid IN (SELECT v FROM t));
 BEGIN
-  ASSERT jsonb_array_length(r) = 2, 'only the two live ads: ' || r::text;
+  ASSERT jsonb_array_length(r) = 2, 'only the two live test ads: ' || r::text;
   ASSERT (r->0->>'id')::uuid = (SELECT v FROM t WHERE k = 'live_high'), 'priority order';
   ASSERT r->1->>'image_desktop_path' = '00000000-0000-4000-8000-000000000003.webp', 'desktop path returned';
   ASSERT NOT (r->0 ? 'views'), 'no counts exposed';
