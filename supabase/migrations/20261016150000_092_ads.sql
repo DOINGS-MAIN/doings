@@ -43,6 +43,10 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
      AND (public.has_admin_role(auth.uid(), 'super_admin') OR public.has_admin_role(auth.uid(), 'moderation'))
 $$;
 
+-- Storage's remove() and upsert read the object first, so managers also need SELECT (the public
+-- bucket only covers public-URL downloads).
+CREATE POLICY ads_admin_select ON storage.objects FOR SELECT TO authenticated
+  USING (bucket_id = 'ads' AND public._is_ads_manager());
 CREATE POLICY ads_admin_insert ON storage.objects FOR INSERT TO authenticated
   WITH CHECK (bucket_id = 'ads' AND public._is_ads_manager());
 CREATE POLICY ads_admin_update ON storage.objects FOR UPDATE TO authenticated

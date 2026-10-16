@@ -44,6 +44,15 @@ const STATUS_CLASS: Record<AdStatus, string> = {
   Paused: "bg-amber-100 text-amber-800 hover:bg-amber-100",
 };
 
+/** Remove files from the ads bucket; say so when storage removed fewer than asked (nothing fails silently). */
+async function removeImages(paths: string[]) {
+  if (paths.length === 0) return;
+  const { data, error } = await adminApi.ads.removeFiles(paths);
+  if (error || (data?.length ?? 0) < paths.length) {
+    toast.warning("Some old images couldn't be removed from storage. They're unused; tell an engineer to clear them.");
+  }
+}
+
 const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString("en-NG") : "No end");
 
 /** ISO → the value a datetime-local input shows (local time). */
@@ -93,7 +102,7 @@ export const AdminAds = () => {
       setBusy(null);
       return void toast.error(error.message);
     }
-    await adminApi.ads.removeFiles((data ?? []) as string[]);
+    await removeImages((data ?? []) as string[]);
     setBusy(null);
     setDeleting(null);
     toast.success("Ad deleted");
@@ -283,11 +292,11 @@ function AdEditor({ ad, onClose, onSaved }: { ad: AdminAd | null; onClose: () =>
         ad && mobile.picked ? ad.image_mobile_path : null,
         ad?.image_desktop_path && ad.image_desktop_path !== desktopPath ? ad.image_desktop_path : null,
       ].filter((p): p is string => Boolean(p));
-      await adminApi.ads.removeFiles(replaced);
+      await removeImages(replaced);
       toast.success("Ad saved");
       onSaved();
     } catch (e) {
-      await adminApi.ads.removeFiles(uploaded);
+      await removeImages(uploaded);
       toast.error(e instanceof Error ? e.message : (e as { message?: string })?.message ?? "Couldn't save the ad");
     } finally {
       setSaving(false);

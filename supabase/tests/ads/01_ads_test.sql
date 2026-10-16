@@ -95,7 +95,33 @@ DO $$
 BEGIN
   ASSERT (SELECT public AND file_size_limit = 1048576 AND allowed_mime_types = ARRAY['image/jpeg','image/png','image/webp']
             FROM storage.buckets WHERE id = 'ads'), 'bucket config';
-  ASSERT (SELECT count(*) FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname LIKE 'ads_admin_%') = 3, 'write policies';
+  ASSERT (SELECT count(*) FROM pg_policies WHERE schemaname = 'storage' AND tablename = 'objects' AND policyname LIKE 'ads_admin_%') = 4, 'select + write policies';
 END $$;
+
+-- storage as the real API role: a guest can't upload; a manager can upload, see (Storage's
+-- remove() reads before it deletes) and delete
+SELECT pg_temp.auth_as((SELECT v FROM t WHERE k = 'guest'));
+SET LOCAL ROLE authenticated;
+DO $$
+BEGIN
+  BEGIN INSERT INTO storage.objects (bucket_id, name) VALUES ('ads', '00000000-0000-4000-8000-0000000000aa.jpg');
+    RAISE EXCEPTION 'expected guest upload refusal';
+  EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+END $$;
+RESET ROLE;
+SELECT pg_temp.auth_as((SELECT v FROM t WHERE k = 'mod'));
+SET LOCAL ROLE authenticated;
+DO $$
+DECLARE n int;
+BEGIN
+  INSERT INTO storage.objects (bucket_id, name) VALUES ('ads', '00000000-0000-4000-8000-0000000000bb.jpg');
+  SELECT count(*) INTO n FROM storage.objects WHERE bucket_id = 'ads' AND name = '00000000-0000-4000-8000-0000000000bb.jpg';
+  ASSERT n = 1, 'manager can see the object (needed for remove())';
+  PERFORM set_config('storage.allow_delete_query', 'true', true); -- as the Storage API does for remove()
+  DELETE FROM storage.objects WHERE bucket_id = 'ads' AND name = '00000000-0000-4000-8000-0000000000bb.jpg';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  ASSERT n = 1, 'manager delete removed the object';
+END $$;
+RESET ROLE;
 
 SELECT 'ads tests passed' AS result;
