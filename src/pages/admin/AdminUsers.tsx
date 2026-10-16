@@ -7,7 +7,6 @@ import {
   UserCheck, 
   Ban,
   Eye,
-  Mail
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -233,10 +232,6 @@ export const AdminUsers = () => {
                       >
                         <Eye className="w-4 h-4 mr-2" />
                         View Details
-                      </DropdownMenuItem>
-                      <DropdownMenuItem>
-                        <Mail className="w-4 h-4 mr-2" />
-                        Send Message
                       </DropdownMenuItem>
                       {canSuspend && <DropdownMenuSeparator />}
                       {!canSuspend ? null : user.status === "active" ? (

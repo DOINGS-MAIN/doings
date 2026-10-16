@@ -1,11 +1,13 @@
-import { useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Shield, Lock } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { PasswordInput } from "@/components/PasswordInput";
 import { Button } from "@/components/ui/button";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { useToast } from "@/hooks/use-toast";
+import { supabase } from "@/lib/supabase";
+import { cameFromEmailLink } from "@/lib/authMethods";
 
 export const AdminChangePassword = () => {
   const [currentPassword, setCurrentPassword] = useState("");
@@ -15,10 +17,13 @@ export const AdminChangePassword = () => {
   const { currentAccount, loading, changePassword, acceptInvite } = useAdminAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [searchParams] = useSearchParams();
-  // From an invite link (signed in, no active admin role yet) or a reset link: there's no current password to confirm.
+  const [fromEmailLink, setFromEmailLink] = useState(false);
+  useEffect(() => {
+    void supabase.auth.getSession().then(({ data }) => setFromEmailLink(cameFromEmailLink(data.session?.access_token)));
+  }, [currentAccount]);
+  // Signed in from an invite or reset link: there's no current password to confirm.
   const needsInviteAccept = !loading && !currentAccount;
-  const settingFirstPassword = needsInviteAccept || searchParams.get("reset") === "1";
+  const settingFirstPassword = fromEmailLink;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -39,7 +39,7 @@ interface AdminAuthContextValue {
   logout: () => Promise<void>;
   /** Pass currentPassword to re-check it first; omit it when setting a first password from an invite link. */
   changePassword: (newPassword: string, currentPassword?: string) => Promise<{ success: boolean; error?: string }>;
-  /** Emails a reset link that opens /admin/change-password?reset=1. */
+  /** Emails a reset link that opens /admin/change-password. */
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   /** Activates a pending admin invite for the signed-in user, then reloads the admin session. */
   acceptInvite: () => Promise<{ success: boolean; error?: string }>;
@@ -144,7 +144,7 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
 
   const resetPassword = useCallback(async (email: string) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/admin/change-password?reset=1`,
+      redirectTo: `${window.location.origin}/admin/change-password`,
     });
     if (error) return { success: false, error: error.message };
     return { success: true };

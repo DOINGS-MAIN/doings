@@ -157,6 +157,7 @@ async function requireAdmin(req: Request) {
   return {
     authId: authUserId,
     role: active ? active.role as string : "",
+    activeRowId: active ? active.id as string : null,
     invitedRowId: active ? null : invited!.id as string,
     supabase,
   };
@@ -208,15 +209,18 @@ Deno.serve(async (req) => {
     return withCors({ error: e.message ?? "Unauthorized" }, { status: e.status ?? 401 });
   }
 
-  const { supabase, authId, role, invitedRowId } = admin;
+  const { supabase, authId, role, activeRowId, invitedRowId } = admin;
   const route = parseRoute(req.url);
   const routeAction = "action" in route ? route.action : undefined;
   const routeId = "id" in route ? route.id : undefined;
 
   try {
-    // ── ACCEPT INVITE ── an invited admin activates their role once signed in.
+    // ── ACCEPT INVITE ── called on every admin sign-in: activates a pending invite, else records the login.
     if (route.resource === "team" && req.method === "POST" && routeAction === "accept") {
-      if (!invitedRowId) return withCors({ ok: true });
+      if (!invitedRowId) {
+        await supabase.from("admin_roles").update({ last_login_at: new Date().toISOString() }).eq("id", activeRowId!);
+        return withCors({ ok: true });
+      }
       const { error } = await supabase
         .from("admin_roles")
         .update({ status: "active", must_change_password: false, last_login_at: new Date().toISOString() })
@@ -733,6 +737,7 @@ Deno.serve(async (req) => {
         }
 
         const { error } = await supabase.from("admin_roles").update({ role: body.role }).eq("id", route.id);
+        if (error?.code === "23505") return withCors({ error: "This person already has that role" }, { status: 409 });
         if (error) throw error;
         await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "change_admin_role", p_target_type: "admin", p_target_id: route.id, p_details: { from: target.role, to: body.role } });
         return withCors({ ok: true });
