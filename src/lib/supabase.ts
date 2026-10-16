@@ -81,7 +81,7 @@ async function invoke<T = unknown>(fnName: string, options?: {
   return data as T;
 }
 
-async function downloadAdminCsv(path: string, params?: Record<string, string>): Promise<void> {
+async function downloadAdminCsv(path: string, params?: Record<string, string>): Promise<{ truncated: boolean }> {
   const headers = await authHeaders();
   const qs = new URLSearchParams({ ...(params ?? {}), format: "csv" });
   const url = `${supabaseUrl}/functions/v1/admin/${path}?${qs.toString()}`;
@@ -96,6 +96,7 @@ async function downloadAdminCsv(path: string, params?: Record<string, string>): 
     }
     throw new Error(message);
   }
+  const truncated = res.headers.get("X-Export-Truncated") === "true";
   const blob = await res.blob();
   const filename = path.replace(/\//g, "-") + ".csv";
   const objectUrl = URL.createObjectURL(blob);
@@ -104,6 +105,7 @@ async function downloadAdminCsv(path: string, params?: Record<string, string>): 
   anchor.download = filename;
   anchor.click();
   URL.revokeObjectURL(objectUrl);
+  return { truncated };
 }
 
 // ── Auth ──
@@ -416,11 +418,11 @@ export const admin = {
     exportCsv: (params?: Record<string, string>) => downloadAdminCsv("webhooks", params),
   },
   kyc: {
-    list: (params?: { page?: number; status?: string }) =>
+    list: (params?: { page?: number; limit?: number; status?: string }) =>
       invoke("admin", { method: "GET", path: "kyc", params: params as Record<string, string> }),
   },
   events: {
-    list: (params?: { page?: number; status?: string }) =>
+    list: (params?: { page?: number; limit?: number; status?: string; flagged?: string }) =>
       invoke("admin", { method: "GET", path: "events", params: params as Record<string, string> }),
     end: (id: string) => invoke("admin", { method: "POST", path: `events/${id}/end` }),
     flag: (id: string, reason: string) => invoke("admin", { method: "POST", path: `events/${id}/flag`, body: { reason } }),
