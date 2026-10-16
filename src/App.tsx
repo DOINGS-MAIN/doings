@@ -35,6 +35,7 @@ import { AdminPaymentRails } from "./pages/admin/AdminPaymentRails";
 import { AdminFxSettings } from "./pages/admin/AdminFxSettings";
 import { AdminSprayTheatreSettings } from "./pages/admin/AdminSprayTheatreSettings";
 import { AdminDanceFloor } from "./pages/admin/AdminDanceFloor";
+import { AdminAds } from "./pages/admin/AdminAds";
 import { AdminPaymentsOverview } from "./pages/admin/AdminPaymentsOverview";
 import { AdminWebhooks } from "./pages/admin/AdminWebhooks";
 import { AdminTransactionDetail } from "./pages/admin/AdminTransactionDetail";
@@ -88,6 +89,7 @@ const App = () => (
               <Route path="fx" element={<AdminFxSettings />} />
               <Route path="spray-theatre" element={<AdminSprayTheatreSettings />} />
               <Route path="dance-floor" element={<AdminDanceFloor />} />
+              <Route path="ads" element={<AdminAds />} />
               <Route path="kyc" element={<AdminKYC />} />
               <Route path="events" element={<AdminEvents />} />
               <Route path="settings" element={<AdminSettings />} />

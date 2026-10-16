@@ -523,4 +523,23 @@ export const admin = {
     removeAvatar: (userId: string, reason: string) =>
       supabase.rpc("admin_clear_floor_avatar", { p_user_id: userId, p_reason: reason }),
   },
+  ads: {
+    /** Managed ads (migration 092): super_admin and moderation. */
+    list: () => supabase.rpc("admin_list_ads"),
+    upsert: (p: { id: string | null; title: string; mobile: string; desktop: string | null; link: string | null; priority: number; startsAt: string; endsAt: string | null }) =>
+      supabase.rpc("admin_upsert_ad", {
+        p_id: p.id, p_title: p.title, p_image_mobile_path: p.mobile, p_image_desktop_path: p.desktop,
+        p_link_url: p.link, p_priority: p.priority, p_starts_at: p.startsAt, p_ends_at: p.endsAt,
+      }),
+    setActive: (id: string, active: boolean) => supabase.rpc("admin_set_ad_active", { p_id: id, p_active: active }),
+    remove: (id: string) => supabase.rpc("admin_delete_ad", { p_id: id }),
+    upload: async (file: File) => {
+      const ext = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+      const path = `${crypto.randomUUID()}.${ext}`;
+      const { error } = await supabase.storage.from("ads").upload(path, file, { contentType: file.type, cacheControl: "31536000" });
+      if (error) throw error;
+      return path;
+    },
+    removeFiles: (paths: string[]) => (paths.length ? supabase.storage.from("ads").remove(paths) : Promise.resolve({ data: [], error: null })),
+  },
 };
