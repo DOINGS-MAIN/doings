@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import type { SprayTheatrePlan, QueueCompressionTier } from "@/lib/sprayTheatrePlan";
+import type { SprayTheatrePlan } from "@/lib/sprayTheatrePlan";
 import { getValidSession } from "@/lib/authSession";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL ?? "").trim();
@@ -370,6 +370,7 @@ export const admin = {
     suspend: (id: string, reason: string) => invoke("admin", { method: "POST", path: `users/${id}/suspend`, body: { reason } }),
     unsuspend: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/unsuspend` }),
     ban: (id: string, reason: string) => invoke("admin", { method: "POST", path: `users/${id}/ban`, body: { reason } }),
+    unban: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/unban` }),
   },
   transactions: {
     list: (params?: {
@@ -417,21 +418,23 @@ export const admin = {
   kyc: {
     list: (params?: { page?: number; status?: string }) =>
       invoke("admin", { method: "GET", path: "kyc", params: params as Record<string, string> }),
-    approve: (id: string) => invoke("admin", { method: "POST", path: `kyc/${id}/approve` }),
-    reject: (id: string, reason: string) => invoke("admin", { method: "POST", path: `kyc/${id}/reject`, body: { reason } }),
   },
   events: {
     list: (params?: { page?: number; status?: string }) =>
       invoke("admin", { method: "GET", path: "events", params: params as Record<string, string> }),
     end: (id: string) => invoke("admin", { method: "POST", path: `events/${id}/end` }),
+    flag: (id: string, reason: string) => invoke("admin", { method: "POST", path: `events/${id}/flag`, body: { reason } }),
+    unflag: (id: string) => invoke("admin", { method: "POST", path: `events/${id}/unflag` }),
   },
   team: {
     list: () => invoke("admin", { method: "GET", path: "team" }),
     invite: (email: string, role: string) => invoke("admin", { method: "POST", path: "team/invite", body: { email, role } }),
     disable: (id: string) => invoke("admin", { method: "POST", path: `team/${id}/disable` }),
     enable: (id: string) => invoke("admin", { method: "POST", path: `team/${id}/enable` }),
+    setRole: (id: string, role: string) => invoke("admin", { method: "POST", path: `team/${id}/role`, body: { role } }),
+    accept: () => invoke("admin", { method: "POST", path: "team/accept" }),
   },
-  audit: (params?: { page?: number; limit?: number }) =>
+  audit: (params?: { page?: number; limit?: number; action?: string; admin_id?: string }) =>
     invoke("admin", { method: "GET", path: "audit", params: params as Record<string, string> }),
   paymentRails: {
     get: () => invoke("admin", { method: "GET", path: "payment-rails" }),
@@ -492,29 +495,7 @@ export const admin = {
     setManualRate: (marketRateNaira: number) =>
       supabase.rpc("set_fx_market_rate_manual", { p_market_rate_naira: marketRateNaira }),
   },
-  sprayTheatre: {
-    getSettings: () => supabase.rpc("get_spray_theatre_admin_settings"),
-    setSettings: (payload: {
-      stageMinPer100kDenom200: number;
-      stageMinPer100kDenom500: number;
-      stageMinPer100kDenom1000: number;
-      stageMinPer100Usdc: number;
-      maxSingleSprayNgn: number;
-      guestSessionCapSec: number;
-      maxStageSec: number;
-      queueCompressionTiers: QueueCompressionTier[];
-    }) =>
-      supabase.rpc("set_spray_theatre_settings", {
-        p_stage_min_per_100k_denom_200: payload.stageMinPer100kDenom200,
-        p_stage_min_per_100k_denom_500: payload.stageMinPer100kDenom500,
-        p_stage_min_per_100k_denom_1000: payload.stageMinPer100kDenom1000,
-        p_stage_min_per_100_usdc: payload.stageMinPer100Usdc,
-        p_max_single_spray_ngn_kobo: Math.round(payload.maxSingleSprayNgn * 100),
-        p_guest_session_cap_sec: payload.guestSessionCapSec,
-        p_max_stage_sec: payload.maxStageSec,
-        p_queue_compression_tiers: payload.queueCompressionTiers,
-      }),
-  },
+
   danceFloor: {
     /** Floor time bands, busy-floor rule and max wait (new app's floor queue). */
     getSettings: () => supabase.rpc("get_spray_floor_settings"),

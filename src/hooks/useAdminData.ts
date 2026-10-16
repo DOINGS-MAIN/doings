@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { admin as adminApi, supabase } from "@/lib/supabase";
+import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { toast } from "sonner";
 import {
   AdminUser,
@@ -9,6 +10,7 @@ import {
   AdminEvent,
   AdminStats,
   AdminRole,
+  can,
 } from "@/types/admin";
 
 export type TransactionListParams = {
@@ -66,7 +68,16 @@ function mapTransaction(t: Record<string, unknown>): AdminTransaction {
   };
 }
 
+// Live events map straight through; scheduled and draft events show as "upcoming".
+function eventStatus(status: unknown): AdminEvent["status"] {
+  if (status === "live") return "live";
+  if (status === "scheduled" || status === "draft") return "upcoming";
+  return "ended";
+}
+
 export const useAdminData = () => {
+  const { session } = useAdminAuth();
+  const role = session?.role;
   const [state, setState] = useState<AdminDataState>({
     currentAdmin: null,
     users: [],
@@ -88,6 +99,7 @@ export const useAdminData = () => {
   }, []);
 
   const fetchTransactions = useCallback(async (params: TransactionListParams = {}) => {
+    if (!can(role, "transactions.view")) return;
     setTransactionsLoading(true);
     try {
       const page = params.page ?? 1;
@@ -115,7 +127,7 @@ export const useAdminData = () => {
     } finally {
       setTransactionsLoading(false);
     }
-  }, [reportError]);
+  }, [reportError, role]);
 
   const fetchStats = useCallback(async () => {
     const s = (await adminApi.stats()) as Record<string, number>;
@@ -138,13 +150,16 @@ export const useAdminData = () => {
   }, []);
 
   const fetchAll = useCallback(async () => {
+    if (!role) return;
     setLoading(true);
     try {
+      // Only ask for what this role may see; the server refuses the rest anyway.
+      const skip = Promise.resolve(null);
       const [statsRes, usersRes, kycRes, eventsRes] = await Promise.allSettled([
-        adminApi.stats(),
-        adminApi.users.list({ limit: 50 }),
-        adminApi.kyc.list(),
-        adminApi.events.list(),
+        can(role, "dashboard") ? adminApi.stats() : skip,
+        can(role, "users.view") ? adminApi.users.list({ limit: 50 }) : skip,
+        can(role, "kyc") ? adminApi.kyc.list({ status: "all" }) : skip,
+        can(role, "events.view") ? adminApi.events.list() : skip,
       ]);
 
       if (statsRes.status === "fulfilled" && statsRes.value) {
@@ -195,32 +210,29 @@ export const useAdminData = () => {
           id: k.id as string,
           userId: (k.user_id as string) ?? "",
           userName: (k.user_name as string) ?? "",
-          userPhone: (k.user_phone as string) ?? "",
-          level: (k.level as number) ?? 0,
-          bvn: (k.bvn as string) ?? "",
-          nin: (k.nin as string) ?? "",
-          idType: "national_id" as const,
-          idNumber: "",
-          idImageUrl: "",
-          selfieUrl: (k.selfie_url as string) ?? "",
+          userEmail: (k.user_email as string) ?? "",
+          level: Number(k.level ?? 0),
           status: (k.status as KYCSubmission["status"]) ?? "pending",
-          submittedAt: new Date((k.created_at as string) ?? Date.now()),
-          reviewedAt: k.reviewed_at ? new Date(k.reviewed_at as string) : undefined,
-          reviewedBy: k.reviewed_by as string | undefined,
+          provider: (k.provider as string) ?? undefined,
+          rejectionReason: (k.rejection_reason as string) ?? undefined,
+          submittedAt: new Date((k.submitted_at as string) ?? (k.created_at as string) ?? Date.now()),
+          verifiedAt: k.verified_at ? new Date(k.verified_at as string) : undefined,
         })),
         events: (evts as Record<string, unknown>[]).map((e) => ({
           id: e.id as string,
           name: (e.title as string) ?? "",
           hostId: (e.host_id as string) ?? "",
           hostName: (e.host_name as string) ?? "",
-          code: (e.event_code as string) ?? (e.code as string) ?? "",
+          code: (e.event_code as string) ?? "",
           type: (e.type as AdminEvent["type"]) ?? "other",
-          status: (e.status as AdminEvent["status"]) ?? "ended",
+          status: eventStatus(e.status),
           participantCount: (e.participant_count as number) ?? 0,
           totalSprayed: ((e.total_sprayed as number) ?? 0) / 100,
           giveawayCount: (e.giveaway_count as number) ?? 0,
           createdAt: new Date((e.created_at as string) ?? Date.now()),
-          scheduledAt: e.scheduled_start ? new Date(e.scheduled_start as string) : undefined,
+          scheduledAt: e.scheduled_at ? new Date(e.scheduled_at as string) : undefined,
+          endedAt: e.ended_at ? new Date(e.ended_at as string) : undefined,
+          isPrivate: (e.is_private as boolean) ?? false,
           flagged: (e.flagged as boolean) ?? false,
           flagReason: e.flag_reason as string | undefined,
         })),
@@ -233,13 +245,14 @@ export const useAdminData = () => {
     } finally {
       setLoading(false);
     }
-  }, [fetchTransactions, reportError]);
+  }, [fetchTransactions, reportError, role]);
 
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
 
   useEffect(() => {
+    if (!can(role, "transactions.view")) return;
     const channel = supabase
       .channel("admin-transactions-live")
       .on(
@@ -255,7 +268,7 @@ export const useAdminData = () => {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [fetchTransactions, fetchStats, transactionPage]);
+  }, [fetchTransactions, fetchStats, transactionPage, role]);
 
   const getStats = useCallback((): AdminStats => {
     if (platformStats) {
@@ -304,6 +317,11 @@ export const useAdminData = () => {
     await fetchAll();
   }, [fetchAll]);
 
+  const unbanUser = useCallback(async (userId: string) => {
+    await adminApi.users.unban(userId);
+    await fetchAll();
+  }, [fetchAll]);
+
   const flagTransaction = useCallback(async (transactionId: string, reason: string) => {
     await adminApi.transactions.flag(transactionId, reason);
     await fetchTransactions({ page: transactionPage, limit: 50 });
@@ -319,26 +337,18 @@ export const useAdminData = () => {
     await fetchTransactions({ page: transactionPage, limit: 50 });
   }, [fetchTransactions, transactionPage]);
 
-  const approveKYC = useCallback(async (kycId: string) => {
-    await adminApi.kyc.approve(kycId);
-    await fetchAll();
-  }, [fetchAll]);
-
-  const rejectKYC = useCallback(async (kycId: string, reason: string) => {
-    await adminApi.kyc.reject(kycId, reason);
-    await fetchAll();
-  }, [fetchAll]);
-
   const endEvent = useCallback(async (eventId: string) => {
     await adminApi.events.end(eventId);
     await fetchAll();
   }, [fetchAll]);
 
-  const flagEvent = useCallback(async (_eventId: string, _reason: string) => {
+  const flagEvent = useCallback(async (eventId: string, reason: string) => {
+    await adminApi.events.flag(eventId, reason);
     await fetchAll();
   }, [fetchAll]);
 
-  const unflagEvent = useCallback(async (_eventId: string) => {
+  const unflagEvent = useCallback(async (eventId: string) => {
+    await adminApi.events.unflag(eventId);
     await fetchAll();
   }, [fetchAll]);
 
@@ -359,11 +369,10 @@ export const useAdminData = () => {
     suspendUser,
     unsuspendUser,
     banUser,
+    unbanUser,
     refundTransaction,
     flagTransaction,
     unflagTransaction,
-    approveKYC,
-    rejectKYC,
     flagEvent,
     unflagEvent,
     endEvent,

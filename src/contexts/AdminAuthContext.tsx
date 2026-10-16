@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { supabase, auth } from "@/lib/supabase";
+import { supabase, auth, admin as adminApi } from "@/lib/supabase";
 import { AdminRole } from "@/types/admin";
 
 export interface AdminAccount {
@@ -34,28 +34,21 @@ interface AdminAuthContextValue {
   isAuthenticated: boolean;
   session: AdminSession | null;
   currentAccount: AdminAccount | null;
-  accounts: AdminAccount[];
   loading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
-  changePassword: (
-    adminId: string,
-    currentPassword: string,
-    newPassword: string,
-  ) => Promise<{ success: boolean; error?: string }>;
-  resetPassword: (email: string) => Promise<{ success: boolean; error?: string; tempPassword?: string }>;
-  inviteAdmin: () => Promise<{ success: boolean; error?: string }>;
-  updateAdminRole: () => Promise<{ success: boolean; error?: string }>;
-  disableAdmin: () => Promise<{ success: boolean; error?: string }>;
-  enableAdmin: () => Promise<void>;
-  deleteAdmin: () => Promise<{ success: boolean; error?: string }>;
+  /** Pass currentPassword to re-check it first; omit it when setting a first password from an invite link. */
+  changePassword: (newPassword: string, currentPassword?: string) => Promise<{ success: boolean; error?: string }>;
+  /** Emails a reset link that opens /admin/change-password?reset=1. */
+  resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
+  /** Activates a pending admin invite for the signed-in user, then reloads the admin session. */
+  acceptInvite: () => Promise<{ success: boolean; error?: string }>;
 }
 
 const AdminAuthContext = createContext<AdminAuthContextValue | null>(null);
 
 export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
   const [session, setSession] = useState<AdminSession | null>(null);
-  const [accounts] = useState<AdminAccount[]>([]);
   const [loading, setLoading] = useState(true);
 
   const checkAdminRole = useCallback(async (): Promise<boolean> => {
@@ -115,6 +108,8 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) return { success: false, error: error.message };
 
+      // An invited admin who already had an account activates their invite on first sign-in.
+      await adminApi.team.accept().catch(() => undefined);
       const isAdmin = await checkAdminRole();
       if (!isAdmin) {
         await auth.signOut();
@@ -132,13 +127,38 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const changePassword = useCallback(
-    async (_adminId: string, _currentPassword: string, newPassword: string) => {
+    async (newPassword: string, currentPassword?: string) => {
+      if (currentPassword !== undefined) {
+        const { data } = await supabase.auth.getUser();
+        const email = data.user?.email;
+        if (!email) return { success: false, error: "Sign in again to change your password." };
+        const { error: checkErr } = await supabase.auth.signInWithPassword({ email, password: currentPassword });
+        if (checkErr) return { success: false, error: "Your current password is wrong." };
+      }
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) return { success: false, error: error.message };
       return { success: true };
     },
     [],
   );
+
+  const resetPassword = useCallback(async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/admin/change-password?reset=1`,
+    });
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  }, []);
+
+  const acceptInvite = useCallback(async () => {
+    try {
+      await adminApi.team.accept();
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : "Couldn't accept the invite" };
+    }
+    const isAdmin = await checkAdminRole();
+    return isAdmin ? { success: true } : { success: false, error: "This account does not have admin access." };
+  }, [checkAdminRole]);
 
   const currentAccount: AdminAccount | null = session
     ? {
@@ -158,19 +178,14 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
       isAuthenticated: !!session,
       session,
       currentAccount,
-      accounts,
       loading,
       login,
       logout,
       changePassword,
-      resetPassword: async () => ({ success: false, error: "Use Supabase password reset" }),
-      inviteAdmin: async () => ({ success: false, error: "Use admin API" }),
-      updateAdminRole: async () => ({ success: false, error: "Use admin API" }),
-      disableAdmin: async () => ({ success: false, error: "Use admin API" }),
-      enableAdmin: async () => {},
-      deleteAdmin: async () => ({ success: false, error: "Use admin API" }),
+      resetPassword,
+      acceptInvite,
     }),
-    [session, currentAccount, accounts, loading, login, logout, changePassword],
+    [session, currentAccount, loading, login, logout, changePassword, resetPassword, acceptInvite],
   );
 
   return <AdminAuthContext.Provider value={value}>{children}</AdminAuthContext.Provider>;

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Shield, Lock } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { PasswordInput } from "@/components/PasswordInput";
@@ -11,24 +11,39 @@ export const AdminChangePassword = () => {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const { currentAccount, changePassword } = useAdminAuth();
+  const [saving, setSaving] = useState(false);
+  const { currentAccount, loading, changePassword, acceptInvite } = useAdminAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const [searchParams] = useSearchParams();
+  // From an invite link (signed in, no active admin role yet) or a reset link: there's no current password to confirm.
+  const needsInviteAccept = !loading && !currentAccount;
+  const settingFirstPassword = needsInviteAccept || searchParams.get("reset") === "1";
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword !== confirmPassword) {
       toast({ title: "Error", description: "Passwords don't match", variant: "destructive" });
       return;
     }
-    if (!currentAccount) return;
-
-    const result = changePassword(currentAccount.id, currentPassword, newPassword);
-    if (result.success) {
+    setSaving(true);
+    try {
+      const result = await changePassword(newPassword, settingFirstPassword ? undefined : currentPassword);
+      if (!result.success) {
+        toast({ title: "Error", description: result.error, variant: "destructive" });
+        return;
+      }
+      if (needsInviteAccept) {
+        const accepted = await acceptInvite();
+        if (!accepted.success) {
+          toast({ title: "Error", description: accepted.error, variant: "destructive" });
+          return;
+        }
+      }
       toast({ title: "Password Changed", description: "Your password has been updated." });
       navigate("/admin");
-    } else {
-      toast({ title: "Error", description: result.error, variant: "destructive" });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -42,23 +57,25 @@ export const AdminChangePassword = () => {
             </div>
             <h1 className="text-2xl font-bold text-foreground">Change Password</h1>
             <p className="text-muted-foreground text-sm mt-1">
-              {currentAccount?.mustChangePassword ? "You must change your password before continuing" : "Update your admin password"}
+              {settingFirstPassword ? "Set a password to finish joining the admin team" : "Update your admin password"}
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="text-sm font-medium text-muted-foreground mb-2 block">Current Password</label>
-              <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none z-10" />
-                <PasswordInput
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  className="pl-11"
-                  required
-                />
+            {!settingFirstPassword && (
+              <div>
+                <label className="text-sm font-medium text-muted-foreground mb-2 block">Current Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none z-10" />
+                  <PasswordInput
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    className="pl-11"
+                    required
+                  />
+                </div>
               </div>
-            </div>
+            )}
             <div>
               <label className="text-sm font-medium text-muted-foreground mb-2 block">New Password</label>
               <div className="relative">
@@ -85,8 +102,8 @@ export const AdminChangePassword = () => {
                 />
               </div>
             </div>
-            <Button type="submit" className="w-full h-12 font-semibold">
-              Update Password
+            <Button type="submit" className="w-full h-12 font-semibold" disabled={saving || loading}>
+              {settingFirstPassword ? "Set Password" : "Update Password"}
             </Button>
           </form>
         </CardContent>

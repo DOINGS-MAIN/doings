@@ -59,13 +59,13 @@ export const AdminLogin = () => {
     }
   };
 
-  const handleReset = (e: React.FormEvent) => {
+  const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
-    const result = resetPassword(email);
+    const result = await resetPassword(email);
     if (result.success) {
       toast({
-        title: "Password Reset",
-        description: `Temporary password: ${result.tempPassword} — Use this to log in, then change your password.`,
+        title: "Check your email",
+        description: "We sent a link to set a new password.",
       });
       setIsResetMode(false);
     } else {

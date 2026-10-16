@@ -13,13 +13,14 @@ import {
   ListTodo,
   Activity,
   ArrowLeftRight,
-  Sparkles,
   Music, Megaphone,
+  UserCog,
+  ScrollText,
 } from "lucide-react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { AdminRole, ROLE_LABELS, ROLE_PERMISSIONS } from "@/types/admin";
+import { AdminRole, ROLE_LABELS, can } from "@/types/admin";
 
 interface AdminSidebarProps {
   currentRole: AdminRole;
@@ -30,29 +31,24 @@ interface AdminSidebarProps {
   flaggedTransactions: number;
 }
 
+// Each item shows when the role has any of its permissions (the server enforces the same matrix).
 const navItems = [
-  { path: "/admin", label: "Dashboard", icon: LayoutDashboard, permission: "dashboard" },
-  { path: "/admin/users", label: "User Management", icon: Users, permission: "users" },
-  { path: "/admin/payments", label: "Payments", icon: BarChart3, permission: "payments" },
-  { path: "/admin/queue", label: "Review Queue", icon: ListTodo, permission: "queue" },
-  { path: "/admin/transactions", label: "Transactions", icon: CreditCard, permission: "transactions" },
-  { path: "/admin/psp-events", label: "PSP Activity", icon: Activity, permission: "psp_events" },
-  { path: "/admin/webhooks", label: "Webhooks", icon: Webhook, permission: "webhooks" },
-  { path: "/admin/payment-rails", label: "Payment Rails", icon: Route, permission: "payment_rails" },
-  { path: "/admin/fx", label: "FX & Convert", icon: ArrowLeftRight, permission: "payment_rails" },
-  { path: "/admin/dance-floor", label: "Dance Floor", icon: Music, permission: "dance_floor" },
-  { path: "/admin/ads", label: "Ads", icon: Megaphone, permission: "ads" },
-  { path: "/admin/spray-theatre", label: "Spray Theatre (old app)", icon: Sparkles, permission: "payment_rails" },
-  { path: "/admin/kyc", label: "KYC Review", icon: FileCheck, permission: "kyc" },
-  { path: "/admin/events", label: "Event Moderation", icon: Calendar, permission: "events" },
+  { path: "/admin", label: "Dashboard", icon: LayoutDashboard, permissions: ["dashboard"] },
+  { path: "/admin/users", label: "User Management", icon: Users, permissions: ["users.view"] },
+  { path: "/admin/payments", label: "Payments", icon: BarChart3, permissions: ["payments"] },
+  { path: "/admin/queue", label: "Review Queue", icon: ListTodo, permissions: ["queue"] },
+  { path: "/admin/transactions", label: "Transactions", icon: CreditCard, permissions: ["transactions.view"] },
+  { path: "/admin/psp-events", label: "PSP Activity", icon: Activity, permissions: ["psp_events"] },
+  { path: "/admin/webhooks", label: "Webhooks", icon: Webhook, permissions: ["webhooks.view"] },
+  { path: "/admin/payment-rails", label: "Payment Rails", icon: Route, permissions: ["payment_rails"] },
+  { path: "/admin/fx", label: "FX & Convert", icon: ArrowLeftRight, permissions: ["payment_rails"] },
+  { path: "/admin/dance-floor", label: "Dance Floor", icon: Music, permissions: ["dance_floor", "floor_avatars"] },
+  { path: "/admin/ads", label: "Ads", icon: Megaphone, permissions: ["ads"] },
+  { path: "/admin/kyc", label: "KYC Results", icon: FileCheck, permissions: ["kyc"] },
+  { path: "/admin/events", label: "Event Moderation", icon: Calendar, permissions: ["events.view"] },
+  { path: "/admin/team", label: "Team", icon: UserCog, permissions: ["*"] },
+  { path: "/admin/audit", label: "Audit Log", icon: ScrollText, permissions: ["*"] },
 ];
-
-const hasPermission = (role: AdminRole, permission: string): boolean => {
-  const permissions = ROLE_PERMISSIONS[role];
-  return permissions.includes("*") || 
-         permissions.includes(permission) || 
-         permissions.some(p => permission.startsWith(p.replace(".view", "")));
-};
 
 export const AdminSidebar = ({ 
   currentRole,
@@ -97,7 +93,7 @@ export const AdminSidebar = ({
         {navItems.map((item) => {
           const isActive = location.pathname === item.path || 
             (item.path !== "/admin" && location.pathname.startsWith(item.path));
-          const canAccess = hasPermission(currentRole, item.permission);
+          const canAccess = item.permissions.some((p) => can(currentRole, p));
           const badgeCount = getBadgeCount(item.path);
 
           if (!canAccess) return null;
@@ -127,20 +123,18 @@ export const AdminSidebar = ({
 
       {/* Footer */}
       <div className="p-4 border-t border-border space-y-1">
-        {hasPermission(currentRole, "*") && (
-          <NavLink
-            to="/admin/settings"
-            className={cn(
-              "flex items-center gap-3 px-4 py-3 rounded-xl transition-all",
-              location.pathname === "/admin/settings"
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
-            )}
-          >
-            <Settings className="w-5 h-5" />
-            <span className="font-medium">Settings</span>
-          </NavLink>
-        )}
+        <NavLink
+          to="/admin/settings"
+          className={cn(
+            "flex items-center gap-3 px-4 py-3 rounded-xl transition-all",
+            location.pathname === "/admin/settings"
+              ? "bg-primary/10 text-primary"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+        >
+          <Settings className="w-5 h-5" />
+          <span className="font-medium">Settings</span>
+        </NavLink>
         <button
           onClick={onLogout}
           className="flex items-center gap-3 px-4 py-3 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all w-full"

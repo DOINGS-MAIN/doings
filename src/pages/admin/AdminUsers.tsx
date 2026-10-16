@@ -44,12 +44,15 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAdminData } from "@/hooks/useAdminData";
-import { PlatformUser } from "@/types/admin";
+import { useAdminAuth } from "@/hooks/useAdminAuth";
+import { PlatformUser, can } from "@/types/admin";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 export const AdminUsers = () => {
-  const { users, suspendUser, unsuspendUser, banUser } = useAdminData();
+  const { users, suspendUser, unsuspendUser, banUser, unbanUser } = useAdminData();
+  const { session } = useAdminAuth();
+  const canSuspend = can(session?.role, "users.suspend");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [kycFilter, setKycFilter] = useState<string>("all");
@@ -101,26 +104,36 @@ export const AdminUsers = () => {
     }
   };
 
-  const handleAction = () => {
-    if (!selectedUser || !actionType) return;
-
-    if (actionType === "suspend") {
-      suspendUser(selectedUser.id, actionReason);
-      toast.success(`${selectedUser.name} has been suspended`);
-    } else if (actionType === "ban") {
-      banUser(selectedUser.id, actionReason);
-      toast.success(`${selectedUser.name} has been banned`);
+  const runAction = async (action: () => Promise<void>, success: string) => {
+    try {
+      await action();
+      toast.success(success);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "That didn't work");
     }
+  };
 
+  const handleAction = async () => {
+    if (!selectedUser || !actionType) return;
+    const user = selectedUser;
+    const type = actionType;
+    const reason = actionReason;
     setSelectedUser(null);
     setActionType(null);
     setActionReason("");
+
+    if (type === "suspend") {
+      await runAction(() => suspendUser(user.id, reason), `${user.name} has been suspended`);
+    } else if (type === "ban") {
+      await runAction(() => banUser(user.id, reason), `${user.name} has been banned`);
+    }
   };
 
-  const handleUnsuspend = (user: PlatformUser) => {
-    unsuspendUser(user.id);
-    toast.success(`${user.name} has been unsuspended`);
-  };
+  const handleUnsuspend = (user: PlatformUser) =>
+    runAction(() => unsuspendUser(user.id), `${user.name} has been unsuspended`);
+
+  const handleUnban = (user: PlatformUser) =>
+    runAction(() => unbanUser(user.id), `${user.name} has been unbanned`);
 
   return (
     <div className="p-8 space-y-6">
@@ -225,8 +238,8 @@ export const AdminUsers = () => {
                         <Mail className="w-4 h-4 mr-2" />
                         Send Message
                       </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      {user.status === "active" ? (
+                      {canSuspend && <DropdownMenuSeparator />}
+                      {!canSuspend ? null : user.status === "active" ? (
                         <>
                           <DropdownMenuItem 
                             onClick={() => {
@@ -257,7 +270,15 @@ export const AdminUsers = () => {
                           <UserCheck className="w-4 h-4 mr-2" />
                           Unsuspend User
                         </DropdownMenuItem>
-                      ) : null}
+                      ) : (
+                        <DropdownMenuItem
+                          onClick={() => handleUnban(user)}
+                          className="text-success"
+                        >
+                          <UserCheck className="w-4 h-4 mr-2" />
+                          Unban User
+                        </DropdownMenuItem>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </TableCell>

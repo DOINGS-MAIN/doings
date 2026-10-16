@@ -162,18 +162,13 @@ export interface KYCSubmission {
   id: string;
   userId: string;
   userName: string;
-  userPhone: string;
-  bvn: string;
-  nin?: string;
-  idType: "national_id" | "drivers_license" | "passport" | "voters_card";
-  idNumber: string;
-  idImageUrl: string;
-  selfieUrl: string;
-  status: "pending" | "approved" | "rejected";
-  submittedAt: Date;
-  reviewedAt?: Date;
-  reviewedBy?: string;
+  userEmail: string;
+  level: number;
+  status: "pending" | "verified" | "rejected" | "expired";
+  provider?: string;
   rejectionReason?: string;
+  submittedAt: Date;
+  verifiedAt?: Date;
 }
 
 export interface AdminEvent {
@@ -192,6 +187,7 @@ export interface AdminEvent {
   endedAt?: Date;
   flagged?: boolean;
   flagReason?: string;
+  isPrivate?: boolean;
 }
 
 export type PspCapability = "wallet_funding" | "disbursement" | "bank_verify";
@@ -229,13 +225,26 @@ export interface AdminStats {
   flaggedTransactions: number;
 }
 
-// Role permissions
-export const ROLE_PERMISSIONS: Record<AdminRole, string[]> = {
+// Role permissions: mirrors supabase/functions/_shared/adminAccess.ts (the server is the authority;
+// adminAccess.parity.test.ts keeps the two equal).
+export const ROLE_PERMISSIONS: Record<AdminRole, readonly string[]> = {
   super_admin: ["*"],
-  finance: ["dashboard", "transactions", "reports", "payment_rails", "payments", "webhooks", "queue", "psp_events", "dance_floor"],
-  support: ["dashboard", "users", "transactions.view", "payments", "webhooks", "queue", "psp_events", "dance_floor", "floor_avatars"],
-  compliance: ["dashboard", "kyc", "users.view"],
-  moderation: ["dashboard", "events", "users.view", "ads"],
+  finance: [
+    "dashboard", "transactions.view", "transactions.write", "payments", "queue",
+    "webhooks.view", "webhooks.write", "psp_events", "payment_rails", "dance_floor",
+  ],
+  support: [
+    "dashboard", "users.view", "transactions.view", "payments", "queue",
+    "webhooks.view", "psp_events", "floor_avatars", "events.view", "events.end",
+  ],
+  compliance: ["dashboard", "kyc", "users.view", "users.suspend"],
+  moderation: ["dashboard", "events.view", "events.flag", "events.end", "ads", "floor_avatars", "users.view"],
+};
+
+export const can = (role: string | null | undefined, permission: string): boolean => {
+  if (!role || !Object.prototype.hasOwnProperty.call(ROLE_PERMISSIONS, role)) return false;
+  const perms = ROLE_PERMISSIONS[role as AdminRole];
+  return perms.includes("*") || perms.includes(permission);
 };
 
 export const ROLE_LABELS: Record<AdminRole, string> = {
