@@ -5,24 +5,29 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useAdminData } from "@/hooks/useAdminData";
+import { useAdminKyc } from "@/hooks/admin/useAdminQueries";
+import { Button } from "@/components/ui/button";
 import { KYCSubmission } from "@/types/admin";
 
 // Verification is automated (BVN + selfie via Dojah); admins see results only and never override them.
 export const AdminKYC = () => {
-  const { kycSubmissions, loading } = useAdminData();
+  type KycTab = "all" | "verified" | "rejected";
+  const [status, setStatus] = useState<KycTab>("all");
+  const [page, setPage] = useState(1);
+  const { data, isLoading: loading } = useAdminKyc({ status, page });
   const [searchQuery, setSearchQuery] = useState("");
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / 50));
 
+  // The search narrows the current page; tabs and paging come from the server.
   const filtered = useMemo(() => {
+    const rows = data?.rows ?? [];
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return kycSubmissions;
-    return kycSubmissions.filter((k) =>
+    if (!q) return rows;
+    return rows.filter((k) =>
       k.userName.toLowerCase().includes(q) || k.userEmail.toLowerCase().includes(q) || k.userId.includes(q),
     );
-  }, [kycSubmissions, searchQuery]);
-
-  const verified = filtered.filter((k) => k.status === "verified");
-  const rejected = filtered.filter((k) => k.status === "rejected");
+  }, [data, searchQuery]);
 
   const statusBadge = (status: KYCSubmission["status"]) => {
     switch (status) {
@@ -81,23 +86,32 @@ export const AdminKYC = () => {
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
         <Input
-          placeholder="Search by name or email..."
+          placeholder="Search this page by name or email..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           className="pl-10"
         />
       </div>
 
-      <Tabs defaultValue="all" className="space-y-6">
+      <Tabs value={status} onValueChange={(v) => { setStatus(v as KycTab); setPage(1); }} className="space-y-6">
         <TabsList>
-          <TabsTrigger value="all">All ({filtered.length})</TabsTrigger>
-          <TabsTrigger value="verified">Verified ({verified.length})</TabsTrigger>
-          <TabsTrigger value="rejected">Rejected ({rejected.length})</TabsTrigger>
+          {(["all", "verified", "rejected"] as KycTab[]).map((t) => (
+            <TabsTrigger key={t} value={t} className="capitalize gap-2">
+              {t}
+              {t === status && <span className="text-xs text-muted-foreground">({total})</span>}
+            </TabsTrigger>
+          ))}
         </TabsList>
-        <TabsContent value="all"><ResultsTable rows={filtered} /></TabsContent>
-        <TabsContent value="verified"><ResultsTable rows={verified} /></TabsContent>
-        <TabsContent value="rejected"><ResultsTable rows={rejected} /></TabsContent>
+        <TabsContent value={status}><ResultsTable rows={filtered} /></TabsContent>
       </Tabs>
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">Page {page} of {totalPages}</p>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+        </div>
+      </div>
     </div>
   );
 };

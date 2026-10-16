@@ -48,7 +48,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent } from "@/components/ui/card";
-import { useAdminData } from "@/hooks/useAdminData";
+import { useAdminMutations, useAdminStats, useAdminTransactions } from "@/hooks/admin/useAdminQueries";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { canWritePayments } from "@/lib/adminPermissions";
 import { admin as adminApi } from "@/lib/supabase";
@@ -60,18 +60,14 @@ export const AdminTransactions = () => {
   const navigate = useNavigate();
   const { currentAccount } = useAdminAuth();
   const canWrite = currentAccount ? canWritePayments(currentAccount.role) : false;
-  const {
-    transactions,
-    getStats,
-    refundTransaction,
-    flagTransaction,
-    unflagTransaction,
-    fetchTransactions,
-    transactionsLoading,
-    transactionTotal,
-    transactionPage,
-  } = useAdminData();
-  const stats = getStats();
+  const { refundTransaction, flagTransaction, unflagTransaction } = useAdminMutations();
+  const { data: statsData } = useAdminStats();
+  const stats = {
+    totalVolume: statsData?.totalVolume ?? 0,
+    todayVolume: statsData?.todayVolume ?? 0,
+    totalTransactions: statsData?.totalTransactions ?? 0,
+    flaggedTransactions: statsData?.flaggedTransactions ?? 0,
+  };
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -92,17 +88,19 @@ export const AdminTransactions = () => {
     setPage(1);
   }, [debouncedSearch, typeFilter, statusFilter, flagFilter, providerFilter]);
 
-  useEffect(() => {
-    fetchTransactions({
-      page,
-      limit: 50,
-      search: debouncedSearch,
-      type: typeFilter,
-      status: statusFilter,
-      flagged: flagFilter,
-      provider: providerFilter,
-    });
-  }, [page, debouncedSearch, typeFilter, statusFilter, flagFilter, providerFilter, fetchTransactions]);
+  // The flag filter's UI values are flagged/unflagged; the API takes true/false.
+  const flaggedParam = flagFilter === "flagged" ? "true" : flagFilter === "unflagged" ? "false" : undefined;
+  const { data: txData, isFetching: transactionsLoading } = useAdminTransactions({
+    page,
+    search: debouncedSearch,
+    type: typeFilter,
+    status: statusFilter,
+    flagged: flaggedParam,
+    provider: providerFilter,
+  });
+  const transactions = txData?.rows ?? [];
+  const transactionTotal = txData?.total ?? 0;
+  const transactionPage = txData?.page ?? page;
 
   const formatCurrency = (amount: number, currency: AdminTransaction["currency"] = "NGN") => {
     if (currency === "USDC") {
@@ -291,15 +289,20 @@ export const AdminTransactions = () => {
         <Button
           variant="outline"
           className="gap-2"
-          onClick={() =>
-            adminApi.transactions.exportCsv({
-              ...(statusFilter !== "all" ? { status: statusFilter } : {}),
-              ...(typeFilter !== "all" ? { type: typeFilter } : {}),
-              ...(providerFilter !== "all" ? { provider: providerFilter } : {}),
-              ...(flagFilter !== "all" ? { flagged: flagFilter === "flagged" ? "true" : "false" } : {}),
-              ...(debouncedSearch ? { search: debouncedSearch } : {}),
-            })
-          }
+          onClick={async () => {
+            try {
+              const { truncated } = await adminApi.transactions.exportCsv({
+                ...(statusFilter !== "all" ? { status: statusFilter } : {}),
+                ...(typeFilter !== "all" ? { type: typeFilter } : {}),
+                ...(providerFilter !== "all" ? { provider: providerFilter } : {}),
+                ...(flaggedParam ? { flagged: flaggedParam } : {}),
+                ...(debouncedSearch ? { search: debouncedSearch } : {}),
+              });
+              if (truncated) toast.warning("Export capped at 50,000 rows — narrow the filters.");
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Export failed");
+            }
+          }}
         >
           <Download className="w-4 h-4" />
           Export

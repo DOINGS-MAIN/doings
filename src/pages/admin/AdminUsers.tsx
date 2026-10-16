@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { 
   Search, 
   Filter, 
@@ -42,19 +42,33 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { useAdminData } from "@/hooks/useAdminData";
+import { useAdminMutations, useAdminUsers } from "@/hooks/admin/useAdminQueries";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { PlatformUser, can } from "@/types/admin";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 export const AdminUsers = () => {
-  const { users, suspendUser, unsuspendUser, banUser, unbanUser } = useAdminData();
+  const { suspendUser, unsuspendUser, banUser, unbanUser } = useAdminMutations();
   const { session } = useAdminAuth();
   const canSuspend = can(session?.role, "users.suspend");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [kycFilter, setKycFilter] = useState<string>("all");
+  const [page, setPage] = useState(1);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  const { data, isFetching } = useAdminUsers({ page, status: statusFilter, search: debouncedSearch });
+  const users = data?.rows ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / 50));
   const [selectedUser, setSelectedUser] = useState<PlatformUser | null>(null);
   const [actionType, setActionType] = useState<"suspend" | "ban" | "view" | null>(null);
   const [actionReason, setActionReason] = useState("");
@@ -66,18 +80,6 @@ export const AdminUsers = () => {
       minimumFractionDigits: 0,
     }).format(amount);
   };
-
-  const filteredUsers = users.filter((user) => {
-    const matchesSearch = 
-      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (user.phone ?? "").includes(searchQuery) ||
-      user.email?.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesStatus = statusFilter === "all" || user.status === statusFilter;
-    const matchesKYC = kycFilter === "all" || user.kycStatus === kycFilter;
-    
-    return matchesSearch && matchesStatus && matchesKYC;
-  });
 
   const getStatusBadge = (status: PlatformUser["status"]) => {
     switch (status) {
@@ -153,7 +155,7 @@ export const AdminUsers = () => {
             className="pl-10"
           />
         </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
+        <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
           <SelectTrigger className="w-[150px]">
             <SelectValue placeholder="Status" />
           </SelectTrigger>
@@ -162,18 +164,6 @@ export const AdminUsers = () => {
             <SelectItem value="active">Active</SelectItem>
             <SelectItem value="suspended">Suspended</SelectItem>
             <SelectItem value="banned">Banned</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={kycFilter} onValueChange={setKycFilter}>
-          <SelectTrigger className="w-[150px]">
-            <SelectValue placeholder="KYC Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All KYC</SelectItem>
-            <SelectItem value="verified">Verified</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-            <SelectItem value="none">None</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -193,7 +183,7 @@ export const AdminUsers = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredUsers.map((user) => (
+            {users.map((user) => (
               <TableRow key={user.id} className="border-border">
                 <TableCell>
                   <div>
@@ -285,8 +275,12 @@ export const AdminUsers = () => {
 
       {/* Results count */}
       <p className="text-sm text-muted-foreground">
-        Showing {filteredUsers.length} of {users.length} users
+        Showing {users.length} of {total} users (page {page} of {totalPages}){isFetching ? " · updating…" : ""}
       </p>
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
+        <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+      </div>
 
       {/* Suspend/Ban Dialog */}
       <Dialog 

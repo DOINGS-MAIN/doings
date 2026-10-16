@@ -27,8 +27,8 @@ interface AdminSidebarProps {
   adminName: string;
   adminEmail: string;
   onLogout: () => void;
-  pendingKYC: number;
   flaggedTransactions: number;
+  stuckWithdrawals: number;
 }
 
 // Each item shows when the role has any of its permissions (the server enforces the same matrix).
@@ -55,14 +55,14 @@ export const AdminSidebar = ({
   adminName,
   adminEmail,
   onLogout,
-  pendingKYC, 
-  flaggedTransactions 
+  flaggedTransactions,
+  stuckWithdrawals,
 }: AdminSidebarProps) => {
   const location = useLocation();
   
   const getBadgeCount = (path: string): number | undefined => {
-    if (path === "/admin/kyc" && pendingKYC > 0) return pendingKYC;
     if (path === "/admin/transactions" && flaggedTransactions > 0) return flaggedTransactions;
+    if (path === "/admin/queue" && stuckWithdrawals > 0) return stuckWithdrawals;
     return undefined;
   };
 
