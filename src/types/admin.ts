@@ -362,7 +362,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, readonly string[]> = {
   compliance: ["dashboard", "kyc", "users.view", "users.suspend"],
   moderation: [
     "dashboard", "events.view", "events.flag", "events.end", "ads", "floor_avatars", "users.view",
-    "giveaways.view", "giveaways.stop",
+    "giveaways.view", "giveaways.stop", "events.floor",
   ],
 };
 

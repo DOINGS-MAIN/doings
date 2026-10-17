@@ -16,7 +16,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, readonly string[]> = {
   compliance: ["dashboard", "kyc", "users.view", "users.suspend"],
   moderation: [
     "dashboard", "events.view", "events.flag", "events.end", "ads", "floor_avatars", "users.view",
-    "giveaways.view", "giveaways.stop",
+    "giveaways.view", "giveaways.stop", "events.floor",
   ],
 };
 
@@ -54,6 +54,8 @@ export function permissionFor(resource: string, method: string, action?: string,
       if (get && !action) return "events.view";
       if (post && hasId && (action === "flag" || action === "unflag")) return "events.flag";
       if (post && hasId && action === "end") return "events.end";
+      if (post && hasId && action === "advance-floor") return "events.end";
+      if (post && hasId && action === "remove-hold") return "events.floor";
       return null;
     case "team":
     case "audit":
@@ -190,4 +192,11 @@ export function maskGiveawayCode(code: string | null | undefined, status: string
   const c = (code ?? "").trim();
   if (!c) return "";
   return status === "active" ? `••••${c.slice(-2)}` : c;
+}
+
+// The one nested admin route: events/:id/holds/:holdId/remove (taking one spray off a live floor).
+export function eventHoldRoute(rest: string[]): { id: string; holdId: string } | null {
+  if (rest.length !== 5 || rest[0] !== "events" || rest[2] !== "holds" || rest[4] !== "remove") return null;
+  if (!rest[1] || !rest[3]) return null;
+  return { id: rest[1], holdId: rest[3] };
 }
