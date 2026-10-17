@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { 
   Search, 
   MoreHorizontal,
@@ -7,8 +8,6 @@ import {
   StopCircle,
   Eye,
   Users,
-  Gift,
-  Coins,
   AlertTriangle
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -49,7 +48,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAdminEvents, useAdminMutations, type EventTab } from "@/hooks/admin/useAdminQueries";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { AdminEvent, can } from "@/types/admin";
-import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 export const AdminEvents = () => {
@@ -68,7 +66,8 @@ export const AdminEvents = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [selectedEvent, setSelectedEvent] = useState<AdminEvent | null>(null);
-  const [actionType, setActionType] = useState<"flag" | "end" | "view" | null>(null);
+  const [actionType, setActionType] = useState<"flag" | "end" | null>(null);
+  const navigate = useNavigate();
   const [flagReason, setFlagReason] = useState("");
 
 
@@ -175,9 +174,10 @@ export const AdminEvents = () => {
             </TableRow>
           ) : (
             eventList.map((event) => (
-              <TableRow 
-                key={event.id} 
-                className={`border-border ${event.flagged ? "bg-destructive/5" : ""}`}
+              <TableRow
+                key={event.id}
+                className={`border-border cursor-pointer ${event.flagged ? "bg-destructive/5" : ""}`}
+                onClick={() => navigate(`/admin/events/${event.id}`)}
               >
                 <TableCell>
                   <div className="flex items-center gap-2">
@@ -203,7 +203,7 @@ export const AdminEvents = () => {
                 <TableCell className="font-medium">
                   {formatCurrency(event.totalSprayed)}
                 </TableCell>
-                <TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -211,14 +211,9 @@ export const AdminEvents = () => {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuItem 
-                        onClick={() => {
-                          setSelectedEvent(event);
-                          setActionType("view");
-                        }}
-                      >
+                      <DropdownMenuItem onClick={() => navigate(`/admin/events/${event.id}`)}>
                         <Eye className="w-4 h-4 mr-2" />
-                        View Details
+                        Open live view
                       </DropdownMenuItem>
                       {(canFlag || (canEnd && event.status === "live")) && <DropdownMenuSeparator />}
                       {!canFlag ? null : event.flagged ? (
@@ -424,86 +419,6 @@ export const AdminEvents = () => {
         </DialogContent>
       </Dialog>
 
-      {/* View Event Dialog */}
-      <Dialog 
-        open={!!selectedEvent && actionType === "view"} 
-        onOpenChange={() => {
-          setSelectedEvent(null);
-          setActionType(null);
-        }}
-      >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Event Details</DialogTitle>
-          </DialogHeader>
-          {selectedEvent && (
-            <div className="space-y-6 py-4">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h3 className="text-xl font-bold">{selectedEvent.name}</h3>
-                  <p className="text-muted-foreground">Code: {selectedEvent.code}</p>
-                </div>
-                {getStatusBadge(selectedEvent.status)}
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-muted p-4 rounded-lg">
-                  <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                    <Users className="w-4 h-4" />
-                    <span className="text-sm">Participants</span>
-                  </div>
-                  <p className="text-2xl font-bold">{selectedEvent.participantCount}</p>
-                </div>
-                <div className="bg-muted p-4 rounded-lg">
-                  <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                    <Coins className="w-4 h-4" />
-                    <span className="text-sm">Total Sprayed</span>
-                  </div>
-                  <p className="text-2xl font-bold">{formatCurrency(selectedEvent.totalSprayed)}</p>
-                </div>
-                <div className="bg-muted p-4 rounded-lg">
-                  <div className="flex items-center gap-2 text-muted-foreground mb-1">
-                    <Gift className="w-4 h-4" />
-                    <span className="text-sm">Giveaways</span>
-                  </div>
-                  <p className="text-2xl font-bold">{selectedEvent.giveawayCount}</p>
-                </div>
-                <div className="bg-muted p-4 rounded-lg">
-                  <p className="text-sm text-muted-foreground mb-1">Event Type</p>
-                  {getTypeBadge(selectedEvent.type)}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Host</span>
-                  <span className="font-medium">{selectedEvent.hostName}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Created</span>
-                  <span>{format(selectedEvent.createdAt, "MMM d, yyyy")}</span>
-                </div>
-                {selectedEvent.scheduledAt && (
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Scheduled</span>
-                    <span>{format(selectedEvent.scheduledAt, "MMM d, yyyy HH:mm")}</span>
-                  </div>
-                )}
-              </div>
-
-              {selectedEvent.flagged && selectedEvent.flagReason && (
-                <div className="bg-destructive/10 p-4 rounded-lg">
-                  <p className="text-sm font-medium text-destructive flex items-center gap-2">
-                    <Flag className="w-4 h-4" />
-                    Flagged
-                  </p>
-                  <p className="text-sm mt-1">{selectedEvent.flagReason}</p>
-                </div>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

@@ -31,6 +31,7 @@ import { AdminPayouts } from "./pages/admin/AdminPayouts";
 import { AdminBundleOrders } from "./pages/admin/AdminBundleOrders";
 import { AdminUser360 } from "./pages/admin/AdminUser360";
 import { AdminGiveaways } from "./pages/admin/AdminGiveaways";
+import { AdminLiveEvent } from "./pages/admin/AdminLiveEvent";
 import { AdminKYC } from "./pages/admin/AdminKYC";
 import { AdminEvents } from "./pages/admin/AdminEvents";
 import { AdminLogin } from "./pages/admin/AdminLogin";
@@ -109,6 +110,7 @@ const App = () => (
               <Route path="ads" element={<AdminAds />} />
               <Route path="kyc" element={<AdminKYC />} />
               <Route path="events" element={<AdminEvents />} />
+              <Route path="events/:id" element={<AdminLiveEvent />} />
               <Route path="team" element={<AdminTeam />} />
               <Route path="audit" element={<AdminAuditLog />} />
               <Route path="settings" element={<AdminSettings />} />
