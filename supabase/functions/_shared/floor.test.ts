@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { floorErrorResponse, floorRateLimit, parseFloorAction } from "./floor.ts";
+import { floorErrorResponse, floorRateLimit, parseFloorAction, STOP_REFUSED } from "./floor.ts";
 
 const EV = "11111111-1111-4111-8111-111111111101";
 const HOLD = "22222222-2222-4222-8222-222222222202";
@@ -45,4 +45,10 @@ Deno.test("floorRateLimit: stop and leave get their own bucket", () => {
   assertEquals(floorRateLimit("queue", "u1"), { key: "spray:u1", maxRequests: 30, windowMs: 60_000 });
   assertEquals(floorRateLimit("stop", "u1"), { key: "spray-floor:u1", maxRequests: 60, windowMs: 60_000 });
   assertEquals(floorRateLimit("leave", "u1"), { key: "spray-floor:u1", maxRequests: 60, windowMs: 60_000 });
+});
+
+Deno.test("stop is refused with a 409 and a clear message", () => {
+  assertEquals(STOP_REFUSED, "Sprays can't be stopped once they start");
+  assertEquals(floorErrorResponse(STOP_REFUSED), { status: 409, error: STOP_REFUSED, code: "SPRAY_CANNOT_STOP" });
+  assertEquals(floorErrorResponse(`ERROR: ${STOP_REFUSED}`).status, 409);
 });

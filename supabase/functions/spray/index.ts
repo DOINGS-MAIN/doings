@@ -1,7 +1,7 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getAuthedClient, getServiceClient } from "../_shared/db.ts";
-import { floorErrorResponse, floorRateLimit, parseFloorAction } from "../_shared/floor.ts";
+import { floorErrorResponse, floorRateLimit, parseFloorAction, STOP_REFUSED } from "../_shared/floor.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
 import {
@@ -140,7 +140,7 @@ async function settleHoldAndRespond(
   });
 }
 
-/** Dance floor: queue (hold + line), stop (server-charged), leave (release). Returns the caller's floor view. */
+/** Dance floor: queue (hold + line; charged in full on stepping onto the floor), leave (release). Stop is refused. Returns the caller's floor view. */
 async function handleFloorAction(
   supabase: ReturnType<typeof getServiceClient>,
   authHeader: string,
@@ -175,9 +175,11 @@ async function handleFloorAction(
       });
       if (error) throw new Error(error.message);
       eventId = parsed.eventId;
+    } else if (parsed.action === "stop") {
+      // Stop is retired (101): a spray is paid in full on stepping onto the floor and runs its turn.
+      throw new Error(STOP_REFUSED);
     } else {
-      const fn = parsed.action === "stop" ? "stop_floor_spray" : "leave_floor_queue";
-      const { data, error } = await supabase.rpc(fn, { p_hold_id: parsed.holdId, p_sprayer_id: sprayerId });
+      const { data, error } = await supabase.rpc("leave_floor_queue", { p_hold_id: parsed.holdId, p_sprayer_id: sprayerId });
       if (error) throw new Error(error.message);
       eventId = data as string;
     }
