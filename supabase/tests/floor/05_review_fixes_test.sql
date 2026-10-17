@@ -14,21 +14,27 @@ BEGIN
   UPDATE public.spray_holds SET floor_started_at = now() - interval '30 seconds', floor_ends_at = now() + interval '90 seconds' WHERE id = ha;
   UPDATE public.events SET status = 'ended' WHERE id = ev;      -- no advance call: the trigger must settle
   SELECT * INTO r FROM public.spray_holds WHERE id = ha;
-  ASSERT r.status = 'settled' AND r.charged_amount_kobo = 500000, format('30 s of 120 s = 5 notes, got %s/%s', r.status, r.charged_amount_kobo);
+  ASSERT r.status = 'settled' AND r.charged_amount_kobo = 2000000 AND r.release_reason = 'event_ended_on_floor',
+    format('paid on stepping on; the end moves no money, got %s/%s', r.status, r.charged_amount_kobo);
   SELECT * INTO r FROM public.spray_holds WHERE id = hb;
   ASSERT r.status = 'released' AND r.release_reason = 'event_ended', 'queue released by the end trigger';
   ASSERT (SELECT ended_at FROM public.events WHERE id = ev) IS NOT NULL, 'ended_at stamped';
   INSERT INTO t VALUES ('ev', ev);
 END $$;
 
--- Critical 1 (cap): a late settle never charges past ended_at.
+-- Critical 1 (cap), legacy pre-101 hold: a late settle never charges past ended_at.
 DO $$
 DECLARE host uuid; ev uuid; a uuid; ha uuid; r record;
 BEGIN
   host := pg_temp.mk_user('rc-host@test.local', 0);
   ev := pg_temp.mk_event(host);
   a := pg_temp.mk_user('rc-a@test.local', 10000000);
-  ha := public.queue_floor_spray(ev, a, 2000000, 1000, 20);
+  UPDATE public.wallets SET locked_balance = 2000000 WHERE user_id = a AND currency = 'NGN';
+  INSERT INTO public.spray_holds (event_id, sprayer_id, wallet_id, planned_amount_kobo, denomination, note_count, status, metadata,
+                                  expires_at, queued_at, floor_seconds, floor_band_seconds, floor_slot, floor_started_at, floor_ends_at)
+  VALUES (ev, a, (SELECT id FROM public.wallets WHERE user_id = a AND currency = 'NGN'), 2000000, 1000, 20, 'on_floor',
+          '{"floor": true}', now() + interval '1 hour', now() - interval '3 minutes', 120, 120, 1, now(), now() + interval '120 seconds')
+  RETURNING id INTO ha;
   -- simulate an end that the trigger could not settle: status already ended 90 s ago, row still on the floor
   ALTER TABLE public.events DISABLE TRIGGER tr_events_floor_end;
   UPDATE public.events SET status = 'ended', ended_at = now() - interval '90 seconds' WHERE id = ev;
@@ -49,7 +55,8 @@ BEGIN
   ha := public.queue_floor_spray(ev, a, 20000, 200, 1);
   UPDATE public.events SET status = 'ended' WHERE id = ev;
   SELECT * INTO r FROM public.spray_holds WHERE id = ha;
-  ASSERT r.status = 'released' AND r.release_reason = 'event_ended_on_floor', format('got %s', r.release_reason);
+  ASSERT r.status = 'settled' AND r.release_reason = 'event_ended_on_floor' AND r.charged_amount_kobo = 20000,
+    format('one note, paid on stepping on, got %s/%s', r.status, r.release_reason);
 END $$;
 
 -- Important 4: settings with missing keys are rejected.
