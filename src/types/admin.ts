@@ -288,6 +288,8 @@ export interface AdminGiveaway {
   /** Recipients so far: the maximum less what the remainder can still pay. */
   redeemedCount: number;
   eventId?: string;
+  eventTitle?: string;
+  eventCode?: string;
   isPrivate: boolean;
   stoppedAt?: Date;
   stopReason?: string;

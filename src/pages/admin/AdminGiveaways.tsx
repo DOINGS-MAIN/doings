@@ -16,6 +16,8 @@ import { useAdminGiveaway, useAdminGiveaways, useAdminMutations } from "@/hooks/
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { can, type AdminGiveaway } from "@/types/admin";
 
+const USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const naira = (n: number) =>
   new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", minimumFractionDigits: 0 }).format(n);
 
@@ -176,7 +178,9 @@ export const AdminGiveaways = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const creatorId = params.get("creator") ?? "";
+  // Ignore a malformed ?creator= rather than showing a filter chip that isn't applied.
+  const creatorParam = params.get("creator") ?? "";
+  const creatorId = USER_ID.test(creatorParam) ? creatorParam : "";
   const openId = params.get("open");
 
   useEffect(() => {
@@ -250,12 +254,13 @@ export const AdminGiveaways = () => {
               <TableHead className="text-muted-foreground">Per person</TableHead>
               <TableHead className="text-muted-foreground">Remaining</TableHead>
               <TableHead className="text-muted-foreground">Recipients</TableHead>
+              <TableHead className="text-muted-foreground">Event</TableHead>
               <TableHead className="text-muted-foreground">Status</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
-              <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">{isFetching ? "Loading…" : "No giveaways"}</TableCell></TableRow>
+              <TableRow><TableCell colSpan={9} className="text-center py-8 text-muted-foreground">{isFetching ? "Loading…" : "No giveaways"}</TableCell></TableRow>
             ) : (
               rows.map((g) => (
                 <TableRow key={g.id} className="border-border cursor-pointer" onClick={() => setParam("open", g.id)}>
@@ -269,6 +274,9 @@ export const AdminGiveaways = () => {
                   <TableCell>{naira(g.perPerson)}</TableCell>
                   <TableCell>{naira(g.remaining)}</TableCell>
                   <TableCell>{g.redeemedCount}/{g.maxRecipients}</TableCell>
+                  <TableCell className="text-sm">
+                    {g.eventTitle ? <>{g.eventTitle} <span className="font-mono text-xs text-muted-foreground">{g.eventCode}</span></> : "—"}
+                  </TableCell>
                   <TableCell>{statusBadge(g.status)}</TableCell>
                 </TableRow>
               ))

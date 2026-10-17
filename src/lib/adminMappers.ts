@@ -443,6 +443,11 @@ export function mapGiveaway(g: Record<string, unknown>): AdminGiveaway {
   const perKobo = Number(g.per_person_amount ?? 0);
   const remainingKobo = Number(g.remaining_amount ?? 0);
   const max = Number(g.max_recipients ?? 0);
+  // The real claim count when the server sent one (a stop zeroes the remainder, so it can't tell);
+  // otherwise infer it from what the remainder can still pay.
+  const embedded = (g.giveaway_redemptions as { count?: number }[] | undefined)?.[0]?.count;
+  const counted = embedded ?? (g.redemption_count as number | undefined);
+  const event = g.events as Record<string, unknown> | null | undefined;
   return {
     id: g.id as string,
     creatorId: (g.creator_id as string) ?? "",
@@ -455,8 +460,12 @@ export function mapGiveaway(g: Record<string, unknown>): AdminGiveaway {
     perPerson: perKobo / 100,
     remaining: remainingKobo / 100,
     maxRecipients: max,
-    redeemedCount: Math.max(0, max - (perKobo > 0 ? Math.floor(remainingKobo / perKobo) : 0)),
+    redeemedCount: counted != null
+      ? Number(counted)
+      : Math.max(0, max - (perKobo > 0 ? Math.floor(remainingKobo / perKobo) : 0)),
     eventId: str(g.event_id),
+    eventTitle: str(event?.title),
+    eventCode: str(event?.event_code),
     isPrivate: !!g.is_private,
     stoppedAt: dateOr(g.stopped_at),
     stopReason: str(g.stop_reason),
@@ -468,7 +477,12 @@ export function mapGiveawayDetail(res: Record<string, unknown>): AdminGiveawayDe
   const g = (res.giveaway ?? {}) as Record<string, unknown>;
   const c = res.creator as Record<string, unknown> | null;
   const e = res.event as Record<string, unknown> | null;
-  const giveaway = mapGiveaway({ ...g, user_name: (c?.full_name as string) ?? g.user_name });
+  const giveaway = mapGiveaway({
+    ...g,
+    user_name: (c?.full_name as string) ?? g.user_name,
+    redemption_count: res.redemption_count ?? g.redemption_count,
+    events: e ?? g.events,
+  });
   return {
     giveaway,
     creator: c ? { id: c.id as string, name: (c.full_name as string) ?? "", email: str(c.email) } : null,

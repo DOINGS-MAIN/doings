@@ -234,6 +234,7 @@ Deno.test("giveawayCodeMatches: the code, any case, spaces trimmed, never empty"
   assertEquals(giveawayCodeMatches("T098AAA", "T098AAA"), true);
   assertEquals(giveawayCodeMatches(" t098aaa ", "T098AAA"), true);
   assertEquals(giveawayCodeMatches("T098AA", "T098AAA"), false);
+  assertEquals(giveawayCodeMatches("T098 AAA", "T098AAA"), true);
   assertEquals(giveawayCodeMatches("", ""), false);
   assertEquals(giveawayCodeMatches(undefined, "T098AAA"), false);
   assertEquals(giveawayCodeMatches("x", null), false);

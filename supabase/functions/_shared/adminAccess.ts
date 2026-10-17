@@ -176,8 +176,9 @@ export function maskAccountNumber(n: string | null | undefined): string {
   return s ? `••••${s.slice(-4)}` : "";
 }
 
-// Stopping a giveaway needs its code typed back (codes are case-insensitive).
-export function giveawayCodeMatches(typed: string | null | undefined, code: string | null | undefined): boolean {
-  const c = (code ?? "").trim().toUpperCase();
-  return c !== "" && (typed ?? "").trim().toUpperCase() === c;
+// Stopping a giveaway needs its code typed back (codes are case-insensitive; spaces are ignored).
+export function giveawayCodeMatches(typed: unknown, code: string | null | undefined): boolean {
+  const norm = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, "").toUpperCase() : "");
+  const c = norm(code);
+  return c !== "" && norm(typed) === c;
 }

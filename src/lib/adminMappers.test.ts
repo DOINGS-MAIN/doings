@@ -119,7 +119,11 @@ describe("admin mappers", () => {
     const g = mapGiveaway({ id: "g1", creator_id: "u1", user_name: "Ada", title: "Party", code: "ABC123", status: "active", type: "live",
       total_amount: 50000, per_person_amount: 10000, remaining_amount: 30000, max_recipients: 5, created_at: "2026-10-17T00:00:00Z" });
     expect(g).toMatchObject({ creatorName: "Ada", total: 500, perPerson: 100, remaining: 300, maxRecipients: 5, redeemedCount: 2 });
-    expect(mapGiveaway({ id: "g2", total_amount: 50000, per_person_amount: 10000, remaining_amount: 0, max_recipients: 5 }).redeemedCount).toBe(5);
+    expect(mapGiveaway({ id: "g2", total_amount: 50000, per_person_amount: 10000, remaining_amount: 0, max_recipients: 5, status: "exhausted" }).redeemedCount).toBe(5);
+    // A stop sets remaining to 0, so the remainder can't tell how many claimed: use the real count.
+    const stopped = mapGiveaway({ id: "g3", status: "stopped", total_amount: 50000, per_person_amount: 10000, remaining_amount: 0,
+      max_recipients: 5, giveaway_redemptions: [{ count: 2 }], events: { title: "Wedding", event_code: "WED1" } });
+    expect(stopped).toMatchObject({ redeemedCount: 2, eventTitle: "Wedding", eventCode: "WED1" });
   });
   it("maps a stopped giveaway's detail with redemptions", () => {
     const d = mapGiveawayDetail({
@@ -132,5 +136,7 @@ describe("admin mappers", () => {
     expect(d.giveaway).toMatchObject({ status: "stopped", stopReason: "Misleading" });
     expect(d.redemptions[0]).toMatchObject({ userName: "Ben", amount: 100 });
     expect(d).toMatchObject({ refundTransactionId: "t9", stoppedByEmail: "mod@doings.app", creator: { name: "Ada" } });
+    expect(mapGiveawayDetail({ giveaway: { id: "g1", status: "stopped", remaining_amount: 0, per_person_amount: 10000, max_recipients: 5 },
+      redemptions: [], redemption_count: 3 }).giveaway.redeemedCount).toBe(3);
   });
 });

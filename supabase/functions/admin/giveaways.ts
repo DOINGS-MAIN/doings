@@ -14,15 +14,20 @@ export async function handleGiveaways(ctx: AdminRouteCtx): Promise<Response | nu
   const { req, supabase, authId, action, id } = ctx;
   const url = new URL(req.url);
 
+  if (id && !UUID.test(id)) return withCors({ error: "Giveaway not found" }, { status: 404 });
+
   if (req.method === "GET" && !id) {
     const { page, limit, from, to } = parsePaging(url.searchParams);
-    let q = supabase.from("giveaways").select(COLUMNS, { count: "exact" });
+    // The real claim count and the event come embedded (a stop zeroes the remainder).
+    let q = supabase.from("giveaways")
+      .select(`${COLUMNS}, giveaway_redemptions(count), events(title, event_code)`, { count: "exact" });
     const status = url.searchParams.get("status");
     if (status && STATUSES.has(status)) q = q.eq("status", status);
     const type = url.searchParams.get("type");
     if (type && TYPES.has(type)) q = q.eq("type", type);
     const creator = url.searchParams.get("creator_id");
-    if (creator && UUID.test(creator)) q = q.eq("creator_id", creator);
+    if (creator && !UUID.test(creator)) return withCors({ error: "creator_id must be a user id" }, { status: 400 });
+    if (creator) q = q.eq("creator_id", creator);
     const search = orIlike(["code", "title"], url.searchParams.get("search"));
     if (search) q = q.or(search);
     const { data, count, error } = await q
@@ -44,13 +49,14 @@ export async function handleGiveaways(ctx: AdminRouteCtx): Promise<Response | nu
       if (r.error) throw r.error;
       return r.data;
     };
-    const [creator, event, redemptions, funding, refund] = await Promise.all([
+    const [creator, event, redemptions, redemptionCount, funding, refund] = await Promise.all([
       supabase.from("users").select("id, full_name, email, username").eq("id", g.creator_id).maybeSingle(),
       g.event_id
         ? supabase.from("events").select("id, title, event_code, status").eq("id", g.event_id).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
       supabase.from("giveaway_redemptions").select("id, user_id, amount, transaction_id, redeemed_at")
         .eq("giveaway_id", id).order("redeemed_at", { ascending: false }).limit(500),
+      supabase.from("giveaway_redemptions").select("id", { count: "exact", head: true }).eq("giveaway_id", id),
       g.funding_transaction_id
         ? supabase.from("transactions").select("id, amount, status, created_at").eq("id", g.funding_transaction_id).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
@@ -68,6 +74,10 @@ export async function handleGiveaways(ctx: AdminRouteCtx): Promise<Response | nu
       creator: must(creator),
       event: must(event),
       redemptions: await ctx.attachUserFields((must(redemptions) ?? []) as Record<string, unknown>[]),
+      redemption_count: (() => {
+        if (redemptionCount.error) throw redemptionCount.error;
+        return redemptionCount.count ?? 0;
+      })(),
       funding_transaction: must(funding),
       refund_transaction: must(refund),
       stopped_by_email: stoppedByEmail,
@@ -75,7 +85,10 @@ export async function handleGiveaways(ctx: AdminRouteCtx): Promise<Response | nu
   }
 
   if (req.method === "POST" && id && action === "stop") {
-    const body = await req.json().catch(() => ({})) as { reason?: string; confirm?: string };
+    const body = await req.json().catch(() => ({})) as { reason?: unknown; confirm?: unknown };
+    if (typeof body.reason !== "string" || typeof body.confirm !== "string") {
+      return withCors({ error: "reason and confirm are required" }, { status: 400 });
+    }
     const { data: g, error } = await supabase.from("giveaways").select("id, code").eq("id", id).maybeSingle();
     if (error) throw error;
     if (!g) return withCors({ error: "Giveaway not found" }, { status: 404 });
@@ -83,7 +96,7 @@ export async function handleGiveaways(ctx: AdminRouteCtx): Promise<Response | nu
       return withCors({ error: "Type the giveaway code to confirm" }, { status: 400 });
     }
     const { data, error: rpcErr } = await supabase.rpc("admin_stop_giveaway", {
-      p_giveaway_id: id, p_admin_auth_id: authId, p_reason: body.reason ?? "",
+      p_giveaway_id: id, p_admin_auth_id: authId, p_reason: body.reason,
     });
     if (rpcErr) return withCors({ error: rpcErr.message }, { status: 409 });
     return withCors({ ok: true, refunded: Number((data as { refunded?: number })?.refunded ?? 0) });

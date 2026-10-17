@@ -23,6 +23,8 @@ BEGIN
   IF NOT FOUND THEN RAISE EXCEPTION 'Giveaway not found'; END IF;
   IF v_g.status <> 'active' THEN RAISE EXCEPTION 'Giveaway is not active'; END IF;
   IF v_reason = '' THEN RAISE EXCEPTION 'A reason is required'; END IF;
+  -- The reason goes into the creator's notification and the audit log.
+  IF length(v_reason) > 500 THEN RAISE EXCEPTION 'Keep the reason under 500 characters'; END IF;
 
   -- The remainder only ever goes back to the creator.
   v_out := public.stop_giveaway_funded(v_g.creator_id, v_g.id);
@@ -30,7 +32,9 @@ BEGIN
 
   UPDATE public.giveaways SET stopped_by = p_admin_auth_id, stop_reason = v_reason WHERE id = v_g.id;
 
-  v_body := format('Your giveaway "%s" was stopped by Doings: %s.', v_g.title, v_reason);
+  -- No second full stop when the reason already ends a sentence.
+  v_body := format('Your giveaway "%s" was stopped by Doings: %s', v_g.title, v_reason)
+    || CASE WHEN right(v_reason, 1) IN ('.', '!', '?') THEN '' ELSE '.' END;
   IF v_refunded > 0 THEN
     v_body := v_body || format(' ₦%s was returned to your Bag.', btrim(to_char(v_refunded / 100.0, 'FM999G999G990D00')));
   END IF;
