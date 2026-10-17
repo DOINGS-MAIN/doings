@@ -10,7 +10,8 @@ BEGIN
   ASSERT (s->>'active_users')::bigint = (SELECT count(*) FROM public.users WHERE status = 'active'), 'active_users';
   ASSERT (s->>'blocked_users')::bigint = (SELECT count(*) FROM public.users WHERE status IN ('suspended','banned')), 'blocked_users';
   ASSERT (s->>'total_transactions')::bigint = (SELECT count(*) FROM public.transactions WHERE status = 'completed' AND amount > 0), 'total_transactions';
-  ASSERT (s->>'total_volume')::bigint = (SELECT COALESCE(sum(abs(amount)),0) FROM public.transactions WHERE status = 'completed' AND amount > 0), 'total_volume';
+  -- total_volume is NGN only since 096 (USDC is reported separately as usdc_volume).
+  ASSERT (s->>'total_volume')::bigint = (SELECT COALESCE(sum(abs(amount)),0) FROM public.transactions WHERE status = 'completed' AND amount > 0 AND currency = 'NGN'), 'total_volume';
   ASSERT (s->>'total_fee_revenue')::bigint = (public.get_fee_revenue_stats()->>'total_fee_kobo')::bigint, 'total_fee_revenue';
   ASSERT (s->>'total_events')::bigint = (SELECT count(*) FROM public.events), 'total_events';
   ASSERT (s->>'live_events')::bigint = (SELECT count(*) FROM public.events WHERE status = 'live'), 'live_events';
