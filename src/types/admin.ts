@@ -190,6 +190,54 @@ export interface AdminEvent {
   isPrivate?: boolean;
 }
 
+export interface AdminPayout {
+  id: string;
+  userId: string;
+  userName: string;
+  currency: "NGN" | "USDC";
+  /** Display units (naira or USDC), always positive. */
+  amount: number;
+  fee: number;
+  status: string;
+  provider?: string;
+  reference: string;
+  providerRef?: string;
+  kind: "sale" | "withdrawal";
+  bundles?: number;
+  needsReview: boolean;
+  lastCheck?: { status: string; providerStatus?: string; at: Date };
+  manualResolution?: { outcome: "paid" | "failed"; reason: string; at: Date };
+  failureReason?: string;
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
+export interface AdminBundleOrder {
+  id: string;
+  userId: string;
+  userName: string;
+  currency: "NGN" | "USDC";
+  bundles: number;
+  /** Display units: naira for NGN orders, USDC for USDC orders. */
+  amount: number;
+  status: string;
+  txRef: string;
+  providerRef?: string;
+  failureReason?: string;
+  refund?: { reference: string; amount: number; note?: string; at: Date };
+  /** Paid (provider ref recorded) but failed, with no outside refund recorded yet. */
+  paidButFailed: boolean;
+  createdAt: Date;
+}
+
+export interface MoneyOverview {
+  byType: { type: string; currency: "NGN" | "USDC"; countToday: number; amountToday: number; count7d: number; amount7d: number }[];
+  queue: { payoutsNeedingReview: number; ordersPaidFailed: number; ordersPendingFloat: number };
+  /** Treasury wallets, in display units. */
+  treasury: { currency: string; balance: number; locked: number }[];
+  recentTopups: { id: string; currency: string; amount: number; reference?: string; note?: string; createdAt: Date }[];
+}
+
 export type PspCapability = "wallet_funding" | "disbursement" | "bank_verify";
 export type PspProviderStatus = "active" | "disabled" | "sandbox_only";
 export type PspEnv = "sandbox" | "production";
@@ -223,6 +271,8 @@ export interface AdminStats {
   totalEvents: number;
   flaggedTransactions: number;
   stuckWithdrawals: number;
+  usdcVolume: number;
+  usdcTodayVolume: number;
 }
 
 // Role permissions: mirrors supabase/functions/_shared/adminAccess.ts (the server is the authority;

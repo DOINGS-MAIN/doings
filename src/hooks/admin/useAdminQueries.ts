@@ -2,7 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { admin as adminApi } from "@/lib/supabase";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { can } from "@/types/admin";
-import { mapEvent, mapKyc, mapStats, mapTransaction, mapUser } from "@/lib/adminMappers";
+import { mapBundleOrder, mapEvent, mapKyc, mapPaymentsOverview, mapPayout, mapQueue, mapStats, mapTransaction, mapUser } from "@/lib/adminMappers";
 
 const STALE = 30_000;
 export type EventTab = "live" | "upcoming" | "ended" | "flagged";
@@ -15,6 +15,10 @@ export const adminKeys = {
   events: (p: object = {}) => ["admin", "events", p] as const,
   kyc: (p: object = {}) => ["admin", "kyc", p] as const,
   transactions: (p: object = {}) => ["admin", "transactions", p] as const,
+  payouts: (p: object = {}) => ["admin", "payouts", p] as const,
+  bundleOrders: (p: object = {}) => ["admin", "bundleOrders", p] as const,
+  payments: () => ["admin", "payments"] as const,
+  queue: () => ["admin", "queue"] as const,
 };
 
 const useRole = () => useAdminAuth().session?.role;
@@ -97,6 +101,95 @@ export function useAdminTransactions(p: TransactionListParams & { page: number; 
   });
 }
 
+export function useAdminPayouts(p: { page: number; status?: string; currency?: string; kind?: string; needsReview?: boolean; search?: string }) {
+  const role = useRole();
+  return useQuery({
+    queryKey: adminKeys.payouts(p),
+    queryFn: async () => {
+      const res = (await adminApi.payouts.list({
+        page: p.page, limit: 50, status: opt(p.status), currency: opt(p.currency), kind: opt(p.kind),
+        needs_review: p.needsReview ? "true" : undefined, search: p.search?.trim() || undefined,
+      })) as { payouts?: Record<string, unknown>[]; total?: number };
+      return { rows: (res.payouts ?? []).map(mapPayout), total: res.total ?? 0 };
+    },
+    enabled: can(role, "transactions.view"),
+    staleTime: STALE,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useAdminPayout(id: string | null) {
+  const role = useRole();
+  return useQuery({
+    queryKey: adminKeys.payouts({ id }),
+    queryFn: async () => {
+      const res = (await adminApi.payouts.get(id!)) as Record<string, unknown>;
+      return {
+        payout: mapPayout((res.payout as Record<string, unknown>) ?? {}),
+        user: (res.user as Record<string, unknown>) ?? null,
+        pspEvents: (res.psp_events as Record<string, unknown>[]) ?? [],
+        webhooks: (res.webhooks as Record<string, unknown>[]) ?? [],
+      };
+    },
+    enabled: can(role, "transactions.view") && !!id,
+    staleTime: STALE,
+  });
+}
+
+export function useAdminBundleOrders(p: { page: number; status?: string; currency?: string; needsRefund?: boolean; search?: string }) {
+  const role = useRole();
+  return useQuery({
+    queryKey: adminKeys.bundleOrders(p),
+    queryFn: async () => {
+      const res = (await adminApi.bundleOrders.list({
+        page: p.page, limit: 50, status: opt(p.status), currency: opt(p.currency),
+        needs_refund: p.needsRefund ? "true" : undefined, search: p.search?.trim() || undefined,
+      })) as { orders?: Record<string, unknown>[]; total?: number };
+      return { rows: (res.orders ?? []).map(mapBundleOrder), total: res.total ?? 0 };
+    },
+    enabled: can(role, "transactions.view"),
+    staleTime: STALE,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useAdminBundleOrder(id: string | null) {
+  const role = useRole();
+  return useQuery({
+    queryKey: adminKeys.bundleOrders({ id }),
+    queryFn: async () => {
+      const res = (await adminApi.bundleOrders.get(id!)) as Record<string, unknown>;
+      return {
+        order: mapBundleOrder((res.order as Record<string, unknown>) ?? {}),
+        user: (res.user as Record<string, unknown>) ?? null,
+        creditTransaction: (res.credit_transaction as Record<string, unknown>) ?? null,
+      };
+    },
+    enabled: can(role, "transactions.view") && !!id,
+    staleTime: STALE,
+  });
+}
+
+export function useAdminPaymentsOverview() {
+  const role = useRole();
+  return useQuery({
+    queryKey: adminKeys.payments(),
+    queryFn: async () => mapPaymentsOverview((await adminApi.payments.overview()) as Record<string, unknown>),
+    enabled: can(role, "payments"),
+    staleTime: STALE,
+  });
+}
+
+export function useAdminQueue() {
+  const role = useRole();
+  return useQuery({
+    queryKey: adminKeys.queue(),
+    queryFn: async () => mapQueue((await adminApi.queue()) as Record<string, unknown>),
+    enabled: can(role, "queue"),
+    staleTime: STALE,
+  });
+}
+
 export function useAdminMutations() {
   const qc = useQueryClient();
   const refresh = (...keys: (keyof typeof adminKeys)[]) =>
@@ -117,5 +210,11 @@ export function useAdminMutations() {
     flagTransaction: (id: string, reason: string) => run(() => adminApi.transactions.flag(id, reason), "transactions", "stats"),
     unflagTransaction: (id: string) => run(() => adminApi.transactions.unflag(id), "transactions", "stats"),
     refundTransaction: (id: string, reason?: string) => run(() => adminApi.transactions.refund(id, reason), "transactions", "stats"),
+    checkPayout: (id: string) => run(() => adminApi.payouts.check(id), "payouts", "transactions", "stats", "queue", "payments"),
+    resolvePayout: (id: string, outcome: "paid" | "failed", reason: string, confirm: string) =>
+      run(() => adminApi.payouts.resolve(id, outcome, reason, confirm), "payouts", "transactions", "stats", "queue", "payments"),
+    checkBundleOrder: (id: string) => run(() => adminApi.bundleOrders.check(id), "bundleOrders", "transactions", "stats", "queue", "payments"),
+    recordBundleRefund: (id: string, reference: string, amountNaira: number, note: string) =>
+      run(() => adminApi.bundleOrders.refund(id, reference, Math.round(amountNaira * 100), note), "bundleOrders", "queue", "payments"),
   };
 }

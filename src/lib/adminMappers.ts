@@ -1,4 +1,7 @@
-import type { AdminEvent, AdminStats, AdminTransaction, KYCSubmission, PlatformUser } from "@/types/admin";
+import type {
+  AdminBundleOrder, AdminEvent, AdminPayout, AdminStats, AdminTransaction, KYCSubmission, MoneyOverview, PaymentsOverview,
+  PlatformUser, ReviewQueue, ReviewQueueItem,
+} from "@/types/admin";
 
 // Admin API rows → UI shapes. Amounts arrive in kobo (NGN) or micro-units (USDC).
 
@@ -124,5 +127,191 @@ export function mapStats(s: Record<string, number>): AdminStats {
     totalEvents: s.totalEvents ?? 0,
     flaggedTransactions: s.flaggedTransactions ?? 0,
     stuckWithdrawals: s.stuckWithdrawals ?? 0,
+    usdcVolume: (s.usdcVolume ?? 0) / 1_000_000,
+    usdcTodayVolume: (s.usdcTodayVolume ?? 0) / 1_000_000,
+  };
+}
+
+const toDisplay = (amount: number, currency: string) =>
+  currency === "USDC" ? amount / 1_000_000 : amount / 100;
+
+const dateOr = (v: unknown): Date | undefined => (v ? new Date(v as string) : undefined);
+
+export function mapPayout(t: Record<string, unknown>): AdminPayout {
+  const currency = ((t.currency as string) ?? "NGN") as AdminPayout["currency"];
+  const m = (t.metadata ?? {}) as Record<string, unknown>;
+  const check = m.last_provider_check as Record<string, unknown> | undefined;
+  const manual = m.manual_resolution as Record<string, unknown> | undefined;
+  return {
+    id: t.id as string,
+    userId: (t.user_id as string) ?? "",
+    userName: (t.user_name as string) ?? "",
+    currency,
+    amount: Math.abs(toDisplay(Number(t.amount ?? 0), currency)),
+    fee: toDisplay(Number(t.fee ?? 0), currency),
+    status: (t.status as string) ?? "pending",
+    provider: (t.provider as string) ?? undefined,
+    reference: (t.idempotency_key as string) ?? (t.id as string),
+    providerRef: (t.provider_ref as string) ?? undefined,
+    kind: String(m.kind ?? "").startsWith("bundle_sale") ? "sale" : "withdrawal",
+    bundles: m.bundles != null ? Number(m.bundles) : undefined,
+    needsReview: m.needs_review === true || m.needs_review === "true",
+    lastCheck: check
+      ? { status: String(check.status ?? ""), providerStatus: (check.provider_status as string) ?? undefined, at: new Date((check.at as string) ?? Date.now()) }
+      : undefined,
+    manualResolution: manual
+      ? { outcome: manual.outcome as "paid" | "failed", reason: String(manual.reason ?? ""), at: new Date((manual.at as string) ?? Date.now()) }
+      : undefined,
+    failureReason: (m.failure_reason as string) ?? undefined,
+    createdAt: new Date((t.created_at as string) ?? Date.now()),
+    updatedAt: dateOr(t.updated_at),
+  };
+}
+
+export function mapBundleOrder(o: Record<string, unknown>): AdminBundleOrder {
+  const currency = ((o.currency as string) ?? "NGN") as AdminBundleOrder["currency"];
+  const refundedAt = o.refunded_at as string | null | undefined;
+  return {
+    id: o.id as string,
+    userId: (o.user_id as string) ?? "",
+    userName: (o.user_name as string) ?? "",
+    currency,
+    bundles: Number(o.bundles ?? 0),
+    amount: toDisplay(Number(o.amount ?? 0), currency),
+    status: (o.status as string) ?? "",
+    txRef: (o.tx_ref as string) ?? "",
+    providerRef: (o.provider_ref as string) ?? undefined,
+    failureReason: (o.failure_reason as string) ?? undefined,
+    refund: refundedAt
+      ? {
+        reference: (o.refund_reference as string) ?? "",
+        amount: Number(o.refund_amount_kobo ?? 0) / 100,
+        note: (o.refund_note as string) ?? undefined,
+        at: new Date(refundedAt),
+      }
+      : undefined,
+    paidButFailed: currency === "NGN" && o.status === "failed" && !!o.provider_ref && !refundedAt,
+    createdAt: new Date((o.created_at as string) ?? Date.now()),
+  };
+}
+
+function mapMoney(res: Record<string, unknown>): MoneyOverview {
+  const money = (res.money ?? {}) as Record<string, unknown>;
+  const queue = (money.queue ?? {}) as Record<string, number>;
+  return {
+    byType: ((money.by_type as Record<string, unknown>[]) ?? []).map((r) => {
+      const cur = ((r.currency as string) ?? "NGN") as "NGN" | "USDC";
+      return {
+        type: r.type as string,
+        currency: cur,
+        countToday: Number(r.count_today ?? 0),
+        amountToday: toDisplay(Number(r.amount_today ?? 0), cur),
+        count7d: Number(r.count_7d ?? 0),
+        amount7d: toDisplay(Number(r.amount_7d ?? 0), cur),
+      };
+    }),
+    queue: {
+      payoutsNeedingReview: Number(queue.payouts_needing_review ?? 0),
+      ordersPaidFailed: Number(queue.orders_paid_failed ?? 0),
+      ordersPendingFloat: Number(queue.orders_pending_float ?? 0),
+    },
+    treasury: ((res.treasury as Record<string, unknown>[]) ?? []).map((w) => ({
+      currency: (w.currency as string) ?? "",
+      balance: toDisplay(Number(w.balance ?? 0), (w.currency as string) ?? "NGN"),
+      locked: toDisplay(Number(w.locked_balance ?? 0), (w.currency as string) ?? "NGN"),
+    })),
+    recentTopups: ((res.recent_topups as Record<string, unknown>[]) ?? []).map((r) => ({
+      id: r.id as string,
+      currency: (r.currency as string) ?? "",
+      amount: toDisplay(Number(r.amount ?? 0), (r.currency as string) ?? "NGN"),
+      reference: (r.reference as string) ?? undefined,
+      note: (r.note as string) ?? undefined,
+      createdAt: new Date((r.created_at as string) ?? Date.now()),
+    })),
+  };
+}
+
+// Moved from useAdminMonitoring.fetchOverview, plus the money overview, treasury and top-ups.
+export function mapPaymentsOverview(res: Record<string, unknown>): PaymentsOverview & { money: MoneyOverview } {
+  return {
+    today: {
+      deposits: {
+        count: ((res.today as Record<string, unknown>)?.deposits as Record<string, number>)?.count ?? 0,
+        volumeKobo: ((res.today as Record<string, unknown>)?.deposits as Record<string, number>)?.volume_kobo ?? 0,
+      },
+      withdrawals: {
+        count: ((res.today as Record<string, unknown>)?.withdrawals as Record<string, number>)?.count ?? 0,
+        volumeKobo: ((res.today as Record<string, unknown>)?.withdrawals as Record<string, number>)?.volume_kobo ?? 0,
+      },
+    },
+    queues: {
+      pendingWithdrawals: (res.queues as Record<string, number>)?.pending_withdrawals ?? 0,
+      processingWithdrawals: (res.queues as Record<string, number>)?.processing_withdrawals ?? 0,
+      failed24h: (res.queues as Record<string, number>)?.failed_24h ?? 0,
+      unprocessedWebhooks: (res.queues as Record<string, number>)?.unprocessed_webhooks ?? 0,
+    },
+    platform: {
+      walletFundingProviderId: (res.platform as Record<string, string>)?.wallet_funding_provider_id ?? "monnify",
+      disbursementProviderId: (res.platform as Record<string, string>)?.disbursement_provider_id ?? "monnify",
+      pspEnv: ((res.platform as Record<string, string>)?.psp_env ?? "sandbox") as PaymentsOverview["platform"]["pspEnv"],
+    },
+    byProvider: ((res.by_provider as Record<string, unknown>[]) ?? []).map((row) => ({
+      provider: row.provider as string,
+      deposits: row.deposits as number,
+      withdrawals: row.withdrawals as number,
+      failed: row.failed as number,
+    })),
+    recentFailures: ((res.recent_failures as Record<string, unknown>[]) ?? []).map((row) => ({
+      id: row.id as string,
+      type: row.type as string,
+      amount: toDisplay((row.amount as number) ?? 0, (row.currency as string) ?? "NGN"),
+      currency: row.currency as string,
+      provider: row.provider as string | undefined,
+      reference: row.reference as string,
+      userName: row.user_name as string,
+      createdAt: new Date((row.created_at as string) ?? Date.now()),
+    })),
+    providerHealth: ((res.provider_health as Record<string, unknown>[]) ?? []).map((row) => ({
+      providerId: (row.provider_id as string) ?? "",
+      ok: Boolean(row.ok),
+      message: (row.message as string) ?? "",
+      checkedAt: new Date((row.checked_at as string) ?? Date.now()),
+    })),
+    money: mapMoney(res),
+  };
+}
+
+function mapQueueItem(row: Record<string, unknown>): ReviewQueueItem {
+  return {
+    id: row.id as string,
+    type: row.type as string | undefined,
+    amount: row.amount != null ? toDisplay(row.amount as number, (row.currency as string) ?? "NGN") : undefined,
+    currency: row.currency as string | undefined,
+    provider: row.provider as string | undefined,
+    status: row.status as string | undefined,
+    reference: (row.idempotency_key as string) ?? (row.tx_ref as string) ?? undefined,
+    userName: row.user_name as string | undefined,
+    flagReason: (row.flag_reason as string) ?? (row.failure_reason as string) ?? undefined,
+    eventType: row.event_type as string | undefined,
+    processingError: row.processing_error as string | undefined,
+    idempotencyKey: row.idempotency_key as string | undefined,
+    createdAt: new Date((row.created_at as string) ?? Date.now()),
+  };
+}
+
+// Moved from useAdminMonitoring.fetchQueue, plus the money queues.
+export function mapQueue(res: Record<string, unknown>): ReviewQueue & {
+  payoutsNeedingReview: ReviewQueueItem[];
+  ordersPaidFailed: ReviewQueueItem[];
+  ordersPendingFloat: ReviewQueueItem[];
+} {
+  const list = (k: string) => ((res[k] as Record<string, unknown>[]) ?? []).map(mapQueueItem);
+  return {
+    stuckWithdrawals: list("stuck_withdrawals"),
+    unprocessedWebhooks: list("unprocessed_webhooks"),
+    flaggedTransactions: list("flagged_transactions"),
+    payoutsNeedingReview: list("payouts_needing_review"),
+    ordersPaidFailed: list("orders_paid_failed"),
+    ordersPendingFloat: list("orders_pending_float"),
   };
 }

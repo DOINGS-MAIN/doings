@@ -398,6 +398,22 @@ export const admin = {
   payments: {
     overview: () => invoke("admin", { method: "GET", path: "payments" }),
   },
+  payouts: {
+    list: (params?: { page?: number; limit?: number; status?: string; currency?: string; kind?: string; needs_review?: string; search?: string }) =>
+      invoke("admin", { method: "GET", path: "payouts", params: params as Record<string, string> }),
+    get: (id: string) => invoke("admin", { method: "GET", path: `payouts/${id}` }),
+    check: (id: string) => invoke("admin", { method: "POST", path: `payouts/${id}/check` }),
+    resolve: (id: string, outcome: "paid" | "failed", reason: string, confirm: string) =>
+      invoke("admin", { method: "POST", path: `payouts/${id}/resolve`, body: { outcome, reason, confirm } }),
+  },
+  bundleOrders: {
+    list: (params?: { page?: number; limit?: number; status?: string; currency?: string; needs_refund?: string; search?: string }) =>
+      invoke("admin", { method: "GET", path: "bundle-orders", params: params as Record<string, string> }),
+    get: (id: string) => invoke("admin", { method: "GET", path: `bundle-orders/${id}` }),
+    check: (id: string) => invoke("admin", { method: "POST", path: `bundle-orders/${id}/check` }),
+    refund: (id: string, reference: string, amountKobo: number, note: string) =>
+      invoke("admin", { method: "POST", path: `bundle-orders/${id}/refund`, body: { reference, amount_kobo: amountKobo, note } }),
+  },
   queue: () => invoke("admin", { method: "GET", path: "queue" }),
   pspEvents: {
     list: (params?: { page?: number; limit?: number; provider?: string; direction?: string; search?: string }) =>
