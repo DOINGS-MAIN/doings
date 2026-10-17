@@ -3,7 +3,7 @@ import { admin as adminApi } from "@/lib/supabase";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { can } from "@/types/admin";
 import {
-  mapBundleOrder, mapEvent, mapGiveaway, mapGiveawayDetail, mapKyc, mapPaymentsOverview, mapPayout, mapQueue, mapStats, mapTransaction,
+  mapBundleOrder, mapEvent, mapGiveaway, mapGiveawayDetail, mapKyc, mapLiveEvent, mapPaymentsOverview, mapPayout, mapQueue, mapStats, mapTransaction,
   mapUser, mapUser360,
 } from "@/lib/adminMappers";
 
@@ -221,6 +221,18 @@ export function useAdminGiveaway(id: string | null) {
   });
 }
 
+export function useAdminLiveEvent(id: string | null) {
+  const role = useRole();
+  return useQuery({
+    queryKey: adminKeys.events({ id, live: true }),
+    queryFn: async () => mapLiveEvent((await adminApi.events.get(id!)) as Record<string, unknown>),
+    enabled: can(role, "events.view") && !!id,
+    staleTime: 0,
+    // Live rooms move fast: refresh every 5 s while live, stop once it has ended.
+    refetchInterval: (q) => (q.state.data?.event.status === "live" ? 5000 : false),
+  });
+}
+
 export function useAdminUser360(id: string | null) {
   const role = useRole();
   return useQuery({
@@ -262,6 +274,9 @@ export function useAdminMutations() {
     revokeKyc: (kycId: string, reason: string, confirm: string) =>
       run(() => adminApi.kyc.revoke(kycId, reason, confirm), "users", "kyc", "stats"),
     resetKycAttempts: (userId: string) => run(() => adminApi.users.resetKycAttempts(userId), "users"),
+    advanceFloor: (eventId: string) => run(() => adminApi.events.advanceFloor(eventId), "events", "stats"),
+    removeFloorHold: (eventId: string, holdId: string, reason: string) =>
+      run(() => adminApi.events.removeHold(eventId, holdId, reason), "events", "stats"),
     stopGiveaway: (id: string, reason: string, confirm: string) =>
       run(() => adminApi.giveaways.stop(id, reason, confirm), "giveaways", "users", "transactions", "stats"),
   };

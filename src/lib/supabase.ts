@@ -452,6 +452,10 @@ export const admin = {
     list: (params?: { page?: number; limit?: number; status?: string; flagged?: string }) =>
       invoke("admin", { method: "GET", path: "events", params: params as Record<string, string> }),
     end: (id: string) => invoke("admin", { method: "POST", path: `events/${id}/end` }),
+    get: (id: string) => invoke("admin", { method: "GET", path: `events/${id}` }),
+    advanceFloor: (id: string) => invoke("admin", { method: "POST", path: `events/${id}/advance-floor` }),
+    removeHold: (id: string, holdId: string, reason: string) =>
+      invoke("admin", { method: "POST", path: `events/${id}/holds/${holdId}/remove`, body: { reason } }),
     flag: (id: string, reason: string) => invoke("admin", { method: "POST", path: `events/${id}/flag`, body: { reason } }),
     unflag: (id: string) => invoke("admin", { method: "POST", path: `events/${id}/unflag` }),
   },

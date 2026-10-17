@@ -1,5 +1,5 @@
 import type {
-  AdminBundleOrder, AdminEvent, AdminGiveaway, AdminGiveawayDetail, AdminPayout, AdminUser360, AdminStats, AdminTransaction, KYCSubmission, MoneyOverview, PaymentsOverview,
+  AdminBundleOrder, AdminEvent, AdminGiveaway, AdminGiveawayDetail, AdminLiveEvent, AdminPayout, AdminUser360, AdminStats, AdminTransaction, KYCSubmission, MoneyOverview, PaymentsOverview,
   PlatformUser, ReviewQueue, ReviewQueueItem,
 } from "@/types/admin";
 
@@ -498,5 +498,59 @@ export function mapGiveawayDetail(res: Record<string, unknown>): AdminGiveawayDe
     fundingTransactionId: str(g.funding_transaction_id),
     refundTransactionId: str(g.refund_transaction_id),
     stoppedByEmail: str(res.stopped_by_email),
+  };
+}
+
+// One live event from the inside; amounts arrive in kobo.
+export function mapLiveEvent(res: Record<string, unknown>): AdminLiveEvent {
+  const e = (res.event ?? {}) as Record<string, unknown>;
+  const h = res.host as Record<string, unknown> | null;
+  const t = (res.totals ?? {}) as Record<string, unknown>;
+  const rows = (k: string) => (res[k] as Record<string, unknown>[]) ?? [];
+  const naira = (v: unknown) => Number(v ?? 0) / 100;
+  return {
+    event: {
+      id: e.id as string,
+      title: (e.title as string) ?? "",
+      code: (e.event_code as string) ?? "",
+      status: (e.status as string) ?? "",
+      type: (e.type as string) ?? "",
+      isPrivate: !!e.is_private,
+      participants: Number(e.participant_count ?? 0),
+      totalSprayed: naira(e.total_sprayed),
+      flagged: !!e.flagged,
+      flagReason: str(e.flag_reason),
+      startedAt: dateOr(e.started_at),
+      endedAt: dateOr(e.ended_at),
+    },
+    host: h ? { id: h.id as string, name: (h.full_name as string) ?? "", email: str(h.email) } : null,
+    totals: { holdsActive: Number(t.holds_active ?? 0), held: naira(t.held_kobo), sprayed: naira(t.sprayed_kobo) },
+    floor: rows("floor").map((f) => ({
+      id: f.id as string,
+      sprayerId: (f.sprayer_id as string) ?? "",
+      name: (f.user_name as string) ?? "",
+      held: naira(f.planned_amount_kobo),
+      slot: Number(f.floor_slot ?? 0),
+      seconds: Number(f.floor_seconds ?? 0),
+      startedAt: dateOr(f.floor_started_at),
+      endsAt: dateOr(f.floor_ends_at),
+      chargedSoFar: naira(f.charged_so_far_kobo),
+    })),
+    queue: rows("queue").map((q, i) => ({
+      id: q.id as string,
+      sprayerId: (q.sprayer_id as string) ?? "",
+      name: (q.user_name as string) ?? "",
+      held: naira(q.planned_amount_kobo),
+      queuedAt: dateOr(q.queued_at),
+      position: i + 1,
+    })),
+    holds: rows("holds").map((p) => ({
+      id: p.id as string,
+      sprayerId: (p.sprayer_id as string) ?? "",
+      name: (p.user_name as string) ?? "",
+      held: naira(p.planned_amount_kobo),
+      createdAt: new Date((p.created_at as string) ?? Date.now()),
+      expiresAt: dateOr(p.expires_at),
+    })),
   };
 }

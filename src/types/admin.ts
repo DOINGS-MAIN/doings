@@ -308,6 +308,23 @@ export interface AdminGiveawayDetail {
   stoppedByEmail?: string;
 }
 
+export interface AdminLiveEvent {
+  event: {
+    id: string; title: string; code: string; status: string; type: string; isPrivate: boolean; participants: number;
+    /** Naira. */
+    totalSprayed: number; flagged: boolean; flagReason?: string; startedAt?: Date; endedAt?: Date;
+  };
+  host: { id: string; name: string; email?: string } | null;
+  /** Naira. */
+  totals: { holdsActive: number; held: number; sprayed: number };
+  floor: {
+    id: string; sprayerId: string; name: string; held: number; slot: number; seconds: number;
+    startedAt?: Date; endsAt?: Date; chargedSoFar: number;
+  }[];
+  queue: { id: string; sprayerId: string; name: string; held: number; queuedAt?: Date; position: number }[];
+  holds: { id: string; sprayerId: string; name: string; held: number; createdAt: Date; expiresAt?: Date }[];
+}
+
 export type PspCapability = "wallet_funding" | "disbursement" | "bank_verify";
 export type PspProviderStatus = "active" | "disabled" | "sandbox_only";
 export type PspEnv = "sandbox" | "production";
