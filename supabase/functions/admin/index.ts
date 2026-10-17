@@ -10,14 +10,15 @@ import { handlePayouts } from "./payouts.ts";
 import { handleBundleOrders } from "./bundleOrders.ts";
 import { handleUser360 } from "./users360.ts";
 import { handleGiveaways } from "./giveaways.ts";
-import { can, escapeLikePattern, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
+import { handleLiveEvent } from "./liveEvent.ts";
+import { can, escapeLikePattern, eventHoldRoute, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
 
 const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") ?? "15");
 
 const RESERVED_ACTIONS = new Set([
   "suspend", "unsuspend", "ban", "unban", "flag", "unflag", "approve", "reject", "end",
   "invite", "accept", "disable", "enable", "role", "refund", "reprocess", "export", "probe-all", "health",
-  "check", "resolve", "revoke", "kyc-reset", "stop", "reveal-code",
+  "check", "resolve", "revoke", "kyc-reset", "stop", "reveal-code", "advance-floor",
 ]);
 
 // The platform treasury's wallets belong to this user (see migration 083).
@@ -114,7 +115,7 @@ type RouteAction =
   | { resource: "users"; action?: string; id?: string }
   | { resource: "transactions"; action?: string; id?: string }
   | { resource: "kyc"; action?: string; id?: string }
-  | { resource: "events"; action?: string; id?: string }
+  | { resource: "events"; action?: string; id?: string; holdId?: string }
   | { resource: "team"; action?: string; id?: string }
   | { resource: "audit" }
   | { resource: "payment-rails"; action?: string; id?: string }
@@ -134,6 +135,8 @@ function parseRoute(url: string): RouteAction {
   const rest = parts.slice(fnIdx + 1);
 
   if (!rest.length || rest[0] === "stats") return { resource: "stats" };
+  const hold = eventHoldRoute(rest);
+  if (hold) return { resource: "events", action: "remove-hold", id: hold.id, holdId: hold.holdId };
   const resource = rest[0];
   const id = rest[1] && !RESERVED_ACTIONS.has(rest[1]) ? rest[1] : undefined;
   const action = id ? rest[2] : rest[1];
@@ -278,6 +281,18 @@ Deno.serve(async (req) => {
     if (route.resource === "giveaways") {
       const res = await handleGiveaways({
         req, supabase, authId, action: routeAction, id: routeId,
+        attachUserFields: (rows: Record<string, unknown>[]) => attachUserFields(supabase, rows),
+      });
+      return res ?? withCors({ error: "Not found" }, { status: 404 });
+    }
+
+    // ── LIVE EVENT ── (route file; the role gate above already ran)
+    if (route.resource === "events" && routeId && (
+      (req.method === "GET" && !routeAction) || routeAction === "advance-floor" || routeAction === "remove-hold"
+    )) {
+      const res = await handleLiveEvent({
+        req, supabase, authId, action: routeAction, id: routeId,
+        holdId: (route as { holdId?: string }).holdId,
         attachUserFields: (rows: Record<string, unknown>[]) => attachUserFields(supabase, rows),
       });
       return res ?? withCors({ error: "Not found" }, { status: 404 });
