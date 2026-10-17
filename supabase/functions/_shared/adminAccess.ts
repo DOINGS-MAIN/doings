@@ -35,13 +35,16 @@ export function permissionFor(resource: string, method: string, action?: string,
     case "users":
       if (get && !action) return "users.view";
       if (post && hasId && ["suspend", "unsuspend", "ban", "unban"].includes(action ?? "")) return "users.suspend";
+      if (post && hasId && action === "kyc-reset") return "kyc";
       return null;
     case "transactions":
       if (get && !action) return "transactions.view";
       if (post && hasId && ["flag", "unflag", "refund"].includes(action ?? "")) return "transactions.write";
       return null;
     case "kyc":
-      return get && !action ? "kyc" : null;
+      if (get && !action) return "kyc";
+      if (post && hasId && action === "revoke") return "kyc";
+      return null;
     case "events":
       if (get && !action) return "events.view";
       if (post && hasId && (action === "flag" || action === "unflag")) return "events.flag";
@@ -132,4 +135,34 @@ export function failedResolutionGate(
   }
   if (normalized === "terminal_failure") return { action: "settled" };
   return { action: "proceed" };
+}
+
+export type User360Sections = { profile: boolean; actions: boolean; kyc: boolean; money: boolean; security: boolean; activity: boolean };
+
+// Which parts of a user's 360 page a role may see; the server leaves the rest out of the response.
+export function user360Sections(role: string): User360Sections {
+  const view = can(role, "users.view");
+  return {
+    profile: view,
+    actions: can(role, "users.suspend"),
+    kyc: can(role, "kyc"),
+    money: can(role, "transactions.view"),
+    security: view,
+    activity: view,
+  };
+}
+
+// Revoking someone's KYC needs their name typed back (email when there's no name on file).
+export function nameConfirmMatches(
+  typed: string | null | undefined,
+  user: { full_name?: string | null; email?: string | null },
+): boolean {
+  const name = (user.full_name ?? "").trim();
+  const target = (name || (user.email ?? "").trim()).toLowerCase();
+  return target !== "" && (typed ?? "").trim().toLowerCase() === target;
+}
+
+export function maskAccountNumber(n: string | null | undefined): string {
+  const s = (n ?? "").trim();
+  return s ? `••••${s.slice(-4)}` : "";
 }

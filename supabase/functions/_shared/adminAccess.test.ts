@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { can, escapeLikePattern, failedResolutionGate, payoutCheckRefusal, payoutConfirmMatches, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed } from "./adminAccess.ts";
+import { can, escapeLikePattern, failedResolutionGate, maskAccountNumber, nameConfirmMatches, payoutCheckRefusal, payoutConfirmMatches, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed, user360Sections } from "./adminAccess.ts";
 
 const ROLES = ["super_admin", "finance", "support", "compliance", "moderation"] as const;
 
@@ -172,4 +172,44 @@ Deno.test("failedResolutionGate: Mark failed only goes ahead when the provider c
   assertEquals(failedResolutionGate("terminal_failure"), { action: "settled" });
   assertEquals(failedResolutionGate("non_terminal"), { action: "proceed" });
   assertEquals(failedResolutionGate("unknown"), { action: "proceed" });
+});
+
+Deno.test("user360Sections: each role sees only its sections", () => {
+  const all = { profile: true, actions: true, kyc: true, money: true, security: true, activity: true };
+  assertEquals(user360Sections("super_admin"), all);
+  assertEquals(user360Sections("compliance"), { profile: true, actions: true, kyc: true, money: false, security: true, activity: true });
+  assertEquals(user360Sections("support"), { profile: true, actions: false, kyc: false, money: true, security: true, activity: true });
+  assertEquals(user360Sections("moderation"), { profile: true, actions: false, kyc: false, money: false, security: true, activity: true });
+  assertEquals(user360Sections("finance"), { profile: false, actions: false, kyc: false, money: true, security: false, activity: false });
+  assertEquals(user360Sections("nope"), { profile: false, actions: false, kyc: false, money: false, security: false, activity: false });
+});
+
+Deno.test("nameConfirmMatches: the person's name, any case, spaces trimmed; email when no name", () => {
+  const ada = { full_name: "Ada Obi", email: "ada@x.com" };
+  assertEquals(nameConfirmMatches("Ada Obi", ada), true);
+  assertEquals(nameConfirmMatches("  ada obi ", ada), true);
+  assertEquals(nameConfirmMatches("Ada", ada), false);
+  assertEquals(nameConfirmMatches("AdaObi", ada), false);
+  assertEquals(nameConfirmMatches("ada@x.com", ada), false);
+  assertEquals(nameConfirmMatches("", ada), false);
+  assertEquals(nameConfirmMatches(undefined, ada), false);
+  assertEquals(nameConfirmMatches("ADA@X.COM", { full_name: "  ", email: "ada@x.com" }), true);
+  assertEquals(nameConfirmMatches("", { full_name: null, email: null }), false);
+  assertEquals(nameConfirmMatches("x", { full_name: null, email: null }), false);
+});
+
+Deno.test("maskAccountNumber shows only the last 4 digits", () => {
+  assertEquals(maskAccountNumber("0123456789"), "••••6789");
+  assertEquals(maskAccountNumber("789"), "••••789");
+  assertEquals(maskAccountNumber(""), "");
+  assertEquals(maskAccountNumber(null), "");
+});
+
+Deno.test("permissionFor: KYC revoke and attempt reset need kyc", () => {
+  assertEquals(permissionFor("kyc", "POST", "revoke", true), "kyc");
+  assertEquals(permissionFor("kyc", "POST", "revoke", false), null);
+  assertEquals(permissionFor("users", "POST", "kyc-reset", true), "kyc");
+  assertEquals(permissionFor("users", "GET", undefined, true), "users.view");
+  assertEquals(can("compliance", "kyc"), true);
+  assertEquals(can("support", "kyc"), false);
 });
