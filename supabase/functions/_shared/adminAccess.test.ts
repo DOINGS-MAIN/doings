@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { can, escapeLikePattern, payoutCheckRefusal, payoutConfirmMatches, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed } from "./adminAccess.ts";
+import { can, escapeLikePattern, failedResolutionGate, payoutCheckRefusal, payoutConfirmMatches, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed } from "./adminAccess.ts";
 
 const ROLES = ["super_admin", "finance", "support", "compliance", "moderation"] as const;
 
@@ -160,4 +160,16 @@ Deno.test("payoutCheckRefusal: only open NGN non-Blockradar withdrawals can be c
   assertEquals(payoutCheckRefusal({ ...ok, currency: "USDC" })?.status, 400);
   assertEquals(payoutCheckRefusal({ ...ok, provider: "blockradar" })?.status, 400);
   assertEquals(payoutCheckRefusal({ ...ok, status: "completed" }), { status: 409, error: "Payout is already completed" });
+  // a failed payout can still be re-checked (read-only), to catch a provider that paid after all
+  assertEquals(payoutCheckRefusal({ ...ok, status: "failed" }), null);
+  assertEquals(payoutCheckRefusal({ ...ok, status: "refunded" })?.status, 409);
+});
+
+Deno.test("failedResolutionGate: Mark failed only goes ahead when the provider can't say", () => {
+  assertEquals(failedResolutionGate("terminal_success"), {
+    action: "refuse", status: 409, error: "The provider reports this payout as paid — it has been marked completed",
+  });
+  assertEquals(failedResolutionGate("terminal_failure"), { action: "settled" });
+  assertEquals(failedResolutionGate("non_terminal"), { action: "proceed" });
+  assertEquals(failedResolutionGate("unknown"), { action: "proceed" });
 });

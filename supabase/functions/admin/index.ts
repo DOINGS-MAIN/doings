@@ -938,6 +938,11 @@ Deno.serve(async (req) => {
           .limit(20),
       ]);
       if (moneyRes.error) throw moneyRes.error;
+      if (treasuryRes.error) throw treasuryRes.error;
+      if (topupsRes.error) throw topupsRes.error;
+      // Treasury balances and top-ups are finance data (get_treasury_balances allows super admin and
+      // finance only); support sees the rest of the overview.
+      const seesTreasury = can(role, "transactions.write");
 
       const sumVolume = (rows: { amount: number; currency: string }[] | null) =>
         (rows ?? []).reduce((s, r) => s + Math.abs(r.amount), 0);
@@ -1004,8 +1009,8 @@ Deno.serve(async (req) => {
         })(),
         provider_health: [...healthLatest.entries()].map(([provider_id, h]) => ({ provider_id, ...h })),
         money: moneyRes.data ?? null,
-        treasury: treasuryRes.data ?? [],
-        recent_topups: topupsRes.data ?? [],
+        treasury: seesTreasury ? treasuryRes.data ?? [] : null,
+        recent_topups: seesTreasury ? topupsRes.data ?? [] : null,
       });
     }
 
@@ -1143,6 +1148,7 @@ Deno.serve(async (req) => {
           .eq("currency", "NGN")
           .eq("status", "failed")
           .not("provider_ref", "is", null)
+          .neq("provider_ref", "")
           .is("refunded_at", null)
           .order("created_at", { ascending: true })
           .limit(50),

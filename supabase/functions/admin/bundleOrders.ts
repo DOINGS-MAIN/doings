@@ -20,7 +20,7 @@ export async function handleBundleOrders(ctx: AdminRouteCtx): Promise<Response |
     const currency = url.searchParams.get("currency");
     if (currency === "NGN" || currency === "USDC") q = q.eq("currency", currency);
     if (url.searchParams.get("needs_refund") === "true") {
-      q = q.eq("currency", "NGN").eq("status", "failed").not("provider_ref", "is", null).is("refunded_at", null);
+      q = q.eq("currency", "NGN").eq("status", "failed").not("provider_ref", "is", null).neq("provider_ref", "").is("refunded_at", null);
     }
     const search = orIlike(["tx_ref", "provider_ref"], url.searchParams.get("search"));
     if (search) q = q.or(search);
@@ -53,12 +53,17 @@ export async function handleBundleOrders(ctx: AdminRouteCtx): Promise<Response |
     let result;
     try {
       result = await settleNgnBundleOrder(supabase, { txRef: order.tx_ref, transactionId: null });
-    } catch {
+    } catch (err) {
+      // Database errors carry a code (e.g. "NGN wallet not found"); anything else is the provider call.
+      if (err && typeof err === "object" && "code" in err) {
+        return withCors({ error: String((err as { message?: string }).message ?? "Database error") }, { status: 500 });
+      }
       return withCors({ error: "Couldn't reach the provider — try again or resolve manually" }, { status: 502 });
     }
-    await supabase.rpc("log_admin_action", {
+    const { error: logErr } = await supabase.rpc("log_admin_action", {
       p_admin_id: authId, p_action: "check_bundle_order", p_target_type: "bundle_order", p_target_id: id, p_details: result,
     });
+    if (logErr) throw logErr;
     return withCors({ ok: true, result });
   }
 

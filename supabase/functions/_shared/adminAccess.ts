@@ -107,7 +107,8 @@ export function payoutConfirmMatches(typed: string | null | undefined, reference
 }
 
 // Why "Check with provider" can't run for this row, or null when it can. USDC (Blockradar) payouts
-// settle by webhook only, so there's nothing to ask.
+// settle by webhook only, so there's nothing to ask. A failed payout can still be re-checked
+// (read-only) to catch a provider that paid after all.
 export function payoutCheckRefusal(
   row: { type: string; currency: string; provider: string | null; status: string },
 ): { status: 400 | 404 | 409; error: string } | null {
@@ -115,8 +116,20 @@ export function payoutCheckRefusal(
   if (row.currency !== "NGN" || row.provider === "blockradar") {
     return { status: 400, error: "USDC payouts settle by webhook — resolve manually" };
   }
-  if (row.status !== "pending" && row.status !== "processing") {
+  if (row.status !== "pending" && row.status !== "processing" && row.status !== "failed") {
     return { status: 409, error: `Payout is already ${row.status}` };
   }
   return null;
+}
+
+// What "Mark failed" does after asking the provider live: refuse when it says paid (the check has
+// just completed the payout), report it settled when it says failed, else go ahead manually.
+export function failedResolutionGate(
+  normalized: string,
+): { action: "refuse"; status: 409; error: string } | { action: "settled" } | { action: "proceed" } {
+  if (normalized === "terminal_success") {
+    return { action: "refuse", status: 409, error: "The provider reports this payout as paid — it has been marked completed" };
+  }
+  if (normalized === "terminal_failure") return { action: "settled" };
+  return { action: "proceed" };
 }
