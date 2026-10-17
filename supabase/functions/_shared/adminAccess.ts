@@ -6,13 +6,18 @@ export const ROLE_PERMISSIONS: Record<AdminRole, readonly string[]> = {
   finance: [
     "dashboard", "transactions.view", "transactions.write", "payments", "queue",
     "webhooks.view", "webhooks.write", "psp_events", "payment_rails", "dance_floor",
+    "giveaways.view", "giveaways.stop",
   ],
   support: [
     "dashboard", "users.view", "transactions.view", "payments", "queue",
     "webhooks.view", "psp_events", "floor_avatars", "events.view", "events.end",
+    "giveaways.view",
   ],
   compliance: ["dashboard", "kyc", "users.view", "users.suspend"],
-  moderation: ["dashboard", "events.view", "events.flag", "events.end", "ads", "floor_avatars", "users.view"],
+  moderation: [
+    "dashboard", "events.view", "events.flag", "events.end", "ads", "floor_avatars", "users.view",
+    "giveaways.view", "giveaways.stop",
+  ],
 };
 
 export function isAdminRole(role: string): role is AdminRole {
@@ -67,6 +72,10 @@ export function permissionFor(resource: string, method: string, action?: string,
       return get ? "queue" : null;
     case "psp-events":
       return get ? "psp_events" : null;
+    case "giveaways":
+      if (get && !action) return "giveaways.view";
+      if (post && hasId && action === "stop") return "giveaways.stop";
+      return null;
     case "payouts":
       if (get && !action) return "transactions.view";
       if (post && hasId && (action === "check" || action === "resolve")) return "transactions.write";
@@ -165,4 +174,10 @@ export function nameConfirmMatches(
 export function maskAccountNumber(n: string | null | undefined): string {
   const s = (n ?? "").trim();
   return s ? `••••${s.slice(-4)}` : "";
+}
+
+// Stopping a giveaway needs its code typed back (codes are case-insensitive).
+export function giveawayCodeMatches(typed: string | null | undefined, code: string | null | undefined): boolean {
+  const c = (code ?? "").trim().toUpperCase();
+  return c !== "" && (typed ?? "").trim().toUpperCase() === c;
 }

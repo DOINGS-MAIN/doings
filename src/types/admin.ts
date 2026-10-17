@@ -316,13 +316,18 @@ export const ROLE_PERMISSIONS: Record<AdminRole, readonly string[]> = {
   finance: [
     "dashboard", "transactions.view", "transactions.write", "payments", "queue",
     "webhooks.view", "webhooks.write", "psp_events", "payment_rails", "dance_floor",
+    "giveaways.view", "giveaways.stop",
   ],
   support: [
     "dashboard", "users.view", "transactions.view", "payments", "queue",
     "webhooks.view", "psp_events", "floor_avatars", "events.view", "events.end",
+    "giveaways.view",
   ],
   compliance: ["dashboard", "kyc", "users.view", "users.suspend"],
-  moderation: ["dashboard", "events.view", "events.flag", "events.end", "ads", "floor_avatars", "users.view"],
+  moderation: [
+    "dashboard", "events.view", "events.flag", "events.end", "ads", "floor_avatars", "users.view",
+    "giveaways.view", "giveaways.stop",
+  ],
 };
 
 export const can = (role: string | null | undefined, permission: string): boolean => {

@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { can, escapeLikePattern, failedResolutionGate, maskAccountNumber, nameConfirmMatches, payoutCheckRefusal, payoutConfirmMatches, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed, user360Sections } from "./adminAccess.ts";
+import { can, escapeLikePattern, failedResolutionGate, giveawayCodeMatches, maskAccountNumber, nameConfirmMatches, payoutCheckRefusal, payoutConfirmMatches, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed, user360Sections } from "./adminAccess.ts";
 
 const ROLES = ["super_admin", "finance", "support", "compliance", "moderation"] as const;
 
@@ -83,7 +83,7 @@ Deno.test("ROLE_PERMISSIONS matches the agreed matrix", () => {
   assertEquals(ROLE_PERMISSIONS.super_admin, ["*"]);
   assertEquals([...ROLE_PERMISSIONS.compliance].sort(), ["dashboard", "kyc", "users.suspend", "users.view"]);
   assertEquals([...ROLE_PERMISSIONS.support].sort(), [
-    "dashboard", "events.end", "events.view", "floor_avatars", "payments", "psp_events", "queue", "transactions.view", "users.view", "webhooks.view",
+    "dashboard", "events.end", "events.view", "floor_avatars", "giveaways.view", "payments", "psp_events", "queue", "transactions.view", "users.view", "webhooks.view",
   ]);
 });
 
@@ -212,4 +212,29 @@ Deno.test("permissionFor: KYC revoke and attempt reset need kyc", () => {
   assertEquals(permissionFor("users", "GET", undefined, true), "users.view");
   assertEquals(can("compliance", "kyc"), true);
   assertEquals(can("support", "kyc"), false);
+});
+
+Deno.test("permissionFor + matrix: giveaways", () => {
+  assertEquals(permissionFor("giveaways", "GET", undefined, false), "giveaways.view");
+  assertEquals(permissionFor("giveaways", "GET", undefined, true), "giveaways.view");
+  assertEquals(permissionFor("giveaways", "POST", "stop", true), "giveaways.stop");
+  assertEquals(permissionFor("giveaways", "POST", "stop", false), null);
+  assertEquals(permissionFor("giveaways", "POST", "refund", true), null);
+  for (const r of ["finance", "moderation", "super_admin"]) {
+    assertEquals(can(r, "giveaways.view"), true, r);
+    assertEquals(can(r, "giveaways.stop"), true, r);
+  }
+  assertEquals(can("support", "giveaways.view"), true);
+  assertEquals(can("support", "giveaways.stop"), false);
+  assertEquals(can("compliance", "giveaways.view"), false);
+  assertEquals(can("compliance", "giveaways.stop"), false);
+});
+
+Deno.test("giveawayCodeMatches: the code, any case, spaces trimmed, never empty", () => {
+  assertEquals(giveawayCodeMatches("T098AAA", "T098AAA"), true);
+  assertEquals(giveawayCodeMatches(" t098aaa ", "T098AAA"), true);
+  assertEquals(giveawayCodeMatches("T098AA", "T098AAA"), false);
+  assertEquals(giveawayCodeMatches("", ""), false);
+  assertEquals(giveawayCodeMatches(undefined, "T098AAA"), false);
+  assertEquals(giveawayCodeMatches("x", null), false);
 });
