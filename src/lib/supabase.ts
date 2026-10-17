@@ -399,6 +399,13 @@ export const admin = {
   payments: {
     overview: () => invoke("admin", { method: "GET", path: "payments" }),
   },
+  giveaways: {
+    list: (params?: { page?: number; limit?: number; status?: string; type?: string; creator_id?: string; search?: string }) =>
+      invoke("admin", { method: "GET", path: "giveaways", params: params as Record<string, string> }),
+    get: (id: string) => invoke("admin", { method: "GET", path: `giveaways/${id}` }),
+    stop: (id: string, reason: string, confirm: string) =>
+      invoke("admin", { method: "POST", path: `giveaways/${id}/stop`, body: { reason, confirm } }),
+  },
   payouts: {
     list: (params?: { page?: number; limit?: number; status?: string; currency?: string; kind?: string; needs_review?: string; search?: string }) =>
       invoke("admin", { method: "GET", path: "payouts", params: params as Record<string, string> }),

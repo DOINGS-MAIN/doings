@@ -1,5 +1,5 @@
 import type {
-  AdminBundleOrder, AdminEvent, AdminPayout, AdminUser360, AdminStats, AdminTransaction, KYCSubmission, MoneyOverview, PaymentsOverview,
+  AdminBundleOrder, AdminEvent, AdminGiveaway, AdminGiveawayDetail, AdminPayout, AdminUser360, AdminStats, AdminTransaction, KYCSubmission, MoneyOverview, PaymentsOverview,
   PlatformUser, ReviewQueue, ReviewQueueItem,
 } from "@/types/admin";
 
@@ -437,4 +437,51 @@ export function mapUser360(res: Record<string, unknown>): AdminUser360 {
     };
   }
   return out;
+}
+
+export function mapGiveaway(g: Record<string, unknown>): AdminGiveaway {
+  const perKobo = Number(g.per_person_amount ?? 0);
+  const remainingKobo = Number(g.remaining_amount ?? 0);
+  const max = Number(g.max_recipients ?? 0);
+  return {
+    id: g.id as string,
+    creatorId: (g.creator_id as string) ?? "",
+    creatorName: (g.user_name as string) ?? "",
+    title: (g.title as string) ?? "",
+    code: (g.code as string) ?? "",
+    status: ((g.status as string) ?? "active") as AdminGiveaway["status"],
+    type: ((g.type as string) ?? "live") as AdminGiveaway["type"],
+    total: Number(g.total_amount ?? 0) / 100,
+    perPerson: perKobo / 100,
+    remaining: remainingKobo / 100,
+    maxRecipients: max,
+    redeemedCount: Math.max(0, max - (perKobo > 0 ? Math.floor(remainingKobo / perKobo) : 0)),
+    eventId: str(g.event_id),
+    isPrivate: !!g.is_private,
+    stoppedAt: dateOr(g.stopped_at),
+    stopReason: str(g.stop_reason),
+    createdAt: new Date((g.created_at as string) ?? Date.now()),
+  };
+}
+
+export function mapGiveawayDetail(res: Record<string, unknown>): AdminGiveawayDetail {
+  const g = (res.giveaway ?? {}) as Record<string, unknown>;
+  const c = res.creator as Record<string, unknown> | null;
+  const e = res.event as Record<string, unknown> | null;
+  const giveaway = mapGiveaway({ ...g, user_name: (c?.full_name as string) ?? g.user_name });
+  return {
+    giveaway,
+    creator: c ? { id: c.id as string, name: (c.full_name as string) ?? "", email: str(c.email) } : null,
+    event: e ? { id: e.id as string, title: (e.title as string) ?? "", code: (e.event_code as string) ?? "", status: (e.status as string) ?? "" } : null,
+    redemptions: ((res.redemptions as Record<string, unknown>[]) ?? []).map((r) => ({
+      id: r.id as string,
+      userId: (r.user_id as string) ?? "",
+      userName: (r.user_name as string) ?? "",
+      amount: Number(r.amount ?? 0) / 100,
+      redeemedAt: new Date((r.redeemed_at as string) ?? Date.now()),
+    })),
+    fundingTransactionId: str(g.funding_transaction_id),
+    refundTransactionId: str(g.refund_transaction_id),
+    stoppedByEmail: str(res.stopped_by_email),
+  };
 }

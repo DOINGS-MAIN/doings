@@ -272,6 +272,38 @@ export interface AdminUser360 {
   activity?: { eventsHosted: { id: string; title: string; status: string; code: string; createdAt: Date }[]; giveawaysCreated: number };
 }
 
+export interface AdminGiveaway {
+  id: string;
+  creatorId: string;
+  creatorName: string;
+  title: string;
+  code: string;
+  status: "active" | "stopped" | "exhausted";
+  type: "live" | "scheduled";
+  /** Naira. */
+  total: number;
+  perPerson: number;
+  remaining: number;
+  maxRecipients: number;
+  /** Recipients so far: the maximum less what the remainder can still pay. */
+  redeemedCount: number;
+  eventId?: string;
+  isPrivate: boolean;
+  stoppedAt?: Date;
+  stopReason?: string;
+  createdAt: Date;
+}
+
+export interface AdminGiveawayDetail {
+  giveaway: AdminGiveaway;
+  creator: { id: string; name: string; email?: string } | null;
+  event: { id: string; title: string; code: string; status: string } | null;
+  redemptions: { id: string; userId: string; userName: string; amount: number; redeemedAt: Date }[];
+  fundingTransactionId?: string;
+  refundTransactionId?: string;
+  stoppedByEmail?: string;
+}
+
 export type PspCapability = "wallet_funding" | "disbursement" | "bank_verify";
 export type PspProviderStatus = "active" | "disabled" | "sandbox_only";
 export type PspEnv = "sandbox" | "production";

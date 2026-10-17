@@ -2,7 +2,10 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { admin as adminApi } from "@/lib/supabase";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { can } from "@/types/admin";
-import { mapBundleOrder, mapEvent, mapKyc, mapPaymentsOverview, mapPayout, mapQueue, mapStats, mapTransaction, mapUser, mapUser360 } from "@/lib/adminMappers";
+import {
+  mapBundleOrder, mapEvent, mapGiveaway, mapGiveawayDetail, mapKyc, mapPaymentsOverview, mapPayout, mapQueue, mapStats, mapTransaction,
+  mapUser, mapUser360,
+} from "@/lib/adminMappers";
 
 const STALE = 30_000;
 export type EventTab = "live" | "upcoming" | "ended" | "flagged";
@@ -19,6 +22,7 @@ export const adminKeys = {
   bundleOrders: (p: object = {}) => ["admin", "bundleOrders", p] as const,
   payments: () => ["admin", "payments"] as const,
   queue: () => ["admin", "queue"] as const,
+  giveaways: (p: object = {}) => ["admin", "giveaways", p] as const,
 };
 
 const useRole = () => useAdminAuth().session?.role;
@@ -190,6 +194,33 @@ export function useAdminQueue() {
   });
 }
 
+export function useAdminGiveaways(p: { page: number; status?: string; type?: string; creatorId?: string; search?: string }) {
+  const role = useRole();
+  return useQuery({
+    queryKey: adminKeys.giveaways(p),
+    queryFn: async () => {
+      const res = (await adminApi.giveaways.list({
+        page: p.page, limit: 50, status: opt(p.status), type: opt(p.type),
+        creator_id: p.creatorId || undefined, search: p.search?.trim() || undefined,
+      })) as { giveaways?: Record<string, unknown>[]; total?: number };
+      return { rows: (res.giveaways ?? []).map(mapGiveaway), total: res.total ?? 0 };
+    },
+    enabled: can(role, "giveaways.view"),
+    staleTime: STALE,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useAdminGiveaway(id: string | null) {
+  const role = useRole();
+  return useQuery({
+    queryKey: adminKeys.giveaways({ id }),
+    queryFn: async () => mapGiveawayDetail((await adminApi.giveaways.get(id!)) as Record<string, unknown>),
+    enabled: can(role, "giveaways.view") && !!id,
+    staleTime: STALE,
+  });
+}
+
 export function useAdminUser360(id: string | null) {
   const role = useRole();
   return useQuery({
@@ -231,5 +262,7 @@ export function useAdminMutations() {
     revokeKyc: (kycId: string, reason: string, confirm: string) =>
       run(() => adminApi.kyc.revoke(kycId, reason, confirm), "users", "kyc", "stats"),
     resetKycAttempts: (userId: string) => run(() => adminApi.users.resetKycAttempts(userId), "users"),
+    stopGiveaway: (id: string, reason: string, confirm: string) =>
+      run(() => adminApi.giveaways.stop(id, reason, confirm), "giveaways", "users", "transactions", "stats"),
   };
 }

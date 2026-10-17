@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapBundleOrder, mapEvent, mapKyc, mapPaymentsOverview, mapPayout, mapStats, mapTransaction, mapUser, mapUser360 } from "./adminMappers";
+import { mapBundleOrder, mapEvent, mapGiveaway, mapGiveawayDetail, mapKyc, mapPaymentsOverview, mapPayout, mapStats, mapTransaction, mapUser, mapUser360 } from "./adminMappers";
 
 describe("admin mappers", () => {
   it("maps event statuses: scheduled/draft are upcoming", () => {
@@ -114,5 +114,23 @@ describe("admin mappers", () => {
     expect(m.money?.transactions[0]).toMatchObject({ amount: 2500, reference: "SELL-1" });
     expect(m.money?.bundleOrders[0]).toMatchObject({ amount: 500, refunded: true });
     expect(m.money?.bankAccounts[0].accountNumber).toBe("••••6789");
+  });
+  it("maps a giveaway in naira with redeemed count from the remainder", () => {
+    const g = mapGiveaway({ id: "g1", creator_id: "u1", user_name: "Ada", title: "Party", code: "ABC123", status: "active", type: "live",
+      total_amount: 50000, per_person_amount: 10000, remaining_amount: 30000, max_recipients: 5, created_at: "2026-10-17T00:00:00Z" });
+    expect(g).toMatchObject({ creatorName: "Ada", total: 500, perPerson: 100, remaining: 300, maxRecipients: 5, redeemedCount: 2 });
+    expect(mapGiveaway({ id: "g2", total_amount: 50000, per_person_amount: 10000, remaining_amount: 0, max_recipients: 5 }).redeemedCount).toBe(5);
+  });
+  it("maps a stopped giveaway's detail with redemptions", () => {
+    const d = mapGiveawayDetail({
+      giveaway: { id: "g1", title: "Party", code: "ABC123", status: "stopped", type: "live", total_amount: 50000, per_person_amount: 10000,
+        remaining_amount: 0, max_recipients: 5, stopped_at: "2026-10-17T10:00:00Z", stop_reason: "Misleading", refund_transaction_id: "t9" },
+      creator: { id: "u1", full_name: "Ada", email: "a@x" }, event: null,
+      redemptions: [{ id: "r1", user_id: "u2", user_name: "Ben", amount: 10000, redeemed_at: "2026-10-17T09:00:00Z" }],
+      stopped_by_email: "mod@doings.app",
+    });
+    expect(d.giveaway).toMatchObject({ status: "stopped", stopReason: "Misleading" });
+    expect(d.redemptions[0]).toMatchObject({ userName: "Ben", amount: 100 });
+    expect(d).toMatchObject({ refundTransactionId: "t9", stoppedByEmail: "mod@doings.app", creator: { name: "Ada" } });
   });
 });
