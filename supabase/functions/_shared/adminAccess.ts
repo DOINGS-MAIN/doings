@@ -6,13 +6,18 @@ export const ROLE_PERMISSIONS: Record<AdminRole, readonly string[]> = {
   finance: [
     "dashboard", "transactions.view", "transactions.write", "payments", "queue",
     "webhooks.view", "webhooks.write", "psp_events", "payment_rails", "dance_floor",
+    "giveaways.view", "giveaways.stop",
   ],
   support: [
     "dashboard", "users.view", "transactions.view", "payments", "queue",
     "webhooks.view", "psp_events", "floor_avatars", "events.view", "events.end",
+    "giveaways.view",
   ],
   compliance: ["dashboard", "kyc", "users.view", "users.suspend"],
-  moderation: ["dashboard", "events.view", "events.flag", "events.end", "ads", "floor_avatars", "users.view"],
+  moderation: [
+    "dashboard", "events.view", "events.flag", "events.end", "ads", "floor_avatars", "users.view",
+    "giveaways.view", "giveaways.stop",
+  ],
 };
 
 export function isAdminRole(role: string): role is AdminRole {
@@ -35,13 +40,16 @@ export function permissionFor(resource: string, method: string, action?: string,
     case "users":
       if (get && !action) return "users.view";
       if (post && hasId && ["suspend", "unsuspend", "ban", "unban"].includes(action ?? "")) return "users.suspend";
+      if (post && hasId && action === "kyc-reset") return "kyc";
       return null;
     case "transactions":
       if (get && !action) return "transactions.view";
       if (post && hasId && ["flag", "unflag", "refund"].includes(action ?? "")) return "transactions.write";
       return null;
     case "kyc":
-      return get && !action ? "kyc" : null;
+      if (get && !action) return "kyc";
+      if (post && hasId && action === "revoke") return "kyc";
+      return null;
     case "events":
       if (get && !action) return "events.view";
       if (post && hasId && (action === "flag" || action === "unflag")) return "events.flag";
@@ -64,6 +72,18 @@ export function permissionFor(resource: string, method: string, action?: string,
       return get ? "queue" : null;
     case "psp-events":
       return get ? "psp_events" : null;
+    case "giveaways":
+      if (get && !action) return "giveaways.view";
+      if (post && hasId && action === "stop") return "giveaways.stop";
+      return null;
+    case "payouts":
+      if (get && !action) return "transactions.view";
+      if (post && hasId && (action === "check" || action === "resolve")) return "transactions.write";
+      return null;
+    case "bundle-orders":
+      if (get && !action) return "transactions.view";
+      if (post && hasId && (action === "check" || action === "refund")) return "transactions.write";
+      return null;
     default:
       return null;
   }
@@ -90,4 +110,75 @@ export function teamChangeAllowed(p: {
 // Escapes LIKE wildcards so an ilike filter matches the value exactly (case-insensitively).
 export function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+// Marking a payout paid or failed needs its reference typed back, so it can't be done to the wrong row.
+export function payoutConfirmMatches(typed: string | null | undefined, reference: string | null | undefined): boolean {
+  const ref = (reference ?? "").trim();
+  return ref !== "" && (typed ?? "").trim() === ref;
+}
+
+// Why "Check with provider" can't run for this row, or null when it can. USDC (Blockradar) payouts
+// settle by webhook only, so there's nothing to ask. A failed payout can still be re-checked
+// (read-only) to catch a provider that paid after all.
+export function payoutCheckRefusal(
+  row: { type: string; currency: string; provider: string | null; status: string },
+): { status: 400 | 404 | 409; error: string } | null {
+  if (row.type !== "withdrawal") return { status: 404, error: "Payout not found" };
+  if (row.currency !== "NGN" || row.provider === "blockradar") {
+    return { status: 400, error: "USDC payouts settle by webhook — resolve manually" };
+  }
+  if (row.status !== "pending" && row.status !== "processing" && row.status !== "failed") {
+    return { status: 409, error: `Payout is already ${row.status}` };
+  }
+  return null;
+}
+
+// What "Mark failed" does after asking the provider live: refuse when it says paid (the check has
+// just completed the payout), report it settled when it says failed, else go ahead manually.
+export function failedResolutionGate(
+  normalized: string,
+): { action: "refuse"; status: 409; error: string } | { action: "settled" } | { action: "proceed" } {
+  if (normalized === "terminal_success") {
+    return { action: "refuse", status: 409, error: "The provider reports this payout as paid — it has been marked completed" };
+  }
+  if (normalized === "terminal_failure") return { action: "settled" };
+  return { action: "proceed" };
+}
+
+export type User360Sections = { profile: boolean; actions: boolean; kyc: boolean; money: boolean; security: boolean; activity: boolean };
+
+// Which parts of a user's 360 page a role may see; the server leaves the rest out of the response.
+export function user360Sections(role: string): User360Sections {
+  const view = can(role, "users.view");
+  return {
+    profile: view,
+    actions: can(role, "users.suspend"),
+    kyc: can(role, "kyc"),
+    money: can(role, "transactions.view"),
+    security: view,
+    activity: view,
+  };
+}
+
+// Revoking someone's KYC needs their name typed back (email when there's no name on file).
+export function nameConfirmMatches(
+  typed: string | null | undefined,
+  user: { full_name?: string | null; email?: string | null },
+): boolean {
+  const name = (user.full_name ?? "").trim();
+  const target = (name || (user.email ?? "").trim()).toLowerCase();
+  return target !== "" && (typed ?? "").trim().toLowerCase() === target;
+}
+
+export function maskAccountNumber(n: string | null | undefined): string {
+  const s = (n ?? "").trim();
+  return s ? `••••${s.slice(-4)}` : "";
+}
+
+// Stopping a giveaway needs its code typed back (codes are case-insensitive; spaces are ignored).
+export function giveawayCodeMatches(typed: unknown, code: string | null | undefined): boolean {
+  const norm = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, "").toUpperCase() : "");
+  const c = norm(code);
+  return c !== "" && norm(typed) === c;
 }

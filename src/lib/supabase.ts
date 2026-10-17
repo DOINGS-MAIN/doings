@@ -373,6 +373,7 @@ export const admin = {
     unsuspend: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/unsuspend` }),
     ban: (id: string, reason: string) => invoke("admin", { method: "POST", path: `users/${id}/ban`, body: { reason } }),
     unban: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/unban` }),
+    resetKycAttempts: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/kyc-reset` }),
   },
   transactions: {
     list: (params?: {
@@ -398,6 +399,29 @@ export const admin = {
   payments: {
     overview: () => invoke("admin", { method: "GET", path: "payments" }),
   },
+  giveaways: {
+    list: (params?: { page?: number; limit?: number; status?: string; type?: string; creator_id?: string; search?: string }) =>
+      invoke("admin", { method: "GET", path: "giveaways", params: params as Record<string, string> }),
+    get: (id: string) => invoke("admin", { method: "GET", path: `giveaways/${id}` }),
+    stop: (id: string, reason: string, confirm: string) =>
+      invoke("admin", { method: "POST", path: `giveaways/${id}/stop`, body: { reason, confirm } }),
+  },
+  payouts: {
+    list: (params?: { page?: number; limit?: number; status?: string; currency?: string; kind?: string; needs_review?: string; search?: string }) =>
+      invoke("admin", { method: "GET", path: "payouts", params: params as Record<string, string> }),
+    get: (id: string) => invoke("admin", { method: "GET", path: `payouts/${id}` }),
+    check: (id: string) => invoke("admin", { method: "POST", path: `payouts/${id}/check` }),
+    resolve: (id: string, outcome: "paid" | "failed", reason: string, confirm: string) =>
+      invoke("admin", { method: "POST", path: `payouts/${id}/resolve`, body: { outcome, reason, confirm } }),
+  },
+  bundleOrders: {
+    list: (params?: { page?: number; limit?: number; status?: string; currency?: string; needs_refund?: string; search?: string }) =>
+      invoke("admin", { method: "GET", path: "bundle-orders", params: params as Record<string, string> }),
+    get: (id: string) => invoke("admin", { method: "GET", path: `bundle-orders/${id}` }),
+    check: (id: string) => invoke("admin", { method: "POST", path: `bundle-orders/${id}/check` }),
+    refund: (id: string, reference: string, amountKobo: number, note: string) =>
+      invoke("admin", { method: "POST", path: `bundle-orders/${id}/refund`, body: { reference, amount_kobo: amountKobo, note } }),
+  },
   queue: () => invoke("admin", { method: "GET", path: "queue" }),
   pspEvents: {
     list: (params?: { page?: number; limit?: number; provider?: string; direction?: string; search?: string }) =>
@@ -420,6 +444,8 @@ export const admin = {
   kyc: {
     list: (params?: { page?: number; limit?: number; status?: string }) =>
       invoke("admin", { method: "GET", path: "kyc", params: params as Record<string, string> }),
+    revoke: (id: string, reason: string, confirm: string) =>
+      invoke("admin", { method: "POST", path: `kyc/${id}/revoke`, body: { reason, confirm } }),
   },
   events: {
     list: (params?: { page?: number; limit?: number; status?: string; flagged?: string }) =>

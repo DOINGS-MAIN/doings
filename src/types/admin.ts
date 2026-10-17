@@ -190,6 +190,122 @@ export interface AdminEvent {
   isPrivate?: boolean;
 }
 
+export interface AdminPayout {
+  id: string;
+  userId: string;
+  userName: string;
+  currency: "NGN" | "USDC";
+  /** Display units (naira or USDC), always positive. */
+  amount: number;
+  fee: number;
+  status: string;
+  provider?: string;
+  reference: string;
+  providerRef?: string;
+  kind: "sale" | "withdrawal";
+  bundles?: number;
+  needsReview: boolean;
+  lastCheck?: { status: string; providerStatus?: string; at: Date };
+  manualResolution?: { outcome: "paid" | "failed"; reason: string; at: Date };
+  failureReason?: string;
+  createdAt: Date;
+  updatedAt?: Date;
+  /** USDC sales: the NGN taken from the person's Bag (amount above is the USDC paid out). */
+  ngnAmount?: number;
+  address?: string;
+  txHash?: string;
+  /** Set when the provider reported this payout as paid after it was marked failed. */
+  paidAfterFailed?: Date;
+}
+
+export interface AdminBundleOrder {
+  id: string;
+  userId: string;
+  userName: string;
+  currency: "NGN" | "USDC";
+  bundles: number;
+  /** Display units: naira for NGN orders, USDC for USDC orders. */
+  amount: number;
+  status: string;
+  txRef: string;
+  providerRef?: string;
+  failureReason?: string;
+  refund?: { reference: string; amount: number; note?: string; at: Date };
+  /** Paid (provider ref recorded) but failed, with no outside refund recorded yet. */
+  paidButFailed: boolean;
+  createdAt: Date;
+}
+
+export interface MoneyOverview {
+  byType: { type: string; currency: "NGN" | "USDC"; countToday: number; amountToday: number; count7d: number; amount7d: number }[];
+  queue: { payoutsNeedingReview: number; ordersPaidFailed: number; ordersPendingFloat: number };
+  /** Treasury wallets, in display units (empty when the role can't see treasury data). */
+  treasury: { currency: string; balance: number; locked: number }[];
+  /** Finance and super admins only; the server leaves treasury data out for other roles. */
+  treasuryVisible: boolean;
+  recentTopups: { id: string; currency: string; amount: number; reference?: string; note?: string; createdAt: Date }[];
+}
+
+export interface AdminUser360 {
+  user: {
+    id: string; name: string; username?: string; email?: string; phone?: string; avatarUrl?: string;
+    status: "active" | "suspended" | "banned"; suspendedReason?: string; suspendedAt?: Date; kycLevel: number; createdAt: Date; lastActive?: Date;
+  };
+  /** Which sections this admin's role may see (the server leaves the others out). */
+  can: { profile: boolean; actions: boolean; kyc: boolean; money: boolean; security: boolean; activity: boolean };
+  security?: { pinSet: boolean; pinFailedAttempts: number; pinLockedUntil?: Date };
+  kyc?: {
+    records: {
+      id: string; level: number; status: string; method?: string; bvnLastFour?: string; ninLastFour?: string;
+      matchScore?: number; livenessScore?: number; rejectionReason?: string; submittedAt: Date; verifiedAt?: Date; reviewedAt?: Date; superseded: boolean;
+    }[];
+    attempts24h: number;
+    attemptsMax: number;
+  };
+  money?: {
+    wallets: { currency: string; balance: number; held: number }[];
+    transactions: { id: string; type: string; currency: string; amount: number; status: string; reference: string; createdAt: Date }[];
+    openPayouts: { id: string; currency: string; amount: number; status: string; reference: string; needsReview: boolean; createdAt: Date }[];
+    bundleOrders: { id: string; currency: string; bundles: number; amount: number; status: string; refunded: boolean; createdAt: Date }[];
+    bankAccounts: { id: string; bankName: string; accountName: string; accountNumber: string; isDefault: boolean }[];
+  };
+  activity?: { eventsHosted: { id: string; title: string; status: string; code: string; createdAt: Date }[]; giveawaysCreated: number };
+}
+
+export interface AdminGiveaway {
+  id: string;
+  creatorId: string;
+  creatorName: string;
+  title: string;
+  code: string;
+  status: "active" | "stopped" | "exhausted";
+  type: "live" | "scheduled";
+  /** Naira. */
+  total: number;
+  perPerson: number;
+  remaining: number;
+  maxRecipients: number;
+  /** Recipients so far: the maximum less what the remainder can still pay. */
+  redeemedCount: number;
+  eventId?: string;
+  eventTitle?: string;
+  eventCode?: string;
+  isPrivate: boolean;
+  stoppedAt?: Date;
+  stopReason?: string;
+  createdAt: Date;
+}
+
+export interface AdminGiveawayDetail {
+  giveaway: AdminGiveaway;
+  creator: { id: string; name: string; email?: string } | null;
+  event: { id: string; title: string; code: string; status: string } | null;
+  redemptions: { id: string; userId: string; userName: string; amount: number; redeemedAt: Date }[];
+  fundingTransactionId?: string;
+  refundTransactionId?: string;
+  stoppedByEmail?: string;
+}
+
 export type PspCapability = "wallet_funding" | "disbursement" | "bank_verify";
 export type PspProviderStatus = "active" | "disabled" | "sandbox_only";
 export type PspEnv = "sandbox" | "production";
@@ -223,6 +339,8 @@ export interface AdminStats {
   totalEvents: number;
   flaggedTransactions: number;
   stuckWithdrawals: number;
+  usdcVolume: number;
+  usdcTodayVolume: number;
 }
 
 // Role permissions: mirrors supabase/functions/_shared/adminAccess.ts (the server is the authority;
@@ -232,13 +350,18 @@ export const ROLE_PERMISSIONS: Record<AdminRole, readonly string[]> = {
   finance: [
     "dashboard", "transactions.view", "transactions.write", "payments", "queue",
     "webhooks.view", "webhooks.write", "psp_events", "payment_rails", "dance_floor",
+    "giveaways.view", "giveaways.stop",
   ],
   support: [
     "dashboard", "users.view", "transactions.view", "payments", "queue",
     "webhooks.view", "psp_events", "floor_avatars", "events.view", "events.end",
+    "giveaways.view",
   ],
   compliance: ["dashboard", "kyc", "users.view", "users.suspend"],
-  moderation: ["dashboard", "events.view", "events.flag", "events.end", "ads", "floor_avatars", "users.view"],
+  moderation: [
+    "dashboard", "events.view", "events.flag", "events.end", "ads", "floor_avatars", "users.view",
+    "giveaways.view", "giveaways.stop",
+  ],
 };
 
 export const can = (role: string | null | undefined, permission: string): boolean => {

@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { AlertTriangle, Clock, Flag, Loader2, RefreshCw, Webhook } from "lucide-react";
+import { AlertTriangle, Banknote, Clock, Flag, Hourglass, Loader2, RefreshCw, ShoppingBag, Webhook } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useAdminMonitoring } from "@/hooks/useAdminMonitoring";
+import { useAdminQueue } from "@/hooks/admin/useAdminQueries";
 import type { ReviewQueue } from "@/types/admin";
 
 function QueueSection({
@@ -71,24 +70,19 @@ function QueueSection({
 }
 
 export const AdminQueue = () => {
-  const { fetchQueue } = useAdminMonitoring();
-  const [queue, setQueue] = useState<ReviewQueue | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: queue, isLoading, isError, isFetching: loading, refetch } = useAdminQueue();
+  const load = () => void refetch();
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      setQueue(await fetchQueue());
-    } finally {
-      setLoading(false);
-    }
-  };
+  if (isError && !queue) {
+    return (
+      <div className="p-8 space-y-3 text-muted-foreground">
+        <p>Couldn't load the review queue.</p>
+        <Button variant="outline" onClick={load}>Try again</Button>
+      </div>
+    );
+  }
 
-  useEffect(() => {
-    load();
-  }, [fetchQueue]);
-
-  if (loading && !queue) {
+  if (isLoading || !queue) {
     return (
       <div className="p-8 flex items-center justify-center text-muted-foreground">
         <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -97,14 +91,14 @@ export const AdminQueue = () => {
     );
   }
 
-  const data = queue!;
+  const data = queue;
 
   return (
     <div className="p-8 space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Review Queue</h1>
-          <p className="text-muted-foreground mt-1">Stuck withdrawals, unprocessed webhooks, and flagged transactions</p>
+          <p className="text-muted-foreground mt-1">Stuck payouts and orders, unprocessed webhooks, and flagged transactions</p>
         </div>
         <Button variant="outline" onClick={load} disabled={loading}>
           <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
@@ -133,6 +127,30 @@ export const AdminQueue = () => {
           items={data.flaggedTransactions}
           emptyText="No flagged transactions."
           linkFor={(item) => `/admin/transactions/${item.id}`}
+        />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        <QueueSection
+          title="Payouts needing review"
+          icon={Banknote}
+          items={data.payoutsNeedingReview}
+          emptyText="No payouts waiting for a decision."
+          linkFor={(item) => `/admin/payouts?open=${item.id}`}
+        />
+        <QueueSection
+          title="Paid but failed bundle orders"
+          icon={ShoppingBag}
+          items={data.ordersPaidFailed}
+          emptyText="No paid orders waiting for a refund."
+          linkFor={(item) => `/admin/bundle-orders?open=${item.id}`}
+        />
+        <QueueSection
+          title="Waiting for USDC float"
+          icon={Hourglass}
+          items={data.ordersPendingFloat}
+          emptyText="No USDC orders waiting for float."
+          linkFor={(item) => `/admin/bundle-orders?open=${item.id}`}
         />
       </div>
 

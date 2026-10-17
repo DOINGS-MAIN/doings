@@ -6,6 +6,10 @@ import { probeProviderHealth } from "../_shared/psp/registry.ts";
 import { reprocessWebhookLog } from "../_shared/reprocessWebhook.ts";
 import { cleanSearch, orIlike, parsePaging, quoteValue } from "../_shared/adminSearch.ts";
 import { chunk, collectAll } from "../_shared/adminExport.ts";
+import { handlePayouts } from "./payouts.ts";
+import { handleBundleOrders } from "./bundleOrders.ts";
+import { handleUser360 } from "./users360.ts";
+import { handleGiveaways } from "./giveaways.ts";
 import { can, escapeLikePattern, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
 
 const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") ?? "15");
@@ -13,15 +17,14 @@ const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") 
 const RESERVED_ACTIONS = new Set([
   "suspend", "unsuspend", "ban", "unban", "flag", "unflag", "approve", "reject", "end",
   "invite", "accept", "disable", "enable", "role", "refund", "reprocess", "export", "probe-all", "health",
+  "check", "resolve", "revoke", "kyc-reset", "stop",
 ]);
+
+// The platform treasury's wallets belong to this user (see migration 083).
+const TREASURY_USER_ID = "00000000-0000-4000-8000-000000000001";
 
 // Bans last until an admin lifts them (100 years).
 const AUTH_BAN_DURATION = "876000h";
-
-// Explicit user detail columns: never PIN hashes or other secrets.
-const USER_DETAIL_COLUMNS =
-  "id, auth_id, phone, email, full_name, username, avatar_url, kyc_level, status, suspended_reason, suspended_at, suspended_by, " +
-  "date_of_birth, address, referral_code, referred_by, last_active_at, transaction_pin_set_at, transaction_pin_locked_until, created_at, updated_at";
 
 function csvEscape(value: unknown): string {
   const s = value == null ? "" : String(value);
@@ -119,6 +122,9 @@ type RouteAction =
   | { resource: "webhooks"; action?: string; id?: string }
   | { resource: "queue" }
   | { resource: "psp-events" }
+  | { resource: "payouts"; action?: string; id?: string }
+  | { resource: "bundle-orders"; action?: string; id?: string }
+  | { resource: "giveaways"; action?: string; id?: string }
   | { resource: "unknown" };
 
 function parseRoute(url: string): RouteAction {
@@ -151,7 +157,7 @@ function parseRoute(url: string): RouteAction {
   if (rest[0] === "queue") return { resource: "queue" };
   if (rest[0] === "psp-events") return { resource: "psp-events" };
 
-  if (["users", "transactions", "kyc", "events", "team", "audit"].includes(resource)) {
+  if (["users", "transactions", "kyc", "events", "team", "audit", "payouts", "bundle-orders", "giveaways"].includes(resource)) {
     return { resource: resource as RouteAction["resource"], action, id } as RouteAction;
   }
   return { resource: "unknown" };
@@ -258,6 +264,36 @@ Deno.serve(async (req) => {
     if (!perm) return withCors({ error: "Not found" }, { status: 404 });
     if (!can(role, perm)) return withCors({ error: "Your admin role can't do this" }, { status: 403 });
 
+    // ── PAYOUTS / BUNDLE ORDERS ── (route files; the role gate above already ran)
+    if (route.resource === "payouts" || route.resource === "bundle-orders") {
+      const ctx = {
+        req, supabase, authId, action: routeAction, id: routeId,
+        attachUserFields: (rows: Record<string, unknown>[]) => attachUserFields(supabase, rows),
+      };
+      const res = route.resource === "payouts" ? await handlePayouts(ctx) : await handleBundleOrders(ctx);
+      return res ?? withCors({ error: "Not found" }, { status: 404 });
+    }
+
+    // ── GIVEAWAYS ── (route file; the role gate above already ran)
+    if (route.resource === "giveaways") {
+      const res = await handleGiveaways({
+        req, supabase, authId, action: routeAction, id: routeId,
+        attachUserFields: (rows: Record<string, unknown>[]) => attachUserFields(supabase, rows),
+      });
+      return res ?? withCors({ error: "Not found" }, { status: 404 });
+    }
+
+    // ── USER 360 / KYC ACTIONS ── (route file; the role gate above already ran)
+    if (
+      (route.resource === "users" && routeId && ((req.method === "GET" && !routeAction) || routeAction === "kyc-reset")) ||
+      (route.resource === "kyc" && routeId && routeAction === "revoke")
+    ) {
+      const res = await handleUser360({
+        req, supabase, authId, role, action: routeAction, id: routeId, resource: route.resource,
+      });
+      return res ?? withCors({ error: "Not found" }, { status: 404 });
+    }
+
     // ── STATS ──
     if (route.resource === "stats" && req.method === "GET") {
       const { data: stats, error } = await supabase.rpc("admin_dashboard_stats", { p_stuck_minutes: STUCK_AFTER_MINUTES });
@@ -276,6 +312,10 @@ Deno.serve(async (req) => {
         totalEvents: n("total_events"),
         flaggedTransactions: n("flagged_transactions"),
         stuckWithdrawals: n("stuck_withdrawals"),
+        ngnVolume: n("ngn_volume"),
+        ngnTodayVolume: n("ngn_today_volume"),
+        usdcVolume: n("usdc_volume"),
+        usdcTodayVolume: n("usdc_today_volume"),
       });
     }
 
@@ -300,16 +340,6 @@ Deno.serve(async (req) => {
         const { data, count, error } = await query;
         if (error) throw error;
         return withCors({ users: data, total: count, page, limit });
-      }
-
-      if (req.method === "GET" && route.id) {
-        const { data, error } = await supabase
-          .from("users")
-          .select(`${USER_DETAIL_COLUMNS}, wallets(id, currency, balance, locked_balance)`)
-          .eq("id", route.id)
-          .single();
-        if (error) throw error;
-        return withCors(data);
       }
 
       if (req.method === "POST" && route.action === "suspend" && route.id) {
@@ -570,7 +600,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── KYC ── read-only: verification is automated (Dojah), admins only see results.
+    // ── KYC ── results list (verification is automated; revoke and attempt reset live in users360.ts)
     if (route.resource === "kyc") {
       if (req.method === "GET" && !route.id) {
         const url = new URL(req.url);
@@ -856,6 +886,9 @@ Deno.serve(async (req) => {
         recentFailures,
         platformSettings,
         providerHealthRes,
+        moneyRes,
+        treasuryRes,
+        topupsRes,
       ] = await Promise.all([
         supabase
           .from("transactions")
@@ -902,7 +935,22 @@ Deno.serve(async (req) => {
           .select("provider_id, ok, message, checked_at")
           .order("checked_at", { ascending: false })
           .limit(10),
+        supabase.rpc("admin_money_overview"),
+        // get_treasury_balances() checks auth.uid(), which a service-role call doesn't have, so read
+        // the treasury wallets directly (the treasury user id from migration 083).
+        supabase.from("wallets").select("currency, balance, locked_balance").eq("user_id", TREASURY_USER_ID),
+        supabase
+          .from("treasury_topups")
+          .select("id, currency, amount, reference, note, created_at")
+          .order("created_at", { ascending: false })
+          .limit(20),
       ]);
+      if (moneyRes.error) throw moneyRes.error;
+      if (treasuryRes.error) throw treasuryRes.error;
+      if (topupsRes.error) throw topupsRes.error;
+      // Treasury balances and top-ups are finance data (get_treasury_balances allows super admin and
+      // finance only); support sees the rest of the overview.
+      const seesTreasury = can(role, "transactions.write");
 
       const sumVolume = (rows: { amount: number; currency: string }[] | null) =>
         (rows ?? []).reduce((s, r) => s + Math.abs(r.amount), 0);
@@ -968,6 +1016,9 @@ Deno.serve(async (req) => {
           }));
         })(),
         provider_health: [...healthLatest.entries()].map(([provider_id, h]) => ({ provider_id, ...h })),
+        money: moneyRes.data ?? null,
+        treasury: seesTreasury ? treasuryRes.data ?? [] : null,
+        recent_topups: seesTreasury ? topupsRes.data ?? [] : null,
       });
     }
 
@@ -1070,7 +1121,7 @@ Deno.serve(async (req) => {
 
       const cutoff = new Date(Date.now() - STUCK_AFTER_MINUTES * 60 * 1000).toISOString();
 
-      const [stuckWithdrawals, unprocessedWebhooks, flaggedTxns] = await Promise.all([
+      const [stuckWithdrawals, unprocessedWebhooks, flaggedTxns, needsReview, paidFailed, pendingFloat] = await Promise.all([
         supabase
           .from("transactions")
           .select("id, type, amount, currency, provider, status, idempotency_key, created_at, user_id")
@@ -1091,6 +1142,30 @@ Deno.serve(async (req) => {
           .eq("flagged", true)
           .order("flagged_at", { ascending: false })
           .limit(50),
+        supabase
+          .from("transactions")
+          .select("id, type, amount, currency, provider, status, idempotency_key, created_at, user_id")
+          .eq("type", "withdrawal")
+          .in("status", ["pending", "processing"])
+          .eq("metadata->>needs_review", "true")
+          .order("created_at", { ascending: true })
+          .limit(50),
+        supabase
+          .from("bundle_orders")
+          .select("id, currency, amount, status, tx_ref, provider_ref, failure_reason, created_at, user_id")
+          .eq("currency", "NGN")
+          .eq("status", "failed")
+          .not("provider_ref", "is", null)
+          .neq("provider_ref", "")
+          .is("refunded_at", null)
+          .order("created_at", { ascending: true })
+          .limit(50),
+        supabase
+          .from("bundle_orders")
+          .select("id, currency, amount, status, tx_ref, failure_reason, created_at, user_id")
+          .eq("status", "pending_float")
+          .order("created_at", { ascending: true })
+          .limit(50),
       ]);
 
       const stuckRows = await attachUserFields(supabase, stuckWithdrawals.data ?? []);
@@ -1100,6 +1175,9 @@ Deno.serve(async (req) => {
         stuck_withdrawals: stuckRows,
         unprocessed_webhooks: unprocessedWebhooks.data ?? [],
         flagged_transactions: flaggedRows,
+        payouts_needing_review: await attachUserFields(supabase, needsReview.data ?? []),
+        orders_paid_failed: await attachUserFields(supabase, paidFailed.data ?? []),
+        orders_pending_float: await attachUserFields(supabase, pendingFloat.data ?? []),
       });
     }
 

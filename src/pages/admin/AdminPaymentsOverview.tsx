@@ -13,7 +13,7 @@ import { formatDistanceToNow } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useAdminMonitoring } from "@/hooks/useAdminMonitoring";
+import { useAdminPaymentsOverview } from "@/hooks/admin/useAdminQueries";
 
 function formatNgnFromDisplay(naira: number) {
   return new Intl.NumberFormat("en-NG", {
@@ -24,9 +24,19 @@ function formatNgnFromDisplay(naira: number) {
 }
 
 export const AdminPaymentsOverview = () => {
-  const { overview, overviewLoading, fetchOverview } = useAdminMonitoring();
+  const { data: overview, isLoading, isError, isFetching: overviewLoading, refetch } = useAdminPaymentsOverview();
+  const fetchOverview = () => void refetch();
 
-  if (overviewLoading && !overview) {
+  if (isError && !overview) {
+    return (
+      <div className="p-8 space-y-3 text-muted-foreground">
+        <p>Couldn't load the payments overview.</p>
+        <Button variant="outline" onClick={fetchOverview}>Try again</Button>
+      </div>
+    );
+  }
+
+  if (isLoading || !overview) {
     return (
       <div className="p-8 flex items-center justify-center text-muted-foreground">
         <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -35,14 +45,16 @@ export const AdminPaymentsOverview = () => {
     );
   }
 
-  const data = overview!;
+  const data = overview;
+  const usd = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(n);
+  const money = (n: number, currency: string) => (currency === "USDC" ? usd(n) : formatNgnFromDisplay(n));
 
   return (
     <div className="p-8 space-y-8">
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-foreground">Payments Overview</h1>
-          <p className="text-muted-foreground mt-1">Live ops dashboard for deposits, withdrawals, and webhooks</p>
+          <p className="text-muted-foreground mt-1">Money flows, payouts, bundle orders, treasury and webhooks</p>
         </div>
         <Button variant="outline" onClick={fetchOverview} disabled={overviewLoading}>
           <RefreshCw className={`w-4 h-4 mr-2 ${overviewLoading ? "animate-spin" : ""}`} />
@@ -226,6 +238,100 @@ export const AdminPaymentsOverview = () => {
           )}
         </CardContent>
       </Card>
+      <div className="grid gap-4 md:grid-cols-3">
+        <Link to="/admin/payouts?needs_review=1" className="rounded-xl border border-border p-4 hover:bg-muted/30 transition-colors">
+          <p className="text-sm text-muted-foreground">Payouts needing review</p>
+          <p className="text-2xl font-bold">{data.money.queue.payoutsNeedingReview}</p>
+        </Link>
+        <Link to="/admin/bundle-orders?needs_refund=1" className="rounded-xl border border-border p-4 hover:bg-muted/30 transition-colors">
+          <p className="text-sm text-muted-foreground">Paid but failed orders</p>
+          <p className="text-2xl font-bold">{data.money.queue.ordersPaidFailed}</p>
+        </Link>
+        <Link to="/admin/bundle-orders?status=pending_float" className="rounded-xl border border-border p-4 hover:bg-muted/30 transition-colors">
+          <p className="text-sm text-muted-foreground">Waiting for USDC float</p>
+          <p className="text-2xl font-bold">{data.money.queue.ordersPendingFloat}</p>
+        </Link>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Money flows (completed)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {data.money.byType.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No completed transactions in the last 7 days.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="py-2 pr-4 font-medium">Type</th>
+                    <th className="py-2 pr-4 font-medium">Currency</th>
+                    <th className="py-2 pr-4 font-medium text-right">Today</th>
+                    <th className="py-2 pr-4 font-medium text-right">Today amount</th>
+                    <th className="py-2 pr-4 font-medium text-right">7 days</th>
+                    <th className="py-2 font-medium text-right">7-day amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.money.byType.map((r) => (
+                    <tr key={`${r.type}-${r.currency}`} className="border-t border-border">
+                      <td className="py-2 pr-4 capitalize">{r.type.replace(/_/g, " ")}</td>
+                      <td className="py-2 pr-4">{r.currency}</td>
+                      <td className="py-2 pr-4 text-right">{r.countToday}</td>
+                      <td className="py-2 pr-4 text-right">{money(r.amountToday, r.currency)}</td>
+                      <td className="py-2 pr-4 text-right">{r.count7d}</td>
+                      <td className="py-2 text-right">{money(r.amount7d, r.currency)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {data.money.treasuryVisible && (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Treasury</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-6">
+            {data.money.treasury.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No treasury wallets found.</p>
+            ) : (
+              data.money.treasury.map((w) => (
+                <div key={w.currency}>
+                  <p className="text-sm text-muted-foreground">{w.currency}</p>
+                  <p className="text-xl font-bold">{money(w.balance, w.currency)}</p>
+                  {w.locked > 0 && <p className="text-xs text-muted-foreground">{money(w.locked, w.currency)} held</p>}
+                </div>
+              ))
+            )}
+          </div>
+          <div>
+            <p className="text-sm font-medium mb-2">Recent top-ups</p>
+            {data.money.recentTopups.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No top-ups recorded. Record them on the FX page.</p>
+            ) : (
+              <div className="space-y-1">
+                {data.money.recentTopups.map((t) => (
+                  <div key={t.id} className="flex items-center justify-between text-sm border-b border-border last:border-0 py-1.5">
+                    <span>
+                      {money(t.amount, t.currency)}
+                      {t.reference && <span className="ml-2 font-mono text-xs text-muted-foreground">{t.reference}</span>}
+                      {t.note && <span className="ml-2 text-muted-foreground">{t.note}</span>}
+                    </span>
+                    <span className="text-xs text-muted-foreground">{formatDistanceToNow(t.createdAt, { addSuffix: true })}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+      )}
     </div>
   );
 };

@@ -67,12 +67,15 @@ Deno.serve(async (req) => {
     if (after && (after.status === "pending" || after.status === "processing")) {
       const metadata = (after.metadata as Record<string, unknown> | null) ?? {};
       const stale = Date.now() - new Date(row.created_at).getTime() > REVIEW_AFTER_MS;
+      // Only touch it while it's still open, and merge the flag rather than rewriting the metadata,
+      // so an admin's check or resolution written meanwhile isn't lost.
       await supabase.from("transactions")
-        .update({
-          updated_at: new Date().toISOString(),
-          ...(stale && !metadata.needs_review ? { metadata: { ...metadata, needs_review: true } } : {}),
-        })
-        .eq("id", row.id);
+        .update({ updated_at: new Date().toISOString() })
+        .eq("id", row.id)
+        .in("status", ["pending", "processing"]);
+      if (stale && !metadata.needs_review) {
+        await supabase.rpc("merge_transaction_metadata", { p_transaction_id: row.id, p_patch: { needs_review: true } });
+      }
     }
   }
 
@@ -94,9 +97,7 @@ Deno.serve(async (req) => {
   for (const row of stuckUsdc ?? []) {
     const metadata = (row.metadata as Record<string, unknown> | null) ?? {};
     if (metadata.needs_review) continue;
-    await supabase.from("transactions")
-      .update({ metadata: { ...metadata, needs_review: true }, updated_at: new Date().toISOString() })
-      .eq("id", row.id);
+    await supabase.rpc("merge_transaction_metadata", { p_transaction_id: row.id, p_patch: { needs_review: true } });
     flagged += 1;
   }
 

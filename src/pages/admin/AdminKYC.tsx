@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { Search } from "lucide-react";
 import { format } from "date-fns";
 import { Input } from "@/components/ui/input";
@@ -59,7 +60,7 @@ export const AdminKYC = () => {
             rows.map((k) => (
               <TableRow key={k.id} className="border-border">
                 <TableCell>
-                  <p className="font-medium text-foreground">{k.userName || "Unnamed user"}</p>
+                  <Link to={`/admin/users/${k.userId}`} className="font-medium text-foreground hover:underline">{k.userName || "Unnamed user"}</Link>
                   <p className="text-xs text-muted-foreground">{k.userEmail}</p>
                 </TableCell>
                 <TableCell>{k.level}</TableCell>

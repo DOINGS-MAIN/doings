@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { 
   Search, 
   Filter, 
@@ -70,7 +71,8 @@ export const AdminUsers = () => {
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / 50));
   const [selectedUser, setSelectedUser] = useState<PlatformUser | null>(null);
-  const [actionType, setActionType] = useState<"suspend" | "ban" | "view" | null>(null);
+  const [actionType, setActionType] = useState<"suspend" | "ban" | null>(null);
+  const navigate = useNavigate();
   const [actionReason, setActionReason] = useState("");
 
   const formatCurrency = (amount: number) => {
@@ -107,7 +109,7 @@ export const AdminUsers = () => {
     }
   };
 
-  const runAction = async (action: () => Promise<void>, success: string) => {
+  const runAction = async (action: () => Promise<unknown>, success: string) => {
     try {
       await action();
       toast.success(success);
@@ -186,7 +188,7 @@ export const AdminUsers = () => {
           </TableHeader>
           <TableBody>
             {users.map((user) => (
-              <TableRow key={user.id} className="border-border">
+              <TableRow key={user.id} className="border-border cursor-pointer" onClick={() => navigate(`/admin/users/${user.id}`)}>
                 <TableCell>
                   <div>
                     <p className="font-medium text-foreground">{user.name}</p>
@@ -208,7 +210,7 @@ export const AdminUsers = () => {
                 <TableCell className="text-muted-foreground text-sm">
                   {formatDistanceToNow(user.lastActive, { addSuffix: true })}
                 </TableCell>
-                <TableCell>
+                <TableCell onClick={(e) => e.stopPropagation()}>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -216,12 +218,7 @@ export const AdminUsers = () => {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-48">
-                      <DropdownMenuItem 
-                        onClick={() => {
-                          setSelectedUser(user);
-                          setActionType("view");
-                        }}
-                      >
+                      <DropdownMenuItem onClick={() => navigate(`/admin/users/${user.id}`)}>
                         <Eye className="w-4 h-4 mr-2" />
                         View Details
                       </DropdownMenuItem>
@@ -341,77 +338,6 @@ export const AdminUsers = () => {
         </DialogContent>
       </Dialog>
 
-      {/* View User Dialog */}
-      <Dialog 
-        open={!!selectedUser && actionType === "view"} 
-        onOpenChange={() => {
-          setSelectedUser(null);
-          setActionType(null);
-        }}
-      >
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>User Details</DialogTitle>
-          </DialogHeader>
-          {selectedUser && (
-            <div className="space-y-6 py-4">
-              <div className="flex items-center gap-4">
-                <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center text-2xl font-bold text-primary">
-                  {selectedUser.name.charAt(0)}
-                </div>
-                <div>
-                  <p className="text-xl font-bold">{selectedUser.name}</p>
-                  <p className="text-muted-foreground">{selectedUser.phone}</p>
-                  {selectedUser.email && (
-                    <p className="text-sm text-muted-foreground">{selectedUser.email}</p>
-                  )}
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-muted p-4 rounded-lg">
-                  <p className="text-sm text-muted-foreground">Wallet Balance</p>
-                  <p className="text-xl font-bold">{formatCurrency(selectedUser.walletBalance)}</p>
-                </div>
-                <div className="bg-muted p-4 rounded-lg">
-                  <p className="text-sm text-muted-foreground">Total Sprayed</p>
-                  <p className="text-xl font-bold">{formatCurrency(selectedUser.totalSprayed)}</p>
-                </div>
-                <div className="bg-muted p-4 rounded-lg">
-                  <p className="text-sm text-muted-foreground">Events Hosted</p>
-                  <p className="text-xl font-bold">{selectedUser.eventsHosted}</p>
-                </div>
-                <div className="bg-muted p-4 rounded-lg">
-                  <p className="text-sm text-muted-foreground">Events Joined</p>
-                  <p className="text-xl font-bold">{selectedUser.eventsJoined}</p>
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Status</span>
-                  {getStatusBadge(selectedUser.status)}
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">KYC Status</span>
-                  {getKYCBadge(selectedUser.kycStatus)}
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Member Since</span>
-                  <span>{selectedUser.createdAt.toLocaleDateString()}</span>
-                </div>
-              </div>
-
-              {selectedUser.suspendedReason && (
-                <div className="bg-destructive/10 p-4 rounded-lg">
-                  <p className="text-sm font-medium text-destructive">Suspension Reason</p>
-                  <p className="text-sm mt-1">{selectedUser.suspendedReason}</p>
-                </div>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };

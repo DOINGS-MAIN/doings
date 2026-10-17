@@ -17,7 +17,11 @@ import { formatDistanceToNow } from "date-fns";
 const EMPTY_STATS: AdminStats = {
   totalUsers: 0, activeUsers: 0, suspendedUsers: 0, totalTransactions: 0, totalVolume: 0, todayVolume: 0,
   totalFeeRevenue: 0, todayFeeRevenue: 0, activeEvents: 0, totalEvents: 0, flaggedTransactions: 0, stuckWithdrawals: 0,
+  usdcVolume: 0, usdcTodayVolume: 0,
 };
+
+const formatUsdc = (n: number) =>
+  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(n);
 
 export const AdminDashboard = () => {
   const { data: statsData } = useAdminStats();
@@ -49,7 +53,7 @@ export const AdminDashboard = () => {
     {
       title: "Transaction Volume",
       value: formatCurrency(stats.totalVolume),
-      subtitle: `${formatCurrency(stats.todayVolume)} today`,
+      subtitle: `${formatCurrency(stats.todayVolume)} today · ${formatUsdc(stats.usdcVolume)} USDC`,
       icon: DollarSign,
       color: "text-secondary",
       bgColor: "bg-secondary/10",
