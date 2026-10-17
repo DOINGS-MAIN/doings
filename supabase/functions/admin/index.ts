@@ -5,7 +5,7 @@ import { getPlatformPaymentSettings } from "../_shared/psp/platformSettings.ts";
 import { probeProviderHealth } from "../_shared/psp/registry.ts";
 import { reprocessWebhookLog } from "../_shared/reprocessWebhook.ts";
 import { cleanSearch, orIlike, parsePaging, quoteValue } from "../_shared/adminSearch.ts";
-import { collectAll } from "../_shared/adminExport.ts";
+import { chunk, collectAll } from "../_shared/adminExport.ts";
 import { can, escapeLikePattern, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
 
 const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") ?? "15");
@@ -37,6 +37,21 @@ function toCsv(rows: Record<string, unknown>[], columns: string[]): string {
   return [header, ...lines].join("\n");
 }
 
+// Walks a filtered query for a CSV export. The order has an id tiebreaker (rows written in one
+// database transaction share created_at) and rows created after the export started are left out,
+// so chunk boundaries can't duplicate or skip rows.
+// deno-lint-ignore no-explicit-any
+async function exportRows(build: () => any, startedAt: string): Promise<{ rows: Record<string, unknown>[]; truncated: boolean }> {
+  return await collectAll(async (f, t) => {
+    const { data, error } = await build()
+      .lte("created_at", startedAt)
+      .order("id", { ascending: false })
+      .range(f, t);
+    if (error) throw error;
+    return (data ?? []) as Record<string, unknown>[];
+  });
+}
+
 function csvResponse(filename: string, body: string, truncated = false): Response {
   return new Response(body, {
     headers: {
@@ -58,14 +73,17 @@ async function loadUsersById(
   const unique = [...new Set(userIds.filter(Boolean))];
   if (unique.length === 0) return new Map();
 
-  const { data, error } = await supabase
-    .from("users")
-    .select("id, full_name, phone, email")
-    .in("id", unique);
-
-  if (error) throw error;
-
-  return new Map((data ?? []).map((row) => [row.id as string, row as UserSummary]));
+  // Bounded groups keep each request URL short however many ids there are.
+  const map = new Map<string, UserSummary>();
+  for (const ids of chunk(unique)) {
+    const { data, error } = await supabase
+      .from("users")
+      .select("id, full_name, phone, email")
+      .in("id", ids);
+    if (error) throw error;
+    for (const row of data ?? []) map.set(row.id as string, row as UserSummary);
+  }
+  return map;
 }
 
 async function attachUserFields(
@@ -273,6 +291,7 @@ Deno.serve(async (req) => {
           .from("users")
           .select("id, phone, email, full_name, kyc_level, status, suspended_reason, last_active_at, created_at", { count: "exact" })
           .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
           .range(from, to);
 
         if (status) query = query.eq("status", status);
@@ -376,7 +395,7 @@ Deno.serve(async (req) => {
             .from("users")
             .select("id")
             .or(orIlike(["full_name", "phone", "email"], search))
-            .limit(500);
+            .limit(150);
           const userIds = (matchingUsers ?? []).map((u: { id: string }) => u.id);
           const orParts = [orIlike(["idempotency_key", "provider_ref", "description"], search)];
           if (userIds.length > 0) orParts.push(`user_id.in.(${userIds.join(",")})`);
@@ -384,13 +403,13 @@ Deno.serve(async (req) => {
         }
 
         // The list and the CSV export share these filters.
-        const buildQuery = (count: boolean) => {
+        const LIST_COLUMNS =
+          "id, wallet_id, user_id, currency, type, amount, fee, net_amount, status, provider, provider_ref, idempotency_key, description, metadata, flagged, flag_reason, created_at, completed_at";
+        const CSV_COLUMNS = "id, idempotency_key, user_id, type, amount, fee, currency, status, provider, flagged, created_at";
+        const buildQuery = (count: boolean, columns = LIST_COLUMNS) => {
           let q = supabase
             .from("transactions")
-            .select(
-              "id, wallet_id, user_id, currency, type, amount, fee, net_amount, status, provider, provider_ref, idempotency_key, description, metadata, flagged, flag_reason, created_at, completed_at",
-              count ? { count: "exact" } : undefined,
-            )
+            .select(columns, count ? { count: "exact" } : undefined)
             .order("created_at", { ascending: false });
           if (status) q = q.eq("status", status);
           if (type) q = q.eq("type", type);
@@ -406,19 +425,12 @@ Deno.serve(async (req) => {
         };
 
         if (url.searchParams.get("format") === "csv") {
-          const { rows, truncated } = await collectAll(async (f, t) => {
-            const { data, error } = await buildQuery(false).range(f, t);
-            if (error) throw error;
-            return (data ?? []) as Record<string, unknown>[];
-          });
-          const named: Record<string, unknown>[] = [];
-          for (let i = 0; i < rows.length; i += 1000) {
-            named.push(...await attachUserFields(supabase, rows.slice(i, i + 1000)));
-          }
-          const csvRows = named.map((row: Record<string, unknown>) => ({
+          const { rows, truncated } = await exportRows(() => buildQuery(false, CSV_COLUMNS), new Date().toISOString());
+          const names = await loadUsersById(supabase, rows.map((row) => row.user_id as string));
+          const csvRows = rows.map((row) => ({
             id: row.id,
             reference: row.idempotency_key,
-            user_name: row.user_name,
+            user_name: names.get(row.user_id as string)?.full_name ?? "",
             type: row.type,
             amount: row.amount,
             fee: row.fee,
@@ -435,10 +447,10 @@ Deno.serve(async (req) => {
           );
         }
 
-        const { data, count, error } = await buildQuery(true).range(from, to);
+        const { data, count, error } = await buildQuery(true).order("id", { ascending: false }).range(from, to);
         if (error) throw error;
 
-        const transactions = await attachUserFields(supabase, data ?? []);
+        const transactions = await attachUserFields(supabase, (data ?? []) as Record<string, unknown>[]);
 
         return withCors({ transactions, total: count, page, limit });
       }
@@ -569,6 +581,7 @@ Deno.serve(async (req) => {
           .from("kyc_verifications")
           .select("id, user_id, level, status, provider, bvn_last_four, nin_last_four, selfie_match_confidence, submitted_at, verified_at, reviewed_by, rejection_reason, created_at", { count: "exact" })
           .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
           .range(from, to);
         if (status && status !== "all") query = query.eq("status", status);
 
@@ -588,6 +601,8 @@ Deno.serve(async (req) => {
 
         const EVENT_STATUSES = new Set(["draft", "scheduled", "live", "ended"]);
         const statuses = (status ?? "").split(",").map((v) => v.trim()).filter((v) => EVENT_STATUSES.has(v));
+        // A status filter with no real status in it matches nothing (not everything).
+        if (status && statuses.length === 0) return withCors({ events: [], total: 0, page, limit });
 
         let query = supabase
           .from("events")
@@ -596,6 +611,7 @@ Deno.serve(async (req) => {
             { count: "exact" },
           )
           .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
           .range(from, to);
 
         if (statuses.length) query = query.in("status", statuses);
@@ -993,11 +1009,7 @@ Deno.serve(async (req) => {
         };
 
         if (url.searchParams.get("format") === "csv") {
-          const { rows, truncated } = await collectAll(async (f, t) => {
-            const { data, error } = await buildQuery(false).range(f, t);
-            if (error) throw error;
-            return (data ?? []) as Record<string, unknown>[];
-          });
+          const { rows, truncated } = await exportRows(() => buildQuery(false), new Date().toISOString());
           const csvRows = rows.map((row: Record<string, unknown>) => ({
             id: row.id,
             provider: row.provider,
@@ -1014,7 +1026,7 @@ Deno.serve(async (req) => {
           );
         }
 
-        const { data, count, error } = await buildQuery(true).range(from, to);
+        const { data, count, error } = await buildQuery(true).order("id", { ascending: false }).range(from, to);
         if (error) throw error;
 
         return withCors({ webhooks: data, total: count, page, limit });
@@ -1100,10 +1112,10 @@ Deno.serve(async (req) => {
       const direction = url.searchParams.get("direction");
       const search = orIlike(["reference", "provider_ref", "event_type"], url.searchParams.get("search"));
 
-      const buildQuery = (count: boolean) => {
+      const buildQuery = (count: boolean, columns = "*") => {
         let q = supabase
           .from("psp_events")
-          .select("*", count ? { count: "exact" } : undefined)
+          .select(columns, count ? { count: "exact" } : undefined)
           .order("created_at", { ascending: false });
         if (provider) q = q.eq("provider_id", provider);
         if (direction) q = q.eq("direction", direction);
@@ -1112,11 +1124,10 @@ Deno.serve(async (req) => {
       };
 
       if (url.searchParams.get("format") === "csv") {
-        const { rows, truncated } = await collectAll(async (f, t) => {
-          const { data, error } = await buildQuery(false).range(f, t);
-          if (error) throw error;
-          return (data ?? []) as Record<string, unknown>[];
-        });
+        const { rows, truncated } = await exportRows(
+          () => buildQuery(false, "id, provider_id, direction, event_type, status, reference, created_at"),
+          new Date().toISOString(),
+        );
         const csvRows = rows.map((row: Record<string, unknown>) => ({
           id: row.id,
           provider_id: row.provider_id,
@@ -1133,7 +1144,7 @@ Deno.serve(async (req) => {
         );
       }
 
-      const { data, count, error } = await buildQuery(true).range(from, to);
+      const { data, count, error } = await buildQuery(true).order("id", { ascending: false }).range(from, to);
       if (error) throw error;
 
       return withCors({ events: data, total: count, page, limit });
@@ -1151,6 +1162,7 @@ Deno.serve(async (req) => {
         .from("admin_audit_log")
         .select("id, admin_user_id, action, target_type, target_id, details, created_at", { count: "exact" })
         .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .range(from, to);
       if (action) query = query.eq("action", action);
       if (adminId) query = query.eq("admin_user_id", adminId);
@@ -1169,6 +1181,10 @@ Deno.serve(async (req) => {
 
     return withCors({ error: "Not found" }, { status: 404 });
   } catch (err) {
+    // A page past the end of the list: PostgREST refuses the range.
+    if (typeof err === "object" && err && (err as { code?: string }).code === "PGRST103") {
+      return withCors({ error: "That page is past the end of the list" }, { status: 400 });
+    }
     const detail = err instanceof Error
       ? err.message
       : typeof err === "object" && err && "message" in err

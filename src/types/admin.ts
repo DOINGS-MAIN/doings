@@ -24,7 +24,7 @@ export interface PlatformUser {
   eventsHosted: number;
   eventsJoined: number;
   status: "active" | "suspended" | "banned";
-  kycStatus: "none" | "pending" | "verified" | "rejected";
+  kycStatus: "none" | "email" | "pending" | "verified" | "rejected";
   createdAt: Date;
   lastActive: Date;
   suspendedReason?: string;

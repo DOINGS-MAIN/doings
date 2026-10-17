@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { collectAll } from "./adminExport.ts";
+import { chunk, collectAll } from "./adminExport.ts";
 
 const source = (n: number) => {
   const calls: [number, number][] = [];
@@ -36,4 +36,10 @@ Deno.test("collectAll stops at the cap and reports truncation", async () => {
 Deno.test("collectAll is not truncated when the source is exactly the cap", async () => {
   const r = await collectAll(source(6).fetchRange, { chunk: 3, cap: 6 });
   assertEquals([r.rows.length, r.truncated], [6, false]);
+});
+
+Deno.test("chunk splits ids into bounded groups for .in() lookups", () => {
+  assertEquals(chunk([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
+  assertEquals(chunk([], 150), []);
+  assertEquals(chunk(Array.from({ length: 300 }, (_, i) => i), 150).map((c) => c.length), [150, 150]);
 });

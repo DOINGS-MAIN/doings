@@ -1,6 +1,8 @@
 // Safe admin search and paging. PostgREST `.or()` filters are strings, so user text must be
 // quoted (commas and brackets are syntax) and LIKE-escaped (% and _ are wildcards).
 export const SEARCH_MAX = 100;
+// Past this, offsets stop being meaningful (and PostgREST refuses very large ranges).
+export const MAX_PAGE = 100_000;
 
 export function cleanSearch(text: string | null | undefined): string {
   return (text ?? "").trim().slice(0, SEARCH_MAX);
@@ -9,7 +11,9 @@ export function cleanSearch(text: string | null | undefined): string {
 export function orIlike(columns: string[], text: string | null | undefined): string {
   const clean = cleanSearch(text);
   if (!clean) return "";
-  const like = `%${clean.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  // PostgREST turns * into % in like patterns and has no escape for it, so * becomes a
+  // single-character wildcard (_), the closest it can get to matching a literal *.
+  const like = `%${clean.replace(/[\\%_]/g, (c) => `\\${c}`).replace(/\*/g, "_")}%`;
   const quoted = `"${like.replace(/[\\"]/g, (c) => `\\${c}`)}"`;
   return columns.map((col) => `${col}.ilike.${quoted}`).join(",");
 }
@@ -24,7 +28,7 @@ export function parsePaging(
     const n = Math.floor(Number(raw));
     return Number.isFinite(n) && n >= 1 ? n : null;
   };
-  const page = int(params.get("page")) ?? 1;
+  const page = Math.min(int(params.get("page")) ?? 1, MAX_PAGE);
   const limit = Math.min(int(params.get("limit")) ?? defaultLimit, maxLimit);
   const from = (page - 1) * limit;
   return { page, limit, from, to: from + limit - 1 };

@@ -96,6 +96,8 @@ export const AdminUsers = () => {
     switch (status) {
       case "verified":
         return <Badge className="bg-success/20 text-success border-0">Verified</Badge>;
+      case "email":
+        return <Badge className="bg-primary/10 text-primary border-0">Email verified</Badge>;
       case "pending":
         return <Badge className="bg-primary/20 text-primary border-0">Pending</Badge>;
       case "rejected":

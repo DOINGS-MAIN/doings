@@ -45,6 +45,12 @@ function eventStatus(status: unknown): AdminEvent["status"] {
   return "ended";
 }
 
+function kycLabel(level: number): PlatformUser["kycStatus"] {
+  if (level >= 2) return "verified";
+  if (level === 1) return "email";
+  return "none";
+}
+
 export function mapUser(u: Record<string, unknown>): PlatformUser {
   return {
     id: u.id as string,
@@ -60,8 +66,8 @@ export function mapUser(u: Record<string, unknown>): PlatformUser {
     eventsHosted: (u.events_hosted as number) ?? 0,
     eventsJoined: (u.events_joined as number) ?? 0,
     status: (u.status as PlatformUser["status"]) ?? "active",
-    // The list returns kyc_level, not a status: level 2 is BVN + selfie verified.
-    kycStatus: (u.kyc_status as PlatformUser["kycStatus"]) ?? (Number(u.kyc_level ?? 0) >= 2 ? "verified" : "none"),
+    // The list returns kyc_level, not a status: level 1 is a verified email, level 2 BVN + selfie.
+    kycStatus: (u.kyc_status as PlatformUser["kycStatus"]) ?? kycLabel(Number(u.kyc_level ?? 0)),
     createdAt: new Date((u.created_at as string) ?? Date.now()),
     lastActive: new Date((u.last_active_at as string) ?? (u.last_active as string) ?? Date.now()),
     suspendedReason: (u.suspended_reason as string) ?? undefined,

@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { cleanSearch, orIlike, parsePaging, quoteValue } from "./adminSearch.ts";
+import { cleanSearch, MAX_PAGE, orIlike, parsePaging, quoteValue } from "./adminSearch.ts";
 
 Deno.test("cleanSearch trims, caps at 100, and empties blanks", () => {
   assertEquals(cleanSearch("  ada  "), "ada");
@@ -44,4 +44,13 @@ Deno.test("quoteValue makes an exact-match value safe inside or()", () => {
   assertEquals(quoteValue("ref-123"), '"ref-123"');
   assertEquals(quoteValue("a,b(c)"), '"a,b(c)"');
   assertEquals(quoteValue('x"y\\z'), '"x\\"y\\\\z"');
+});
+
+Deno.test("orIlike: * (a PostgREST wildcard with no escape) matches one character, not any run", () => {
+  assertEquals(orIlike(["email"], "a*b"), 'email.ilike."%a_b%"');
+});
+
+Deno.test("parsePaging caps huge page numbers", () => {
+  assertEquals(parsePaging(new URLSearchParams("page=1e12")).page, MAX_PAGE);
+  assertEquals(parsePaging(new URLSearchParams("page=1e12&limit=10")).from, (MAX_PAGE - 1) * 10);
 });

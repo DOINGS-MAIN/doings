@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapEvent, mapKyc, mapStats, mapTransaction } from "./adminMappers";
+import { mapEvent, mapKyc, mapStats, mapTransaction, mapUser } from "./adminMappers";
 
 describe("admin mappers", () => {
   it("maps event statuses: scheduled/draft are upcoming", () => {
@@ -18,5 +18,11 @@ describe("admin mappers", () => {
   });
   it("maps USDC amounts with 6 decimals", () => {
     expect(mapTransaction({ id: "t", currency: "USDC", amount: 2_500_000, net_amount: 2_500_000 }).amount).toBe(2.5);
+  });
+  it("derives the users KYC label from kyc_level", () => {
+    expect(mapUser({ id: "u", kyc_level: 0 }).kycStatus).toBe("none");
+    expect(mapUser({ id: "u", kyc_level: 1 }).kycStatus).toBe("email");
+    expect(mapUser({ id: "u", kyc_level: 2 }).kycStatus).toBe("verified");
+    expect(mapUser({ id: "u", suspended_reason: "Chargebacks" }).suspendedReason).toBe("Chargebacks");
   });
 });

@@ -17,7 +17,7 @@ AS $$
   t AS (
     SELECT count(*) AS total,
            COALESCE(sum(abs(amount)), 0) AS volume,
-           COALESCE(sum(abs(amount)) FILTER (WHERE created_at >= date_trunc('day', now() AT TIME ZONE 'UTC')), 0) AS today
+           COALESCE(sum(abs(amount)) FILTER (WHERE created_at >= date_trunc('day', now(), 'UTC')), 0) AS today
     FROM public.transactions
     WHERE status = 'completed' AND amount > 0
   ),
@@ -49,3 +49,45 @@ $$;
 
 REVOKE ALL ON FUNCTION public.admin_dashboard_stats(int) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_dashboard_stats(int) TO service_role;
+
+-- The fee stats it reads use the same "today": the UTC day, whatever the session time zone
+-- (unchanged from 041 apart from the date_trunc form).
+CREATE OR REPLACE FUNCTION public.get_fee_revenue_stats()
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  WITH fee_rows AS (
+    SELECT
+      COALESCE(
+        NULLIF(t.fee, 0),
+        NULLIF((t.metadata->'fee_breakdown'->>'total_fee_kobo')::bigint, 0),
+        CASE
+          WHEN ABS(t.net_amount) > ABS(t.amount)
+            THEN ABS(t.net_amount) - ABS(t.amount)
+          ELSE 0
+        END
+      ) AS fee_kobo,
+      t.created_at
+    FROM public.transactions t
+    WHERE t.status = 'completed'
+      AND t.type = 'withdrawal'
+  ),
+  positive AS (
+    SELECT fee_kobo, created_at
+    FROM fee_rows
+    WHERE fee_kobo > 0
+  )
+  SELECT jsonb_build_object(
+    'total_fee_kobo', COALESCE((SELECT SUM(fee_kobo) FROM positive), 0),
+    'today_fee_kobo', COALESCE((
+      SELECT SUM(fee_kobo) FROM positive
+      WHERE created_at >= date_trunc('day', now(), 'UTC')
+    ), 0)
+  );
+$$;
+
+REVOKE ALL ON FUNCTION public.get_fee_revenue_stats() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_fee_revenue_stats() TO service_role;

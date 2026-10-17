@@ -59,4 +59,41 @@ BEGIN
   ASSERT has_function_privilege('service_role', 'public.admin_dashboard_stats(int)'::regprocedure, 'execute'), 'service_role can execute';
 END $$;
 
+-- "Today" is the UTC day whatever the session time zone: a row 30 minutes before UTC midnight is
+-- yesterday, even in Lagos (UTC+1) where it's already after local midnight.
+SET LOCAL TIME ZONE 'Africa/Lagos';
+CREATE TEMP TABLE before_tz AS SELECT public.admin_dashboard_stats() AS s;
+INSERT INTO public.transactions (wallet_id, user_id, currency, type, amount, net_amount, status, provider, idempotency_key, description, created_at)
+SELECT w.id, w.user_id, 'NGN', 'deposit', 777, 777, 'completed', 'internal', 'test-095-tz', 'test 095',
+       date_trunc('day', now(), 'UTC') - interval '30 minutes'
+FROM public.wallets w
+WHERE w.user_id = '53f63182-22be-4f1f-aa78-c24d52ad4f3d' AND w.currency = 'NGN';
+DO $$
+DECLARE b jsonb := (SELECT s FROM before_tz); a jsonb := public.admin_dashboard_stats();
+BEGIN
+  ASSERT (a->>'total_volume')::bigint - (b->>'total_volume')::bigint = 777, 'tz row counts in total';
+  ASSERT (a->>'today_volume')::bigint - (b->>'today_volume')::bigint = 0, 'tz row before UTC midnight is not today';
+END $$;
+RESET TIME ZONE;
+
+-- Users and events: a suspended user and a live event move the counts.
+CREATE TEMP TABLE before_ue AS SELECT public.admin_dashboard_stats() AS s;
+INSERT INTO public.users (phone, email, full_name, status) VALUES ('+2340000095095', 'test095@doings.internal', 'Test 095', 'suspended');
+INSERT INTO public.events (host_id, title, type, status) VALUES ('53f63182-22be-4f1f-aa78-c24d52ad4f3d', 'Test 095', 'other', 'live');
+DO $$
+DECLARE b jsonb := (SELECT s FROM before_ue); a jsonb := public.admin_dashboard_stats();
+BEGIN
+  ASSERT (a->>'total_users')::bigint - (b->>'total_users')::bigint = 1, 'total_users delta';
+  ASSERT (a->>'blocked_users')::bigint - (b->>'blocked_users')::bigint = 1, 'blocked_users delta';
+  ASSERT (a->>'active_users')::bigint - (b->>'active_users')::bigint = 0, 'active_users unchanged';
+  ASSERT (a->>'total_events')::bigint - (b->>'total_events')::bigint = 1, 'total_events delta';
+  ASSERT (a->>'live_events')::bigint - (b->>'live_events')::bigint = 1, 'live_events delta';
+END $$;
+
+DO $$
+BEGIN
+  ASSERT NOT has_function_privilege('authenticated', 'public.get_fee_revenue_stats()'::regprocedure, 'execute'), 'fee stats not callable by users';
+  ASSERT has_function_privilege('service_role', 'public.get_fee_revenue_stats()'::regprocedure, 'execute'), 'service_role keeps fee stats';
+END $$;
+
 SELECT 'admin_dashboard_stats tests passed' AS result;

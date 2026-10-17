@@ -1,7 +1,8 @@
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -43,7 +44,15 @@ import { AdminTransactionDetail } from "./pages/admin/AdminTransactionDetail";
 import { AdminQueue } from "./pages/admin/AdminQueue";
 import { AdminPspEvents } from "./pages/admin/AdminPspEvents";
 
-const queryClient = new QueryClient();
+// Admin data that fails to load says so, instead of showing zeros and empty tables as if real.
+const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (err, query) => {
+      if (query.queryKey[0] !== "admin") return;
+      toast.error(err instanceof Error ? err.message : "Couldn't load admin data");
+    },
+  }),
+});
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
