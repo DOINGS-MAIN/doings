@@ -9,6 +9,14 @@ const HOLD_COLUMNS =
   "floor_started_at, floor_ends_at, queued_at, created_at, expires_at";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// The floor functions' own refusals (shown to the admin as 409); anything else is a real failure (500).
+const REFUSALS = [
+  "Spray hold not found", "This spray isn't on the floor or in the queue", "A reason is required",
+  "Keep the reason under 500 characters", "The event has ended; its floor settles automatically", "Event not found",
+];
+const rpcFailure = (message: string) =>
+  withCors({ error: message }, { status: REFUSALS.some((r) => message.startsWith(r)) ? 409 : 500 });
+
 // Same rule as floor_charged_kobo (088): whole notes for the share of the turn already danced.
 function chargedSoFar(n: number, d: number, secs: number, startedAt: string | null): number {
   if (!startedAt || !secs) return 0;
@@ -34,9 +42,10 @@ export async function handleLiveEvent(ctx: AdminRouteCtx & { holdId?: string }):
     if (hostRes.error) throw hostRes.error;
     if (holdsRes.error) throw holdsRes.error;
 
-    const named = await ctx.attachUserFields(
+    // Names only: the page has no use for sprayers' phone numbers or emails.
+    const named = (await ctx.attachUserFields(
       ((holdsRes.data ?? []) as Record<string, unknown>[]).map((h) => ({ ...h, user_id: h.sprayer_id })),
-    );
+    )).map(({ user_phone: _p, user_email: _e, user_id: _u, ...h }) => h);
     const time = (v: unknown) => (v ? new Date(v as string).getTime() : 0);
     const floor = named.filter((h) => h.status === "on_floor")
       .sort((a, b) => Number(a.floor_slot ?? 0) - Number(b.floor_slot ?? 0))
@@ -65,7 +74,7 @@ export async function handleLiveEvent(ctx: AdminRouteCtx & { holdId?: string }):
 
   if (req.method === "POST" && action === "advance-floor") {
     const { data, error } = await supabase.rpc("admin_advance_floor", { p_event_id: id, p_admin_auth_id: authId });
-    if (error) return withCors({ error: error.message }, { status: 409 });
+    if (error) return rpcFailure(error.message);
     return withCors({ ok: true, ...(data as Record<string, unknown>) });
   }
 
@@ -80,9 +89,9 @@ export async function handleLiveEvent(ctx: AdminRouteCtx & { holdId?: string }):
     if (!hold || hold.event_id !== id) return withCors({ error: "Spray hold not found in this event" }, { status: 404 });
 
     const { data, error: rpcErr } = await supabase.rpc("admin_remove_floor_hold", {
-      p_hold_id: holdId, p_admin_auth_id: authId, p_reason: body.reason,
+      p_event_id: id, p_hold_id: holdId, p_admin_auth_id: authId, p_reason: body.reason,
     });
-    if (rpcErr) return withCors({ error: rpcErr.message }, { status: 409 });
+    if (rpcErr) return rpcFailure(rpcErr.message);
     const out = data as { was_status?: string; charged_kobo?: number };
     return withCors({ ok: true, was_status: out?.was_status, charged_kobo: Number(out?.charged_kobo ?? 0) });
   }

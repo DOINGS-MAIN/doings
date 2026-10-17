@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapBundleOrder, mapEvent, mapGiveaway, mapGiveawayDetail, mapKyc, mapLiveEvent, mapPaymentsOverview, mapPayout, mapStats, mapTransaction, mapUser, mapUser360 } from "./adminMappers";
+import { floorChargedSoFar, mapBundleOrder, mapEvent, mapGiveaway, mapGiveawayDetail, mapKyc, mapLiveEvent, mapPaymentsOverview, mapPayout, mapStats, mapTransaction, mapUser, mapUser360 } from "./adminMappers";
 
 describe("admin mappers", () => {
   it("maps event statuses: scheduled/draft are upcoming", () => {
@@ -146,7 +146,8 @@ describe("admin mappers", () => {
         participant_count: 12, total_sprayed: 500000, flagged: false, started_at: "2026-10-17T10:00:00Z" },
       host: { id: "u9", full_name: "Host", email: "h@x" },
       totals: { holds_active: 3, held_kobo: 600000, sprayed_kobo: 500000 },
-      floor: [{ id: "h1", sprayer_id: "u1", user_name: "Ada", planned_amount_kobo: 200000, floor_slot: 1, floor_seconds: 60,
+      floor: [{ id: "h1", sprayer_id: "u1", user_name: "Ada", planned_amount_kobo: 200000, note_count: 10, denomination: 200,
+        floor_slot: 1, floor_seconds: 60,
         floor_started_at: "2026-10-17T10:05:00Z", floor_ends_at: "2026-10-17T10:06:00Z", charged_so_far_kobo: 100000 }],
       queue: [{ id: "h2", sprayer_id: "u2", user_name: "Ben", planned_amount_kobo: 200000, queued_at: "2026-10-17T10:04:00Z" },
               { id: "h3", sprayer_id: "u3", user_name: "Chi", planned_amount_kobo: 200000, queued_at: "2026-10-17T10:04:30Z" }],
@@ -155,7 +156,20 @@ describe("admin mappers", () => {
     expect(m.event).toMatchObject({ code: "WED1", participants: 12, totalSprayed: 5000 });
     expect(m.totals).toEqual({ holdsActive: 3, held: 6000, sprayed: 5000 });
     expect(m.floor[0]).toMatchObject({ name: "Ada", held: 2000, slot: 1, seconds: 60, chargedSoFar: 1000 });
+    // the floor rows carry what the browser needs to keep "charged so far" ticking
+    expect(m.floor[0]).toMatchObject({ noteCount: 10, denomination: 200 });
     expect(m.queue.map((q) => [q.name, q.position])).toEqual([["Ben", 1], ["Chi", 2]]);
     expect(m.host).toMatchObject({ name: "Host" });
+  });
+  it("floorChargedSoFar matches the database rule (whole notes for the share danced, capped)", () => {
+    const start = new Date("2026-10-17T10:00:00Z");
+    const at = (s: number) => start.getTime() + s * 1000;
+    expect(floorChargedSoFar(10, 200, 60, start, at(0))).toBe(0);
+    expect(floorChargedSoFar(10, 200, 60, start, at(5.9))).toBe(0);
+    expect(floorChargedSoFar(10, 200, 60, start, at(6))).toBe(200);
+    expect(floorChargedSoFar(10, 200, 60, start, at(30))).toBe(1000);
+    expect(floorChargedSoFar(10, 200, 60, start, at(600))).toBe(2000);
+    expect(floorChargedSoFar(10, 200, 60, undefined, at(30))).toBe(0);
+    expect(floorChargedSoFar(10, 200, 60, start, at(-5))).toBe(0);
   });
 });

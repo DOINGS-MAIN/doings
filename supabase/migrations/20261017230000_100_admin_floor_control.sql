@@ -15,10 +15,12 @@ BEGIN
     EXECUTE format('ALTER TABLE public.spray_holds DROP CONSTRAINT %I', c);
   END LOOP;
 END $$;
+-- NOT VALID then VALIDATE: checking existing rows doesn't hold an exclusive lock on this live table.
 ALTER TABLE public.spray_holds ADD CONSTRAINT ck_spray_hold_release_reason
-  CHECK (release_reason IN ('left', 'max_wait', 'event_ended', 'event_ended_on_floor', 'removed_by_admin'));
+  CHECK (release_reason IN ('left', 'max_wait', 'event_ended', 'event_ended_on_floor', 'removed_by_admin')) NOT VALID;
+ALTER TABLE public.spray_holds VALIDATE CONSTRAINT ck_spray_hold_release_reason;
 
-CREATE OR REPLACE FUNCTION public.admin_remove_floor_hold(p_hold_id uuid, p_admin_auth_id uuid, p_reason text)
+CREATE OR REPLACE FUNCTION public.admin_remove_floor_hold(p_event_id uuid, p_hold_id uuid, p_admin_auth_id uuid, p_reason text)
 RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
@@ -29,10 +31,18 @@ DECLARE
   v_reason text := btrim(COALESCE(p_reason, ''));
   v_charged bigint := 0;
   v_title text;
+  v_event_status text;
   v_body text;
 BEGIN
   SELECT * INTO v_hold FROM public.spray_holds WHERE id = p_hold_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'Spray hold not found'; END IF;
+  -- Never act on another event's floor through this event.
+  IF v_hold.event_id <> p_event_id THEN RAISE EXCEPTION 'Spray hold not found in this event'; END IF;
+  -- An ended event's floor settles automatically, charged only up to its end time.
+  SELECT status::text, title INTO v_event_status, v_title FROM public.events WHERE id = v_hold.event_id;
+  IF v_event_status IS DISTINCT FROM 'live' THEN
+    RAISE EXCEPTION 'The event has ended; its floor settles automatically';
+  END IF;
   IF v_hold.status NOT IN ('queued', 'on_floor') THEN
     RAISE EXCEPTION 'This spray isn''t on the floor or in the queue';
   END IF;
@@ -52,7 +62,6 @@ BEGIN
   PERFORM public.advance_event_floor(v_hold.event_id);
   PERFORM public._floor_ping(v_hold.event_id);
 
-  SELECT title INTO v_title FROM public.events WHERE id = v_hold.event_id;
   v_body := format('You were removed from the dance floor at "%s": %s', v_title, v_reason)
     || CASE WHEN right(v_reason, 1) IN ('.', '!', '?') THEN '' ELSE '.' END
     || CASE WHEN v_charged > 0
@@ -89,7 +98,7 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.admin_remove_floor_hold(uuid, uuid, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.admin_remove_floor_hold(uuid, uuid, text) TO service_role;
+REVOKE ALL ON FUNCTION public.admin_remove_floor_hold(uuid, uuid, uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_remove_floor_hold(uuid, uuid, uuid, text) TO service_role;
 REVOKE ALL ON FUNCTION public.admin_advance_floor(uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_advance_floor(uuid, uuid) TO service_role;

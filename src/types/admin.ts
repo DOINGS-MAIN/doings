@@ -319,7 +319,7 @@ export interface AdminLiveEvent {
   totals: { holdsActive: number; held: number; sprayed: number };
   floor: {
     id: string; sprayerId: string; name: string; held: number; slot: number; seconds: number;
-    startedAt?: Date; endsAt?: Date; chargedSoFar: number;
+    startedAt?: Date; endsAt?: Date; chargedSoFar: number; noteCount: number; denomination: number;
   }[];
   queue: { id: string; sprayerId: string; name: string; held: number; queuedAt?: Date; position: number }[];
   holds: { id: string; sprayerId: string; name: string; held: number; createdAt: Date; expiresAt?: Date }[];

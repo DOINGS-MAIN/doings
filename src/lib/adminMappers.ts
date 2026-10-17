@@ -535,6 +535,8 @@ export function mapLiveEvent(res: Record<string, unknown>): AdminLiveEvent {
       startedAt: dateOr(f.floor_started_at),
       endsAt: dateOr(f.floor_ends_at),
       chargedSoFar: naira(f.charged_so_far_kobo),
+      noteCount: Number(f.note_count ?? 0),
+      denomination: Number(f.denomination ?? 0),
     })),
     queue: rows("queue").map((q, i) => ({
       id: q.id as string,
@@ -553,4 +555,12 @@ export function mapLiveEvent(res: Record<string, unknown>): AdminLiveEvent {
       expiresAt: dateOr(p.expires_at),
     })),
   };
+}
+
+// The floor's charge rule (floor_charged_kobo in 088), in naira: whole notes for the share of the turn
+// already danced, never more than the turn. Lets the live page tick between refreshes.
+export function floorChargedSoFar(noteCount: number, denomination: number, seconds: number, startedAt: Date | undefined, now: number): number {
+  if (!startedAt || !seconds) return 0;
+  const ms = Math.min(Math.max(now - startedAt.getTime(), 0), seconds * 1000);
+  return Math.floor((noteCount * ms) / (seconds * 1000)) * denomination;
 }
