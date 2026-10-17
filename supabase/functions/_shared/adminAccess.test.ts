@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { can, escapeLikePattern, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed } from "./adminAccess.ts";
+import { can, escapeLikePattern, payoutCheckRefusal, payoutConfirmMatches, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed } from "./adminAccess.ts";
 
 const ROLES = ["super_admin", "finance", "support", "compliance", "moderation"] as const;
 
@@ -119,4 +119,45 @@ Deno.test("escapeLikePattern makes an email match only itself in ilike", () => {
   assertEquals(escapeLikePattern("100%@x.com"), "100\\%@x.com");
   assertEquals(escapeLikePattern("a\\b@x.com"), "a\\\\b@x.com");
   assertEquals(escapeLikePattern("plain@x.com"), "plain@x.com");
+});
+
+Deno.test("permissionFor: payouts and bundle orders", () => {
+  assertEquals(permissionFor("payouts", "GET", undefined, false), "transactions.view");
+  assertEquals(permissionFor("payouts", "GET", undefined, true), "transactions.view");
+  assertEquals(permissionFor("payouts", "POST", "check", true), "transactions.write");
+  assertEquals(permissionFor("payouts", "POST", "resolve", true), "transactions.write");
+  assertEquals(permissionFor("payouts", "POST", "resolve", false), null);
+  assertEquals(permissionFor("payouts", "POST", "delete", true), null);
+  assertEquals(permissionFor("bundle-orders", "GET", undefined, false), "transactions.view");
+  assertEquals(permissionFor("bundle-orders", "POST", "check", true), "transactions.write");
+  assertEquals(permissionFor("bundle-orders", "POST", "refund", true), "transactions.write");
+  assertEquals(permissionFor("bundle-orders", "POST", "resolve", true), null);
+});
+
+Deno.test("payouts: support views but can't act; compliance and moderation can't view", () => {
+  assertEquals(can("support", permissionFor("payouts", "GET")!), true);
+  assertEquals(can("support", permissionFor("payouts", "POST", "resolve", true)!), false);
+  assertEquals(can("finance", permissionFor("payouts", "POST", "resolve", true)!), true);
+  assertEquals(can("compliance", permissionFor("payouts", "GET")!), false);
+  assertEquals(can("moderation", permissionFor("bundle-orders", "GET")!), false);
+});
+
+Deno.test("payoutConfirmMatches: exact reference, spaces trimmed, never empty", () => {
+  assertEquals(payoutConfirmMatches("SELL-ab12-xyz", "SELL-ab12-xyz"), true);
+  assertEquals(payoutConfirmMatches("  SELL-ab12-xyz ", "SELL-ab12-xyz"), true);
+  assertEquals(payoutConfirmMatches("sell-ab12-xyz", "SELL-ab12-xyz"), false);
+  assertEquals(payoutConfirmMatches("SELL-ab12", "SELL-ab12-xyz"), false);
+  assertEquals(payoutConfirmMatches("", ""), false);
+  assertEquals(payoutConfirmMatches(undefined, "SELL-1"), false);
+  assertEquals(payoutConfirmMatches("x", null), false);
+});
+
+Deno.test("payoutCheckRefusal: only open NGN non-Blockradar withdrawals can be checked", () => {
+  const ok = { type: "withdrawal", currency: "NGN", provider: "flutterwave", status: "processing" };
+  assertEquals(payoutCheckRefusal(ok), null);
+  assertEquals(payoutCheckRefusal({ ...ok, provider: null, status: "pending" }), null);
+  assertEquals(payoutCheckRefusal({ ...ok, type: "deposit" })?.status, 404);
+  assertEquals(payoutCheckRefusal({ ...ok, currency: "USDC" })?.status, 400);
+  assertEquals(payoutCheckRefusal({ ...ok, provider: "blockradar" })?.status, 400);
+  assertEquals(payoutCheckRefusal({ ...ok, status: "completed" }), { status: 409, error: "Payout is already completed" });
 });

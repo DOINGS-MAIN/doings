@@ -64,6 +64,14 @@ export function permissionFor(resource: string, method: string, action?: string,
       return get ? "queue" : null;
     case "psp-events":
       return get ? "psp_events" : null;
+    case "payouts":
+      if (get && !action) return "transactions.view";
+      if (post && hasId && (action === "check" || action === "resolve")) return "transactions.write";
+      return null;
+    case "bundle-orders":
+      if (get && !action) return "transactions.view";
+      if (post && hasId && (action === "check" || action === "refund")) return "transactions.write";
+      return null;
     default:
       return null;
   }
@@ -90,4 +98,25 @@ export function teamChangeAllowed(p: {
 // Escapes LIKE wildcards so an ilike filter matches the value exactly (case-insensitively).
 export function escapeLikePattern(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
+
+// Marking a payout paid or failed needs its reference typed back, so it can't be done to the wrong row.
+export function payoutConfirmMatches(typed: string | null | undefined, reference: string | null | undefined): boolean {
+  const ref = (reference ?? "").trim();
+  return ref !== "" && (typed ?? "").trim() === ref;
+}
+
+// Why "Check with provider" can't run for this row, or null when it can. USDC (Blockradar) payouts
+// settle by webhook only, so there's nothing to ask.
+export function payoutCheckRefusal(
+  row: { type: string; currency: string; provider: string | null; status: string },
+): { status: 400 | 404 | 409; error: string } | null {
+  if (row.type !== "withdrawal") return { status: 404, error: "Payout not found" };
+  if (row.currency !== "NGN" || row.provider === "blockradar") {
+    return { status: 400, error: "USDC payouts settle by webhook — resolve manually" };
+  }
+  if (row.status !== "pending" && row.status !== "processing") {
+    return { status: 409, error: `Payout is already ${row.status}` };
+  }
+  return null;
 }
