@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapBundleOrder, mapEvent, mapKyc, mapPaymentsOverview, mapPayout, mapStats, mapTransaction, mapUser } from "./adminMappers";
+import { mapBundleOrder, mapEvent, mapKyc, mapPaymentsOverview, mapPayout, mapStats, mapTransaction, mapUser, mapUser360 } from "./adminMappers";
 
 describe("admin mappers", () => {
   it("maps event statuses: scheduled/draft are upcoming", () => {
@@ -79,5 +79,40 @@ describe("admin mappers", () => {
     const f = mapPaymentsOverview({ treasury: [{ currency: "USDC", balance: 2_000_000, locked_balance: 500_000 }], recent_topups: [] });
     expect(f.money.treasuryVisible).toBe(true);
     expect(f.money.treasury[0]).toEqual({ currency: "USDC", balance: 2, locked: 0.5 });
+  });
+  it("maps a user 360 with only the sections the server sent", () => {
+    const m = mapUser360({
+      user: { id: "u1", full_name: "Ada Obi", status: "suspended", suspended_reason: "Chargebacks", kyc_level: 2, created_at: "2026-10-01T00:00:00Z" },
+      can: { profile: true, actions: true, kyc: true, money: false, security: true, activity: true },
+      sections: {
+        security: { pin_set: true, pin_failed_attempts: 2, pin_locked_until: null },
+        kyc: { records: [{ id: "k1", level: 2, status: "verified", verification_method: "bvn_selfie", bvn_last_four: "1234",
+          selfie_match_confidence: 96.5, liveness_score: 71, submitted_at: "2026-10-02T00:00:00Z", verified_at: "2026-10-02T00:01:00Z", superseded_at: null }],
+          attempts_24h: 3, attempts_max: 5 },
+        activity: { events_hosted: [{ id: "e1", title: "Party", status: "live", event_code: "AB12", created_at: "2026-10-03T00:00:00Z" }], giveaways_created: 4 },
+      },
+    });
+    expect(m.user).toMatchObject({ name: "Ada Obi", status: "suspended", suspendedReason: "Chargebacks", kycLevel: 2 });
+    expect(m.money).toBeUndefined();
+    expect(m.kyc?.records[0]).toMatchObject({ method: "bvn_selfie", matchScore: 96.5, livenessScore: 71, superseded: false });
+    expect(m.kyc).toMatchObject({ attempts24h: 3, attemptsMax: 5 });
+    expect(m.security).toMatchObject({ pinSet: true, pinFailedAttempts: 2 });
+    expect(m.activity).toMatchObject({ giveawaysCreated: 4 });
+  });
+  it("maps user 360 money in display units", () => {
+    const m = mapUser360({
+      user: { id: "u1", status: "active", kyc_level: 1, created_at: "2026-10-01T00:00:00Z" },
+      can: { profile: true, actions: false, kyc: false, money: true, security: true, activity: true },
+      sections: { money: {
+        wallets: [{ currency: "NGN", balance: 500000, locked_balance: 100000 }, { currency: "USDC", balance: 2_000_000, locked_balance: 0 }],
+        transactions: [{ id: "t1", type: "withdrawal", currency: "NGN", amount: -250000, status: "completed", idempotency_key: "SELL-1", created_at: "2026-10-04T00:00:00Z" }],
+        open_payouts: [], bundle_orders: [{ id: "o1", currency: "NGN", bundles: 5, amount: 50000, status: "failed", refunded_at: "2026-10-05T00:00:00Z", created_at: "2026-10-04T00:00:00Z" }],
+        bank_accounts: [{ id: "b1", bank_name: "GTB", account_name: "ADA OBI", account_number: "••••6789", is_default: true }],
+      } },
+    });
+    expect(m.money?.wallets).toEqual([{ currency: "NGN", balance: 5000, held: 1000 }, { currency: "USDC", balance: 2, held: 0 }]);
+    expect(m.money?.transactions[0]).toMatchObject({ amount: 2500, reference: "SELL-1" });
+    expect(m.money?.bundleOrders[0]).toMatchObject({ amount: 500, refunded: true });
+    expect(m.money?.bankAccounts[0].accountNumber).toBe("••••6789");
   });
 });

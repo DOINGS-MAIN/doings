@@ -1,5 +1,5 @@
 import type {
-  AdminBundleOrder, AdminEvent, AdminPayout, AdminStats, AdminTransaction, KYCSubmission, MoneyOverview, PaymentsOverview,
+  AdminBundleOrder, AdminEvent, AdminPayout, AdminUser360, AdminStats, AdminTransaction, KYCSubmission, MoneyOverview, PaymentsOverview,
   PlatformUser, ReviewQueue, ReviewQueueItem,
 } from "@/types/admin";
 
@@ -323,4 +323,118 @@ export function mapQueue(res: Record<string, unknown>): ReviewQueue & {
     ordersPaidFailed: list("orders_paid_failed"),
     ordersPendingFloat: list("orders_pending_float"),
   };
+}
+
+const num = (v: unknown): number | undefined => (v == null || v === "" ? undefined : Number(v));
+const str = (v: unknown): string | undefined => (v == null || v === "" ? undefined : String(v));
+
+// User 360: a section is present exactly when the server sent it (the role may see it).
+export function mapUser360(res: Record<string, unknown>): AdminUser360 {
+  const u = (res.user ?? {}) as Record<string, unknown>;
+  const sections = (res.sections ?? {}) as Record<string, Record<string, unknown> | undefined>;
+  const can = (res.can ?? {}) as AdminUser360["can"];
+  const out: AdminUser360 = {
+    user: {
+      id: u.id as string,
+      name: (u.full_name as string) ?? "",
+      username: str(u.username),
+      email: str(u.email),
+      phone: str(u.phone),
+      avatarUrl: str(u.avatar_url),
+      status: ((u.status as string) ?? "active") as AdminUser360["user"]["status"],
+      suspendedReason: str(u.suspended_reason),
+      suspendedAt: dateOr(u.suspended_at),
+      kycLevel: Number(u.kyc_level ?? 0),
+      createdAt: new Date((u.created_at as string) ?? Date.now()),
+      lastActive: dateOr(u.last_active_at),
+    },
+    can: {
+      profile: !!can.profile, actions: !!can.actions, kyc: !!can.kyc, money: !!can.money, security: !!can.security, activity: !!can.activity,
+    },
+  };
+  const sec = sections.security;
+  if (sec) {
+    out.security = { pinSet: !!sec.pin_set, pinFailedAttempts: Number(sec.pin_failed_attempts ?? 0), pinLockedUntil: dateOr(sec.pin_locked_until) };
+  }
+  const kyc = sections.kyc;
+  if (kyc) {
+    out.kyc = {
+      records: ((kyc.records as Record<string, unknown>[]) ?? []).map((r) => ({
+        id: r.id as string,
+        level: Number(r.level ?? 0),
+        status: (r.status as string) ?? "",
+        method: str(r.verification_method),
+        bvnLastFour: str(r.bvn_last_four),
+        ninLastFour: str(r.nin_last_four),
+        matchScore: num(r.selfie_match_confidence),
+        livenessScore: num(r.liveness_score),
+        rejectionReason: str(r.rejection_reason),
+        submittedAt: new Date((r.submitted_at as string) ?? Date.now()),
+        verifiedAt: dateOr(r.verified_at),
+        reviewedAt: dateOr(r.reviewed_at),
+        superseded: !!r.superseded_at,
+      })),
+      attempts24h: Number(kyc.attempts_24h ?? 0),
+      attemptsMax: Number(kyc.attempts_max ?? 5),
+    };
+  }
+  const money = sections.money;
+  if (money) {
+    const rows = (k: string) => (money[k] as Record<string, unknown>[]) ?? [];
+    out.money = {
+      wallets: rows("wallets").map((w) => ({
+        currency: (w.currency as string) ?? "",
+        balance: toDisplay(Number(w.balance ?? 0), (w.currency as string) ?? "NGN"),
+        held: toDisplay(Number(w.locked_balance ?? 0), (w.currency as string) ?? "NGN"),
+      })),
+      transactions: rows("transactions").map((t) => ({
+        id: t.id as string,
+        type: (t.type as string) ?? "",
+        currency: (t.currency as string) ?? "NGN",
+        amount: Math.abs(toDisplay(Number(t.amount ?? 0), (t.currency as string) ?? "NGN")),
+        status: (t.status as string) ?? "",
+        reference: (t.idempotency_key as string) ?? (t.id as string),
+        createdAt: new Date((t.created_at as string) ?? Date.now()),
+      })),
+      openPayouts: rows("open_payouts").map((p) => ({
+        id: p.id as string,
+        currency: (p.currency as string) ?? "NGN",
+        amount: Math.abs(toDisplay(Number(p.amount ?? 0), (p.currency as string) ?? "NGN")),
+        status: (p.status as string) ?? "",
+        reference: (p.idempotency_key as string) ?? (p.id as string),
+        needsReview: !!p.needs_review,
+        createdAt: new Date((p.created_at as string) ?? Date.now()),
+      })),
+      bundleOrders: rows("bundle_orders").map((o) => ({
+        id: o.id as string,
+        currency: (o.currency as string) ?? "NGN",
+        bundles: Number(o.bundles ?? 0),
+        amount: toDisplay(Number(o.amount ?? 0), (o.currency as string) ?? "NGN"),
+        status: (o.status as string) ?? "",
+        refunded: !!o.refunded_at,
+        createdAt: new Date((o.created_at as string) ?? Date.now()),
+      })),
+      bankAccounts: rows("bank_accounts").map((b) => ({
+        id: b.id as string,
+        bankName: (b.bank_name as string) ?? "",
+        accountName: (b.account_name as string) ?? "",
+        accountNumber: (b.account_number as string) ?? "",
+        isDefault: !!b.is_default,
+      })),
+    };
+  }
+  const act = sections.activity;
+  if (act) {
+    out.activity = {
+      eventsHosted: ((act.events_hosted as Record<string, unknown>[]) ?? []).map((e) => ({
+        id: e.id as string,
+        title: (e.title as string) ?? "",
+        status: (e.status as string) ?? "",
+        code: (e.event_code as string) ?? "",
+        createdAt: new Date((e.created_at as string) ?? Date.now()),
+      })),
+      giveawaysCreated: Number(act.giveaways_created ?? 0),
+    };
+  }
+  return out;
 }

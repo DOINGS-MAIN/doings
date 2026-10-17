@@ -373,6 +373,7 @@ export const admin = {
     unsuspend: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/unsuspend` }),
     ban: (id: string, reason: string) => invoke("admin", { method: "POST", path: `users/${id}/ban`, body: { reason } }),
     unban: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/unban` }),
+    resetKycAttempts: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/kyc-reset` }),
   },
   transactions: {
     list: (params?: {
@@ -436,6 +437,8 @@ export const admin = {
   kyc: {
     list: (params?: { page?: number; limit?: number; status?: string }) =>
       invoke("admin", { method: "GET", path: "kyc", params: params as Record<string, string> }),
+    revoke: (id: string, reason: string, confirm: string) =>
+      invoke("admin", { method: "POST", path: `kyc/${id}/revoke`, body: { reason, confirm } }),
   },
   events: {
     list: (params?: { page?: number; limit?: number; status?: string; flagged?: string }) =>

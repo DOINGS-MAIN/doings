@@ -246,6 +246,32 @@ export interface MoneyOverview {
   recentTopups: { id: string; currency: string; amount: number; reference?: string; note?: string; createdAt: Date }[];
 }
 
+export interface AdminUser360 {
+  user: {
+    id: string; name: string; username?: string; email?: string; phone?: string; avatarUrl?: string;
+    status: "active" | "suspended" | "banned"; suspendedReason?: string; suspendedAt?: Date; kycLevel: number; createdAt: Date; lastActive?: Date;
+  };
+  /** Which sections this admin's role may see (the server leaves the others out). */
+  can: { profile: boolean; actions: boolean; kyc: boolean; money: boolean; security: boolean; activity: boolean };
+  security?: { pinSet: boolean; pinFailedAttempts: number; pinLockedUntil?: Date };
+  kyc?: {
+    records: {
+      id: string; level: number; status: string; method?: string; bvnLastFour?: string; ninLastFour?: string;
+      matchScore?: number; livenessScore?: number; rejectionReason?: string; submittedAt: Date; verifiedAt?: Date; reviewedAt?: Date; superseded: boolean;
+    }[];
+    attempts24h: number;
+    attemptsMax: number;
+  };
+  money?: {
+    wallets: { currency: string; balance: number; held: number }[];
+    transactions: { id: string; type: string; currency: string; amount: number; status: string; reference: string; createdAt: Date }[];
+    openPayouts: { id: string; currency: string; amount: number; status: string; reference: string; needsReview: boolean; createdAt: Date }[];
+    bundleOrders: { id: string; currency: string; bundles: number; amount: number; status: string; refunded: boolean; createdAt: Date }[];
+    bankAccounts: { id: string; bankName: string; accountName: string; accountNumber: string; isDefault: boolean }[];
+  };
+  activity?: { eventsHosted: { id: string; title: string; status: string; code: string; createdAt: Date }[]; giveawaysCreated: number };
+}
+
 export type PspCapability = "wallet_funding" | "disbursement" | "bank_verify";
 export type PspProviderStatus = "active" | "disabled" | "sandbox_only";
 export type PspEnv = "sandbox" | "production";

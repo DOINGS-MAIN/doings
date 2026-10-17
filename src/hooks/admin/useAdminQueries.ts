@@ -2,7 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { admin as adminApi } from "@/lib/supabase";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { can } from "@/types/admin";
-import { mapBundleOrder, mapEvent, mapKyc, mapPaymentsOverview, mapPayout, mapQueue, mapStats, mapTransaction, mapUser } from "@/lib/adminMappers";
+import { mapBundleOrder, mapEvent, mapKyc, mapPaymentsOverview, mapPayout, mapQueue, mapStats, mapTransaction, mapUser, mapUser360 } from "@/lib/adminMappers";
 
 const STALE = 30_000;
 export type EventTab = "live" | "upcoming" | "ended" | "flagged";
@@ -190,6 +190,16 @@ export function useAdminQueue() {
   });
 }
 
+export function useAdminUser360(id: string | null) {
+  const role = useRole();
+  return useQuery({
+    queryKey: adminKeys.users({ id }),
+    queryFn: async () => mapUser360((await adminApi.users.get(id!)) as Record<string, unknown>),
+    enabled: can(role, "users.view") && !!id,
+    staleTime: STALE,
+  });
+}
+
 export function useAdminMutations() {
   const qc = useQueryClient();
   const refresh = (...keys: (keyof typeof adminKeys)[]) =>
@@ -218,5 +228,8 @@ export function useAdminMutations() {
     checkBundleOrder: (id: string) => run(() => adminApi.bundleOrders.check(id), "bundleOrders", "transactions", "stats", "queue", "payments"),
     recordBundleRefund: (id: string, reference: string, amountNaira: number, note: string) =>
       run(() => adminApi.bundleOrders.refund(id, reference, Math.round(amountNaira * 100), note), "bundleOrders", "queue", "payments"),
+    revokeKyc: (kycId: string, reason: string, confirm: string) =>
+      run(() => adminApi.kyc.revoke(kycId, reason, confirm), "users", "kyc", "stats"),
+    resetKycAttempts: (userId: string) => run(() => adminApi.users.resetKycAttempts(userId), "users"),
   };
 }
