@@ -277,7 +277,9 @@ export interface AdminGiveaway {
   creatorId: string;
   creatorName: string;
   title: string;
+  /** Masked (••••XX) while active: the server never sends a claimable code to the list or detail. */
   code: string;
+  codeMasked: boolean;
   status: "active" | "stopped" | "exhausted";
   type: "live" | "scheduled";
   /** Naira. */

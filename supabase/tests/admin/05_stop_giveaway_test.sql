@@ -49,7 +49,9 @@ BEGIN
   ASSERT (SELECT status FROM public.giveaways WHERE id = g_live) = 'stopped', 'stopped';
   ASSERT (SELECT remaining_amount FROM public.giveaways WHERE id = g_live) = 0, 'nothing left';
   ASSERT (SELECT refund_transaction_id IS NOT NULL FROM public.giveaways WHERE id = g_live), 'refund txn recorded';
-  ASSERT (SELECT stopped_by FROM public.giveaways WHERE id = g_live) = a, 'who';
+  -- Who stopped it lives only in the audit log (099 dropped giveaways.stopped_by, which creators could read).
+  ASSERT NOT EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = 'public' AND table_name = 'giveaways' AND column_name = 'stopped_by'), 'no stopped_by column';
   ASSERT (SELECT stop_reason FROM public.giveaways WHERE id = g_live) = 'Misleading title.', 'why';
   ASSERT (SELECT balance FROM public.wallets WHERE id = (SELECT admin_wallet_id FROM fx)) = (SELECT admin_balance FROM b0), 'admin wallet untouched';
   ASSERT EXISTS (SELECT 1 FROM public.notifications WHERE user_id = u AND type = 'giveaway_stopped'

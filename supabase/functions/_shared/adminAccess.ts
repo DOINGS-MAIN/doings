@@ -74,7 +74,7 @@ export function permissionFor(resource: string, method: string, action?: string,
       return get ? "psp_events" : null;
     case "giveaways":
       if (get && !action) return "giveaways.view";
-      if (post && hasId && action === "stop") return "giveaways.stop";
+      if (post && hasId && (action === "stop" || action === "reveal-code")) return "giveaways.stop";
       return null;
     case "payouts":
       if (get && !action) return "transactions.view";
@@ -181,4 +181,13 @@ export function giveawayCodeMatches(typed: unknown, code: string | null | undefi
   const norm = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, "").toUpperCase() : "");
   const c = norm(code);
   return c !== "" && norm(typed) === c;
+}
+
+// An active giveaway's code is effectively cash (whoever has it can claim), so lists and detail only
+// ever show its last two characters; stop roles reveal it through an audited route. Finished
+// giveaways can't be claimed any more, so their codes are shown in full.
+export function maskGiveawayCode(code: string | null | undefined, status: string): string {
+  const c = (code ?? "").trim();
+  if (!c) return "";
+  return status === "active" ? `••••${c.slice(-2)}` : c;
 }

@@ -17,7 +17,7 @@ const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") 
 const RESERVED_ACTIONS = new Set([
   "suspend", "unsuspend", "ban", "unban", "flag", "unflag", "approve", "reject", "end",
   "invite", "accept", "disable", "enable", "role", "refund", "reprocess", "export", "probe-all", "health",
-  "check", "resolve", "revoke", "kyc-reset", "stop",
+  "check", "resolve", "revoke", "kyc-reset", "stop", "reveal-code",
 ]);
 
 // The platform treasury's wallets belong to this user (see migration 083).

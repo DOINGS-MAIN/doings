@@ -123,7 +123,8 @@ describe("admin mappers", () => {
     // A stop sets remaining to 0, so the remainder can't tell how many claimed: use the real count.
     const stopped = mapGiveaway({ id: "g3", status: "stopped", total_amount: 50000, per_person_amount: 10000, remaining_amount: 0,
       max_recipients: 5, giveaway_redemptions: [{ count: 2 }], events: { title: "Wedding", event_code: "WED1" } });
-    expect(stopped).toMatchObject({ redeemedCount: 2, eventTitle: "Wedding", eventCode: "WED1" });
+    expect(stopped).toMatchObject({ redeemedCount: 2, eventTitle: "Wedding", eventCode: "WED1", codeMasked: false });
+    expect(mapGiveaway({ id: "g4", status: "active", code: "••••23", code_masked: true }).codeMasked).toBe(true);
   });
   it("maps a stopped giveaway's detail with redemptions", () => {
     const d = mapGiveawayDetail({

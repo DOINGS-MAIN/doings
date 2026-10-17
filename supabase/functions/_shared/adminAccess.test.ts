@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { can, escapeLikePattern, failedResolutionGate, giveawayCodeMatches, maskAccountNumber, nameConfirmMatches, payoutCheckRefusal, payoutConfirmMatches, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed, user360Sections } from "./adminAccess.ts";
+import { can, escapeLikePattern, failedResolutionGate, giveawayCodeMatches, maskAccountNumber, maskGiveawayCode, nameConfirmMatches, payoutCheckRefusal, payoutConfirmMatches, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed, user360Sections } from "./adminAccess.ts";
 
 const ROLES = ["super_admin", "finance", "support", "compliance", "moderation"] as const;
 
@@ -238,4 +238,18 @@ Deno.test("giveawayCodeMatches: the code, any case, spaces trimmed, never empty"
   assertEquals(giveawayCodeMatches("", ""), false);
   assertEquals(giveawayCodeMatches(undefined, "T098AAA"), false);
   assertEquals(giveawayCodeMatches("x", null), false);
+});
+
+Deno.test("maskGiveawayCode: an active giveaway's code is effectively cash, so it is masked", () => {
+  assertEquals(maskGiveawayCode("ABC123", "active"), "••••23");
+  assertEquals(maskGiveawayCode("ABC123", "stopped"), "ABC123");
+  assertEquals(maskGiveawayCode("ABC123", "exhausted"), "ABC123");
+  assertEquals(maskGiveawayCode("", "active"), "");
+  assertEquals(maskGiveawayCode(null, "active"), "");
+});
+
+Deno.test("permissionFor: revealing a giveaway code needs giveaways.stop", () => {
+  assertEquals(permissionFor("giveaways", "POST", "reveal-code", true), "giveaways.stop");
+  assertEquals(permissionFor("giveaways", "POST", "reveal-code", false), null);
+  assertEquals(can("support", "giveaways.stop"), false);
 });

@@ -454,6 +454,7 @@ export function mapGiveaway(g: Record<string, unknown>): AdminGiveaway {
     creatorName: (g.user_name as string) ?? "",
     title: (g.title as string) ?? "",
     code: (g.code as string) ?? "",
+    codeMasked: g.code_masked === true,
     status: ((g.status as string) ?? "active") as AdminGiveaway["status"],
     type: ((g.type as string) ?? "live") as AdminGiveaway["type"],
     total: Number(g.total_amount ?? 0) / 100,
