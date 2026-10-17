@@ -113,11 +113,16 @@ export const AdminWebhooks = () => {
   };
 
   const handleExport = async () => {
-    await adminApi.webhooks.exportCsv({
-      ...(providerFilter !== "all" ? { provider: providerFilter } : {}),
-      ...(processedFilter !== "all" ? { processed: processedFilter } : {}),
-      ...(debouncedSearch ? { search: debouncedSearch } : {}),
-    });
+    try {
+      const { truncated } = await adminApi.webhooks.exportCsv({
+        ...(providerFilter !== "all" ? { provider: providerFilter } : {}),
+        ...(processedFilter !== "all" ? { processed: processedFilter } : {}),
+        ...(debouncedSearch ? { search: debouncedSearch } : {}),
+      });
+      if (truncated) toast.warning("Export capped at 50,000 rows — narrow the filters.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Export failed");
+    }
   };
 
   const totalPages = Math.max(1, Math.ceil(total / 50));

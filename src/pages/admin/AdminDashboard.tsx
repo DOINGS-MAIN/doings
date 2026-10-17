@@ -10,12 +10,24 @@ import {
   Coins,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useAdminData } from "@/hooks/useAdminData";
+import { useAdminEvents, useAdminKyc, useAdminStats, useAdminTransactions } from "@/hooks/admin/useAdminQueries";
+import type { AdminStats } from "@/types/admin";
 import { formatDistanceToNow } from "date-fns";
 
+const EMPTY_STATS: AdminStats = {
+  totalUsers: 0, activeUsers: 0, suspendedUsers: 0, totalTransactions: 0, totalVolume: 0, todayVolume: 0,
+  totalFeeRevenue: 0, todayFeeRevenue: 0, activeEvents: 0, totalEvents: 0, flaggedTransactions: 0, stuckWithdrawals: 0,
+};
+
 export const AdminDashboard = () => {
-  const { getStats, transactions, events, kycSubmissions } = useAdminData();
-  const stats = getStats();
+  const { data: statsData } = useAdminStats();
+  const stats = statsData ?? EMPTY_STATS;
+  const { data: recentTx } = useAdminTransactions({ page: 1, limit: 5 });
+  const { data: liveEv } = useAdminEvents({ tab: "live", page: 1, limit: 5 });
+  const { data: recentKyc } = useAdminKyc({ status: "all", page: 1, limit: 5 });
+  const recentTransactions = recentTx?.rows ?? [];
+  const liveEvents = liveEv?.rows ?? [];
+  const recentKYC = recentKyc?.rows ?? [];
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-NG", {
@@ -51,10 +63,10 @@ export const AdminDashboard = () => {
       bgColor: "bg-primary/10",
     },
     {
-      title: "Pending KYC",
-      value: stats.pendingKYC,
-      subtitle: "Awaiting review",
-      icon: FileCheck,
+      title: "Flagged Transactions",
+      value: stats.flaggedTransactions,
+      subtitle: `${stats.stuckWithdrawals} stuck withdrawals`,
+      icon: AlertTriangle,
       color: "text-accent",
       bgColor: "bg-accent/10",
     },
@@ -67,17 +79,6 @@ export const AdminDashboard = () => {
       bgColor: "bg-success/10",
     },
   ];
-
-  const recentTransactions = transactions
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .slice(0, 5);
-
-  const recentKYC = kycSubmissions
-    .filter(k => k.status === "pending")
-    .sort((a, b) => b.submittedAt.getTime() - a.submittedAt.getTime())
-    .slice(0, 5);
-
-  const liveEvents = events.filter(e => e.status === "live");
 
   return (
     <div className="p-8 space-y-8">
@@ -162,18 +163,18 @@ export const AdminDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Pending KYC */}
+        {/* Recent KYC results */}
         <Card className="bg-card border-border">
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
               <FileCheck className="w-5 h-5 text-muted-foreground" />
-              Pending KYC
+              Recent KYC results
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {recentKYC.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-4">
-                No pending submissions
+                No KYC results yet
               </p>
             ) : (
               recentKYC.map((kyc) => (
@@ -183,7 +184,7 @@ export const AdminDashboard = () => {
                 >
                   <div>
                     <p className="font-medium text-sm text-foreground">{kyc.userName}</p>
-                    <p className="text-xs text-muted-foreground">Level {kyc.level}</p>
+                    <p className="text-xs text-muted-foreground capitalize">Level {kyc.level} · {kyc.status}</p>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     {formatDistanceToNow(kyc.submittedAt, { addSuffix: true })}

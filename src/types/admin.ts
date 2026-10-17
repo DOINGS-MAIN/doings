@@ -24,7 +24,7 @@ export interface PlatformUser {
   eventsHosted: number;
   eventsJoined: number;
   status: "active" | "suspended" | "banned";
-  kycStatus: "none" | "pending" | "verified" | "rejected";
+  kycStatus: "none" | "email" | "pending" | "verified" | "rejected";
   createdAt: Date;
   lastActive: Date;
   suspendedReason?: string;
@@ -214,7 +214,6 @@ export interface AdminStats {
   totalUsers: number;
   activeUsers: number;
   suspendedUsers: number;
-  pendingKYC: number;
   totalTransactions: number;
   totalVolume: number;
   todayVolume: number;
@@ -223,6 +222,7 @@ export interface AdminStats {
   activeEvents: number;
   totalEvents: number;
   flaggedTransactions: number;
+  stuckWithdrawals: number;
 }
 
 // Role permissions: mirrors supabase/functions/_shared/adminAccess.ts (the server is the authority;

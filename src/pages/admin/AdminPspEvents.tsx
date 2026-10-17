@@ -72,11 +72,16 @@ export const AdminPspEvents = () => {
   const totalPages = Math.max(1, Math.ceil(total / 50));
 
   const handleExport = async () => {
-    await adminApi.pspEvents.exportCsv({
-      ...(providerFilter !== "all" ? { provider: providerFilter } : {}),
-      ...(directionFilter !== "all" ? { direction: directionFilter } : {}),
-      ...(debouncedSearch ? { search: debouncedSearch } : {}),
-    });
+    try {
+      const { truncated } = await adminApi.pspEvents.exportCsv({
+        ...(providerFilter !== "all" ? { provider: providerFilter } : {}),
+        ...(directionFilter !== "all" ? { direction: directionFilter } : {}),
+        ...(debouncedSearch ? { search: debouncedSearch } : {}),
+      });
+      if (truncated) toast.warning("Export capped at 50,000 rows — narrow the filters.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Export failed");
+    }
   };
 
   return (

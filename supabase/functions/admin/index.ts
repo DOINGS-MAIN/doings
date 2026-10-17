@@ -4,6 +4,8 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.8
 import { getPlatformPaymentSettings } from "../_shared/psp/platformSettings.ts";
 import { probeProviderHealth } from "../_shared/psp/registry.ts";
 import { reprocessWebhookLog } from "../_shared/reprocessWebhook.ts";
+import { cleanSearch, orIlike, parsePaging, quoteValue } from "../_shared/adminSearch.ts";
+import { chunk, collectAll } from "../_shared/adminExport.ts";
 import { can, escapeLikePattern, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
 
 const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") ?? "15");
@@ -35,12 +37,29 @@ function toCsv(rows: Record<string, unknown>[], columns: string[]): string {
   return [header, ...lines].join("\n");
 }
 
-function csvResponse(filename: string, body: string): Response {
+// Walks a filtered query for a CSV export. The order has an id tiebreaker (rows written in one
+// database transaction share created_at) and rows created after the export started are left out,
+// so chunk boundaries can't duplicate or skip rows.
+// deno-lint-ignore no-explicit-any
+async function exportRows(build: () => any, startedAt: string): Promise<{ rows: Record<string, unknown>[]; truncated: boolean }> {
+  return await collectAll(async (f, t) => {
+    const { data, error } = await build()
+      .lte("created_at", startedAt)
+      .order("id", { ascending: false })
+      .range(f, t);
+    if (error) throw error;
+    return (data ?? []) as Record<string, unknown>[];
+  });
+}
+
+function csvResponse(filename: string, body: string, truncated = false): Response {
   return new Response(body, {
     headers: {
       ...corsHeaders,
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="${filename}"`,
+      "Access-Control-Expose-Headers": "X-Export-Truncated",
+      ...(truncated ? { "X-Export-Truncated": "true" } : {}),
     },
   });
 }
@@ -54,14 +73,17 @@ async function loadUsersById(
   const unique = [...new Set(userIds.filter(Boolean))];
   if (unique.length === 0) return new Map();
 
-  const { data, error } = await supabase
-    .from("users")
-    .select("id, full_name, phone, email")
-    .in("id", unique);
-
-  if (error) throw error;
-
-  return new Map((data ?? []).map((row) => [row.id as string, row as UserSummary]));
+  // Bounded groups keep each request URL short however many ids there are.
+  const map = new Map<string, UserSummary>();
+  for (const ids of chunk(unique)) {
+    const { data, error } = await supabase
+      .from("users")
+      .select("id, full_name, phone, email")
+      .in("id", ids);
+    if (error) throw error;
+    for (const row of data ?? []) map.set(row.id as string, row as UserSummary);
+  }
+  return map;
 }
 
 async function attachUserFields(
@@ -238,33 +260,22 @@ Deno.serve(async (req) => {
 
     // ── STATS ──
     if (route.resource === "stats" && req.method === "GET") {
-      const today = new Date();
-      today.setUTCHours(0, 0, 0, 0);
-
-      const [users, txns, events, kyc, feeStatsRes] = await Promise.all([
-        supabase.from("users").select("id, status", { count: "exact", head: false }),
-        supabase.from("transactions").select("id, amount, status, created_at", { count: "exact", head: false })
-          .eq("status", "completed").gt("amount", 0),
-        supabase.from("events").select("id, status", { count: "exact", head: false }),
-        supabase.from("kyc_verifications").select("id", { count: "exact", head: true }).eq("status", "pending"),
-        supabase.rpc("get_fee_revenue_stats"),
-      ]);
-
-      const todayTxns = (txns.data ?? []).filter((t: { created_at: string }) => new Date(t.created_at) >= today);
-      const feeStats = (feeStatsRes.data ?? {}) as { total_fee_kobo?: number; today_fee_kobo?: number };
-
+      const { data: stats, error } = await supabase.rpc("admin_dashboard_stats", { p_stuck_minutes: STUCK_AFTER_MINUTES });
+      if (error) throw error;
+      const n = (k: string) => Number((stats as Record<string, unknown> | null)?.[k] ?? 0);
       return withCors({
-        totalUsers: users.count ?? 0,
-        activeUsers: (users.data ?? []).filter((u: { status: string }) => u.status === "active").length,
-        suspendedUsers: (users.data ?? []).filter((u: { status: string }) => u.status === "suspended" || u.status === "banned").length,
-        pendingKYC: kyc.count ?? 0,
-        totalTransactions: txns.count ?? 0,
-        totalVolume: (txns.data ?? []).reduce((s: number, t: { amount: number }) => s + Math.abs(t.amount), 0),
-        todayVolume: todayTxns.reduce((s: number, t: { amount: number }) => s + Math.abs(t.amount), 0),
-        totalFeeRevenue: Number(feeStats.total_fee_kobo ?? 0),
-        todayFeeRevenue: Number(feeStats.today_fee_kobo ?? 0),
-        activeEvents: (events.data ?? []).filter((e: { status: string }) => e.status === "live").length,
-        totalEvents: events.count ?? 0,
+        totalUsers: n("total_users"),
+        activeUsers: n("active_users"),
+        suspendedUsers: n("blocked_users"),
+        totalTransactions: n("total_transactions"),
+        totalVolume: n("total_volume"),
+        todayVolume: n("today_volume"),
+        totalFeeRevenue: n("total_fee_revenue"),
+        todayFeeRevenue: n("today_fee_revenue"),
+        activeEvents: n("live_events"),
+        totalEvents: n("total_events"),
+        flaggedTransactions: n("flagged_transactions"),
+        stuckWithdrawals: n("stuck_withdrawals"),
       });
     }
 
@@ -272,19 +283,19 @@ Deno.serve(async (req) => {
     if (route.resource === "users") {
       if (req.method === "GET" && !route.id) {
         const url = new URL(req.url);
-        const page = Number(url.searchParams.get("page") ?? 1);
-        const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 100);
+        const { page, limit, from, to } = parsePaging(url.searchParams);
         const status = url.searchParams.get("status");
-        const search = url.searchParams.get("search");
+        const search = orIlike(["phone", "full_name", "email"], url.searchParams.get("search"));
 
         let query = supabase
           .from("users")
           .select("id, phone, email, full_name, kyc_level, status, suspended_reason, last_active_at, created_at", { count: "exact" })
           .order("created_at", { ascending: false })
-          .range((page - 1) * limit, page * limit - 1);
+          .order("id", { ascending: false })
+          .range(from, to);
 
         if (status) query = query.eq("status", status);
-        if (search) query = query.or(`phone.ilike.%${search}%,full_name.ilike.%${search}%,email.ilike.%${search}%`);
+        if (search) query = query.or(search);
 
         const { data, count, error } = await query;
         if (error) throw error;
@@ -367,64 +378,59 @@ Deno.serve(async (req) => {
     if (route.resource === "transactions") {
       if (req.method === "GET" && !route.id) {
         const url = new URL(req.url);
-        const page = Number(url.searchParams.get("page") ?? 1);
-        const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 100);
+        const { page, limit, from, to } = parsePaging(url.searchParams);
         const status = url.searchParams.get("status");
         const type = url.searchParams.get("type");
         const userId = url.searchParams.get("user_id");
         const provider = url.searchParams.get("provider");
         const currency = url.searchParams.get("currency");
         const flagged = url.searchParams.get("flagged");
-        const search = url.searchParams.get("search")?.trim();
+        const search = cleanSearch(url.searchParams.get("search"));
         const dateFrom = url.searchParams.get("date_from");
         const dateTo = url.searchParams.get("date_to");
 
-        let query = supabase
-          .from("transactions")
-          .select(
-            "id, wallet_id, user_id, currency, type, amount, fee, net_amount, status, provider, provider_ref, idempotency_key, description, metadata, flagged, flag_reason, created_at, completed_at",
-            { count: "exact" },
-          )
-          .order("created_at", { ascending: false })
-          .range((page - 1) * limit, page * limit - 1);
-
-        if (status) query = query.eq("status", status);
-        if (type) query = query.eq("type", type);
-        if (userId) query = query.eq("user_id", userId);
-        if (provider) query = query.eq("provider", provider);
-        if (currency) query = query.eq("currency", currency);
-        if (flagged === "true") query = query.eq("flagged", true);
-        if (flagged === "false") query = query.eq("flagged", false);
-        if (dateFrom) query = query.gte("created_at", dateFrom);
-        if (dateTo) query = query.lte("created_at", dateTo);
-
+        let searchOr = "";
         if (search) {
           const { data: matchingUsers } = await supabase
             .from("users")
             .select("id")
-            .or(`full_name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
+            .or(orIlike(["full_name", "phone", "email"], search))
+            .limit(150);
           const userIds = (matchingUsers ?? []).map((u: { id: string }) => u.id);
-          const orParts = [
-            `idempotency_key.ilike.%${search}%`,
-            `provider_ref.ilike.%${search}%`,
-            `description.ilike.%${search}%`,
-          ];
-          if (userIds.length > 0) {
-            orParts.push(`user_id.in.(${userIds.join(",")})`);
-          }
-          query = query.or(orParts.join(","));
+          const orParts = [orIlike(["idempotency_key", "provider_ref", "description"], search)];
+          if (userIds.length > 0) orParts.push(`user_id.in.(${userIds.join(",")})`);
+          searchOr = orParts.join(",");
         }
 
-        const { data, count, error } = await query;
-        if (error) throw error;
-
-        const transactions = await attachUserFields(supabase, data ?? []);
+        // The list and the CSV export share these filters.
+        const LIST_COLUMNS =
+          "id, wallet_id, user_id, currency, type, amount, fee, net_amount, status, provider, provider_ref, idempotency_key, description, metadata, flagged, flag_reason, created_at, completed_at";
+        const CSV_COLUMNS = "id, idempotency_key, user_id, type, amount, fee, currency, status, provider, flagged, created_at";
+        const buildQuery = (count: boolean, columns = LIST_COLUMNS) => {
+          let q = supabase
+            .from("transactions")
+            .select(columns, count ? { count: "exact" } : undefined)
+            .order("created_at", { ascending: false });
+          if (status) q = q.eq("status", status);
+          if (type) q = q.eq("type", type);
+          if (userId) q = q.eq("user_id", userId);
+          if (provider) q = q.eq("provider", provider);
+          if (currency) q = q.eq("currency", currency);
+          if (flagged === "true") q = q.eq("flagged", true);
+          if (flagged === "false") q = q.eq("flagged", false);
+          if (dateFrom) q = q.gte("created_at", dateFrom);
+          if (dateTo) q = q.lte("created_at", dateTo);
+          if (searchOr) q = q.or(searchOr);
+          return q;
+        };
 
         if (url.searchParams.get("format") === "csv") {
-          const csvRows = transactions.map((row: Record<string, unknown>) => ({
+          const { rows, truncated } = await exportRows(() => buildQuery(false, CSV_COLUMNS), new Date().toISOString());
+          const names = await loadUsersById(supabase, rows.map((row) => row.user_id as string));
+          const csvRows = rows.map((row) => ({
             id: row.id,
             reference: row.idempotency_key,
-            user_name: row.user_name,
+            user_name: names.get(row.user_id as string)?.full_name ?? "",
             type: row.type,
             amount: row.amount,
             fee: row.fee,
@@ -437,8 +443,14 @@ Deno.serve(async (req) => {
           return csvResponse(
             "transactions.csv",
             toCsv(csvRows, ["id", "reference", "user_name", "type", "amount", "fee", "currency", "status", "provider", "flagged", "created_at"]),
+            truncated,
           );
         }
+
+        const { data, count, error } = await buildQuery(true).order("id", { ascending: false }).range(from, to);
+        if (error) throw error;
+
+        const transactions = await attachUserFields(supabase, (data ?? []) as Record<string, unknown>[]);
 
         return withCors({ transactions, total: count, page, limit });
       }
@@ -473,7 +485,7 @@ Deno.serve(async (req) => {
 
         let pspEvents = pspByTxn ?? [];
         if (refs.length > 0) {
-          const refFilter = refs.map((r) => `reference.eq.${r},provider_ref.eq.${r}`).join(",");
+          const refFilter = refs.map((r) => `reference.eq.${quoteValue(r)},provider_ref.eq.${quoteValue(r)}`).join(",");
           const { data: pspByRef } = await supabase
             .from("psp_events")
             .select("*")
@@ -490,7 +502,7 @@ Deno.serve(async (req) => {
 
         let relatedWebhooks: Record<string, unknown>[] = [];
         if (refs.length > 0) {
-          const whFilter = refs.map((r) => `idempotency_key.eq.${r}`).join(",");
+          const whFilter = refs.map((r) => `idempotency_key.eq.${quoteValue(r)}`).join(",");
           const { data: webhooks } = await supabase
             .from("webhook_logs")
             .select("id, provider, event_type, processed, processing_error, signature_valid, idempotency_key, created_at, processed_at")
@@ -563,14 +575,14 @@ Deno.serve(async (req) => {
       if (req.method === "GET" && !route.id) {
         const url = new URL(req.url);
         const status = url.searchParams.get("status");
-        const page = Number(url.searchParams.get("page") ?? 1);
-        const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 100);
+        const { page, limit, from, to } = parsePaging(url.searchParams);
 
         let query = supabase
           .from("kyc_verifications")
           .select("id, user_id, level, status, provider, bvn_last_four, nin_last_four, selfie_match_confidence, submitted_at, verified_at, reviewed_by, rejection_reason, created_at", { count: "exact" })
           .order("created_at", { ascending: false })
-          .range((page - 1) * limit, page * limit - 1);
+          .order("id", { ascending: false })
+          .range(from, to);
         if (status && status !== "all") query = query.eq("status", status);
 
         const { data, count, error } = await query;
@@ -584,9 +596,13 @@ Deno.serve(async (req) => {
     if (route.resource === "events") {
       if (req.method === "GET" && !route.id) {
         const url = new URL(req.url);
-        const page = Number(url.searchParams.get("page") ?? 1);
-        const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 100);
+        const { page, limit, from, to } = parsePaging(url.searchParams);
         const status = url.searchParams.get("status");
+
+        const EVENT_STATUSES = new Set(["draft", "scheduled", "live", "ended"]);
+        const statuses = (status ?? "").split(",").map((v) => v.trim()).filter((v) => EVENT_STATUSES.has(v));
+        // A status filter with no real status in it matches nothing (not everything).
+        if (status && statuses.length === 0) return withCors({ events: [], total: 0, page, limit });
 
         let query = supabase
           .from("events")
@@ -595,9 +611,11 @@ Deno.serve(async (req) => {
             { count: "exact" },
           )
           .order("created_at", { ascending: false })
-          .range((page - 1) * limit, page * limit - 1);
+          .order("id", { ascending: false })
+          .range(from, to);
 
-        if (status) query = query.eq("status", status);
+        if (statuses.length) query = query.in("status", statuses);
+        if (url.searchParams.get("flagged") === "true") query = query.eq("flagged", true);
 
         const { data, count, error } = await query;
         if (error) throw error;
@@ -968,35 +986,31 @@ Deno.serve(async (req) => {
 
       if (req.method === "GET" && !route.id) {
         const url = new URL(req.url);
-        const page = Number(url.searchParams.get("page") ?? 1);
-        const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 100);
+        const { page, limit, from, to } = parsePaging(url.searchParams);
         const provider = url.searchParams.get("provider");
         const processed = url.searchParams.get("processed");
-        const eventType = url.searchParams.get("event_type");
-        const search = url.searchParams.get("search")?.trim();
+        const eventType = cleanSearch(url.searchParams.get("event_type"));
+        const search = orIlike(["idempotency_key", "event_type"], url.searchParams.get("search"));
 
-        let query = supabase
-          .from("webhook_logs")
-          .select(
-            "id, provider, event_type, processed, processing_error, signature_valid, idempotency_key, created_at, processed_at",
-            { count: "exact" },
-          )
-          .order("created_at", { ascending: false })
-          .range((page - 1) * limit, page * limit - 1);
-
-        if (provider) query = query.eq("provider", provider);
-        if (processed === "true") query = query.eq("processed", true);
-        if (processed === "false") query = query.eq("processed", false);
-        if (eventType) query = query.ilike("event_type", `%${eventType}%`);
-        if (search) {
-          query = query.or(`idempotency_key.ilike.%${search}%,event_type.ilike.%${search}%`);
-        }
-
-        const { data, count, error } = await query;
-        if (error) throw error;
+        const buildQuery = (count: boolean) => {
+          let q = supabase
+            .from("webhook_logs")
+            .select(
+              "id, provider, event_type, processed, processing_error, signature_valid, idempotency_key, created_at, processed_at",
+              count ? { count: "exact" } : undefined,
+            )
+            .order("created_at", { ascending: false });
+          if (provider) q = q.eq("provider", provider);
+          if (processed === "true") q = q.eq("processed", true);
+          if (processed === "false") q = q.eq("processed", false);
+          if (eventType) q = q.ilike("event_type", `%${escapeLikePattern(eventType)}%`);
+          if (search) q = q.or(search);
+          return q;
+        };
 
         if (url.searchParams.get("format") === "csv") {
-          const csvRows = (data ?? []).map((row: Record<string, unknown>) => ({
+          const { rows, truncated } = await exportRows(() => buildQuery(false), new Date().toISOString());
+          const csvRows = rows.map((row: Record<string, unknown>) => ({
             id: row.id,
             provider: row.provider,
             event_type: row.event_type,
@@ -1008,8 +1022,12 @@ Deno.serve(async (req) => {
           return csvResponse(
             "webhooks.csv",
             toCsv(csvRows, ["id", "provider", "event_type", "processed", "processing_error", "idempotency_key", "created_at"]),
+            truncated,
           );
         }
+
+        const { data, count, error } = await buildQuery(true).order("id", { ascending: false }).range(from, to);
+        if (error) throw error;
 
         return withCors({ webhooks: data, total: count, page, limit });
       }
@@ -1089,29 +1107,28 @@ Deno.serve(async (req) => {
     if (route.resource === "psp-events" && req.method === "GET") {
 
       const url = new URL(req.url);
-      const page = Number(url.searchParams.get("page") ?? 1);
-      const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 100);
+      const { page, limit, from, to } = parsePaging(url.searchParams);
       const provider = url.searchParams.get("provider");
       const direction = url.searchParams.get("direction");
-      const search = url.searchParams.get("search")?.trim();
+      const search = orIlike(["reference", "provider_ref", "event_type"], url.searchParams.get("search"));
 
-      let query = supabase
-        .from("psp_events")
-        .select("*", { count: "exact" })
-        .order("created_at", { ascending: false })
-        .range((page - 1) * limit, page * limit - 1);
-
-      if (provider) query = query.eq("provider_id", provider);
-      if (direction) query = query.eq("direction", direction);
-      if (search) {
-        query = query.or(`reference.ilike.%${search}%,provider_ref.ilike.%${search}%,event_type.ilike.%${search}%`);
-      }
-
-      const { data, count, error } = await query;
-      if (error) throw error;
+      const buildQuery = (count: boolean, columns = "*") => {
+        let q = supabase
+          .from("psp_events")
+          .select(columns, count ? { count: "exact" } : undefined)
+          .order("created_at", { ascending: false });
+        if (provider) q = q.eq("provider_id", provider);
+        if (direction) q = q.eq("direction", direction);
+        if (search) q = q.or(search);
+        return q;
+      };
 
       if (url.searchParams.get("format") === "csv") {
-        const csvRows = (data ?? []).map((row: Record<string, unknown>) => ({
+        const { rows, truncated } = await exportRows(
+          () => buildQuery(false, "id, provider_id, direction, event_type, status, reference, created_at"),
+          new Date().toISOString(),
+        );
+        const csvRows = rows.map((row: Record<string, unknown>) => ({
           id: row.id,
           provider_id: row.provider_id,
           direction: row.direction,
@@ -1123,8 +1140,12 @@ Deno.serve(async (req) => {
         return csvResponse(
           "psp-events.csv",
           toCsv(csvRows, ["id", "provider_id", "direction", "event_type", "status", "reference", "created_at"]),
+          truncated,
         );
       }
+
+      const { data, count, error } = await buildQuery(true).order("id", { ascending: false }).range(from, to);
+      if (error) throw error;
 
       return withCors({ events: data, total: count, page, limit });
     }
@@ -1132,8 +1153,7 @@ Deno.serve(async (req) => {
     // ── AUDIT LOG ──
     if (route.resource === "audit" && req.method === "GET") {
       const url = new URL(req.url);
-      const page = Number(url.searchParams.get("page") ?? 1);
-      const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 100);
+      const { page, limit, from, to } = parsePaging(url.searchParams);
 
       const action = url.searchParams.get("action");
       const adminId = url.searchParams.get("admin_id");
@@ -1142,7 +1162,8 @@ Deno.serve(async (req) => {
         .from("admin_audit_log")
         .select("id, admin_user_id, action, target_type, target_id, details, created_at", { count: "exact" })
         .order("created_at", { ascending: false })
-        .range((page - 1) * limit, page * limit - 1);
+        .order("id", { ascending: false })
+        .range(from, to);
       if (action) query = query.eq("action", action);
       if (adminId) query = query.eq("admin_user_id", adminId);
 
@@ -1160,6 +1181,10 @@ Deno.serve(async (req) => {
 
     return withCors({ error: "Not found" }, { status: 404 });
   } catch (err) {
+    // A page past the end of the list: PostgREST refuses the range.
+    if (typeof err === "object" && err && (err as { code?: string }).code === "PGRST103") {
+      return withCors({ error: "That page is past the end of the list" }, { status: 400 });
+    }
     const detail = err instanceof Error
       ? err.message
       : typeof err === "object" && err && "message" in err

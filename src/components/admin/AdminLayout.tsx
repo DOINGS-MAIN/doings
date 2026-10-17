@@ -1,12 +1,13 @@
 import { Navigate, Outlet } from "react-router-dom";
 import { AdminSidebar } from "./AdminSidebar";
-import { useAdminData } from "@/hooks/useAdminData";
+import { useAdminStats } from "@/hooks/admin/useAdminQueries";
+import { useAdminRealtime } from "@/hooks/admin/useAdminRealtime";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 
 export const AdminLayout = () => {
   const { isAuthenticated, currentAccount, logout, loading } = useAdminAuth();
-  const { getStats } = useAdminData();
-  const stats = getStats();
+  const { data: stats } = useAdminStats();
+  useAdminRealtime();
 
   if (loading) {
     return (
@@ -27,8 +28,8 @@ export const AdminLayout = () => {
         adminName={currentAccount.name}
         adminEmail={currentAccount.email}
         onLogout={logout}
-        pendingKYC={stats.pendingKYC}
-        flaggedTransactions={stats.flaggedTransactions}
+        flaggedTransactions={stats?.flaggedTransactions ?? 0}
+        stuckWithdrawals={stats?.stuckWithdrawals ?? 0}
       />
       <main className="flex-1 overflow-auto">
         <Outlet />

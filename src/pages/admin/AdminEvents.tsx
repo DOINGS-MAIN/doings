@@ -46,14 +46,22 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useAdminData } from "@/hooks/useAdminData";
+import { useAdminEvents, useAdminMutations, type EventTab } from "@/hooks/admin/useAdminQueries";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { AdminEvent, can } from "@/types/admin";
 import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 
 export const AdminEvents = () => {
-  const { events, flagEvent, unflagEvent, endEvent } = useAdminData();
+  const { flagEvent, unflagEvent, endEvent } = useAdminMutations();
+  const [tab, setTab] = useState<EventTab>("live");
+  const [page, setPage] = useState(1);
+  const { data, isFetching } = useAdminEvents({ tab, page });
+  const { data: flaggedData } = useAdminEvents({ tab: "flagged", page: 1, limit: 1 });
+  const pageEvents = data?.rows ?? [];
+  const tabTotal = data?.total ?? 0;
+  const flaggedTotal = flaggedData?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(tabTotal / 50));
   const { session } = useAdminAuth();
   const canFlag = can(session?.role, "events.flag");
   const canEnd = can(session?.role, "events.end");
@@ -63,10 +71,6 @@ export const AdminEvents = () => {
   const [actionType, setActionType] = useState<"flag" | "end" | "view" | null>(null);
   const [flagReason, setFlagReason] = useState("");
 
-  const liveEvents = events.filter(e => e.status === "live");
-  const upcomingEvents = events.filter(e => e.status === "upcoming");
-  const endedEvents = events.filter(e => e.status === "ended");
-  const flaggedEvents = events.filter(e => e.flagged);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat("en-NG", {
@@ -265,10 +269,10 @@ export const AdminEvents = () => {
           <h1 className="text-3xl font-bold text-foreground">Event Moderation</h1>
           <p className="text-muted-foreground mt-1">Monitor and manage platform events</p>
         </div>
-        {flaggedEvents.length > 0 && (
+        {flaggedTotal > 0 && (
           <Badge variant="destructive" className="gap-1 h-8 px-3">
             <AlertTriangle className="w-4 h-4" />
-            {flaggedEvents.length} flagged
+            {flaggedTotal} flagged
           </Badge>
         )}
       </div>
@@ -278,7 +282,7 @@ export const AdminEvents = () => {
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Search by event name, host, or code..."
+            placeholder="Search this page by event name, host, or code..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
@@ -299,42 +303,31 @@ export const AdminEvents = () => {
         </Select>
       </div>
 
-      {/* Tabs */}
-      <Tabs defaultValue="live" className="space-y-6">
+      {/* Tabs: each asks the server for its own events */}
+      <Tabs value={tab} onValueChange={(v) => { setTab(v as EventTab); setPage(1); }} className="space-y-6">
         <TabsList>
-          <TabsTrigger value="live" className="gap-2">
-            Live
-            {liveEvents.length > 0 && (
-              <Badge className="bg-success/20 text-success border-0 h-5 min-w-[20px] px-1.5">
-                {liveEvents.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="upcoming">Upcoming ({upcomingEvents.length})</TabsTrigger>
-          <TabsTrigger value="ended">Ended ({endedEvents.length})</TabsTrigger>
-          {flaggedEvents.length > 0 && (
-            <TabsTrigger value="flagged" className="gap-2 text-destructive">
-              Flagged
-              <Badge variant="destructive" className="h-5 min-w-[20px] px-1.5">
-                {flaggedEvents.length}
-              </Badge>
+          {(["live", "upcoming", "ended", "flagged"] as EventTab[]).map((t) => (
+            <TabsTrigger key={t} value={t} className={`capitalize gap-2 ${t === "flagged" ? "text-destructive" : ""}`}>
+              {t}
+              {t === tab && <span className="text-xs text-muted-foreground">({tabTotal})</span>}
             </TabsTrigger>
-          )}
+          ))}
         </TabsList>
 
-        <TabsContent value="live">
-          <EventTable eventList={filteredEvents(liveEvents)} />
-        </TabsContent>
-        <TabsContent value="upcoming">
-          <EventTable eventList={filteredEvents(upcomingEvents)} />
-        </TabsContent>
-        <TabsContent value="ended">
-          <EventTable eventList={filteredEvents(endedEvents)} />
-        </TabsContent>
-        <TabsContent value="flagged">
-          <EventTable eventList={filteredEvents(flaggedEvents)} />
+        <TabsContent value={tab}>
+          <EventTable eventList={filteredEvents(pageEvents)} />
         </TabsContent>
       </Tabs>
+
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Page {page} of {totalPages}{isFetching ? " · updating…" : ""}
+        </p>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>Previous</Button>
+          <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+        </div>
+      </div>
 
       {/* Flag Dialog */}
       <Dialog 
