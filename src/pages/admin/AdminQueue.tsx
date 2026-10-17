@@ -70,8 +70,17 @@ function QueueSection({
 }
 
 export const AdminQueue = () => {
-  const { data: queue, isLoading, isFetching: loading, refetch } = useAdminQueue();
+  const { data: queue, isLoading, isError, isFetching: loading, refetch } = useAdminQueue();
   const load = () => void refetch();
+
+  if (isError && !queue) {
+    return (
+      <div className="p-8 space-y-3 text-muted-foreground">
+        <p>Couldn't load the review queue.</p>
+        <Button variant="outline" onClick={load}>Try again</Button>
+      </div>
+    );
+  }
 
   if (isLoading || !queue) {
     return (

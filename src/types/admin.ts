@@ -210,6 +210,12 @@ export interface AdminPayout {
   failureReason?: string;
   createdAt: Date;
   updatedAt?: Date;
+  /** USDC sales: the NGN taken from the person's Bag (amount above is the USDC paid out). */
+  ngnAmount?: number;
+  address?: string;
+  txHash?: string;
+  /** Set when the provider reported this payout as paid after it was marked failed. */
+  paidAfterFailed?: Date;
 }
 
 export interface AdminBundleOrder {
@@ -233,8 +239,10 @@ export interface AdminBundleOrder {
 export interface MoneyOverview {
   byType: { type: string; currency: "NGN" | "USDC"; countToday: number; amountToday: number; count7d: number; amount7d: number }[];
   queue: { payoutsNeedingReview: number; ordersPaidFailed: number; ordersPendingFloat: number };
-  /** Treasury wallets, in display units. */
+  /** Treasury wallets, in display units (empty when the role can't see treasury data). */
   treasury: { currency: string; balance: number; locked: number }[];
+  /** Finance and super admins only; the server leaves treasury data out for other roles. */
+  treasuryVisible: boolean;
   recentTopups: { id: string; currency: string; amount: number; reference?: string; note?: string; createdAt: Date }[];
 }
 

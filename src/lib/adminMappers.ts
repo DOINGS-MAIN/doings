@@ -138,8 +138,12 @@ const toDisplay = (amount: number, currency: string) =>
 const dateOr = (v: unknown): Date | undefined => (v ? new Date(v as string) : undefined);
 
 export function mapPayout(t: Record<string, unknown>): AdminPayout {
-  const currency = ((t.currency as string) ?? "NGN") as AdminPayout["currency"];
   const m = (t.metadata ?? {}) as Record<string, unknown>;
+  // A USDC bundle sale is an NGN row (the Bag is debited in NGN) that pays out USDC.
+  const usdcSale = m.kind === "bundle_sale_usdc";
+  const rowCurrency = ((t.currency as string) ?? "NGN") as AdminPayout["currency"];
+  const currency: AdminPayout["currency"] = usdcSale ? "USDC" : rowCurrency;
+  const paidAfter = m.provider_paid_after_failed as Record<string, unknown> | undefined;
   const check = m.last_provider_check as Record<string, unknown> | undefined;
   const manual = m.manual_resolution as Record<string, unknown> | undefined;
   return {
@@ -147,8 +151,12 @@ export function mapPayout(t: Record<string, unknown>): AdminPayout {
     userId: (t.user_id as string) ?? "",
     userName: (t.user_name as string) ?? "",
     currency,
-    amount: Math.abs(toDisplay(Number(t.amount ?? 0), currency)),
-    fee: toDisplay(Number(t.fee ?? 0), currency),
+    amount: usdcSale ? Number(m.usdc_micro ?? 0) / 1_000_000 : Math.abs(toDisplay(Number(t.amount ?? 0), rowCurrency)),
+    fee: toDisplay(Number(t.fee ?? 0), rowCurrency),
+    ngnAmount: usdcSale ? Math.abs(toDisplay(Number(t.amount ?? 0), "NGN")) : undefined,
+    address: (m.address as string) ?? undefined,
+    txHash: (m.tx_hash as string) ?? (m.blockradar_tx_hash as string) ?? undefined,
+    paidAfterFailed: paidAfter ? new Date((paidAfter.at as string) ?? Date.now()) : undefined,
     status: (t.status as string) ?? "pending",
     provider: (t.provider as string) ?? undefined,
     reference: (t.idempotency_key as string) ?? (t.id as string),
@@ -190,7 +198,7 @@ export function mapBundleOrder(o: Record<string, unknown>): AdminBundleOrder {
         at: new Date(refundedAt),
       }
       : undefined,
-    paidButFailed: currency === "NGN" && o.status === "failed" && !!o.provider_ref && !refundedAt,
+    paidButFailed: currency === "NGN" && o.status === "failed" && String(o.provider_ref ?? "").trim() !== "" && !refundedAt,
     createdAt: new Date((o.created_at as string) ?? Date.now()),
   };
 }
@@ -215,6 +223,7 @@ function mapMoney(res: Record<string, unknown>): MoneyOverview {
       ordersPaidFailed: Number(queue.orders_paid_failed ?? 0),
       ordersPendingFloat: Number(queue.orders_pending_float ?? 0),
     },
+    treasuryVisible: Array.isArray(res.treasury),
     treasury: ((res.treasury as Record<string, unknown>[]) ?? []).map((w) => ({
       currency: (w.currency as string) ?? "",
       balance: toDisplay(Number(w.balance ?? 0), (w.currency as string) ?? "NGN"),

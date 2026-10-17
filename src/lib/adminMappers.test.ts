@@ -59,4 +59,25 @@ describe("admin mappers", () => {
   it("converts USDC dashboard volume from micro-units", () => {
     expect(mapStats({ usdcVolume: 3_000_000, usdcTodayVolume: 1_000_000 })).toMatchObject({ usdcVolume: 3, usdcTodayVolume: 1 });
   });
+  it("shows a USDC bundle sale in USDC, with its address and on-chain hash", () => {
+    const p = mapPayout({
+      id: "t3", currency: "NGN", amount: -150000, provider: "blockradar", idempotency_key: "SELL-u",
+      metadata: { kind: "bundle_sale_usdc", bundles: 15, usdc_micro: 1_000_000, network_fee_micro: 50_000, address: "0xabc", tx_hash: "0xhash" },
+    });
+    expect(p).toMatchObject({ currency: "USDC", amount: 1, ngnAmount: 1500, address: "0xabc", txHash: "0xhash", kind: "sale" });
+  });
+  it("flags a payout the provider paid after it was marked failed", () => {
+    const p = mapPayout({ id: "t4", currency: "NGN", amount: -1000, status: "failed", metadata: { provider_paid_after_failed: { at: "2026-10-17T12:00:00Z" } } });
+    expect(p.paidAfterFailed?.toISOString()).toBe("2026-10-17T12:00:00.000Z");
+    expect(mapPayout({ id: "t5", currency: "NGN", amount: -1, metadata: {} }).paidAfterFailed).toBeUndefined();
+  });
+  it("treats a blank payment reference as unpaid", () => {
+    expect(mapBundleOrder({ id: "o2", currency: "NGN", amount: 5000, status: "failed", provider_ref: "  " }).paidButFailed).toBe(false);
+  });
+  it("hides treasury data the server left out for the role", () => {
+    expect(mapPaymentsOverview({ treasury: null, recent_topups: null }).money.treasuryVisible).toBe(false);
+    const f = mapPaymentsOverview({ treasury: [{ currency: "USDC", balance: 2_000_000, locked_balance: 500_000 }], recent_topups: [] });
+    expect(f.money.treasuryVisible).toBe(true);
+    expect(f.money.treasury[0]).toEqual({ currency: "USDC", balance: 2, locked: 0.5 });
+  });
 });

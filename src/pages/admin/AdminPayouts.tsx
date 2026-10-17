@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { format, formatDistanceToNow } from "date-fns";
-import { Search, Loader2, RefreshCw, CheckCircle2, XCircle } from "lucide-react";
+import { Search, Loader2, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -61,8 +61,9 @@ function ResolveDialog({
   const submit = async () => {
     setSaving(true);
     try {
-      await resolvePayout(payout.id, outcome, reason.trim(), confirm.trim());
-      toast.success(outcome === "paid" ? "Payout marked paid" : "Payout marked failed — the user has their money back");
+      const res = (await resolvePayout(payout.id, outcome, reason.trim(), confirm.trim())) as { provider_confirmed?: boolean } | undefined;
+      if (res?.provider_confirmed) toast.success("The provider confirmed it failed — the user has their money back");
+      else toast.success(outcome === "paid" ? "Payout marked paid" : "Payout marked failed — the user has their money back");
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "That didn't work");
@@ -79,7 +80,9 @@ function ResolveDialog({
           <DialogDescription>
             {outcome === "paid"
               ? "Only do this when you've confirmed the money reached the person."
-              : "The user gets the money (or bundles) back in their Bag. Only do this when you're sure the provider didn't pay."}
+              : canAskProvider(payout)
+                ? "We'll ask the provider first. If it says paid, this is refused; if it can't say, the user gets the money (or bundles) back in their Bag."
+                : "The user gets the money (or bundles) back in their Bag. Check the address on-chain first — USDC can't be recalled."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -123,8 +126,9 @@ function PayoutSheet({ id, onClose }: { id: string | null; onClose: () => void }
     if (!p) return;
     setChecking(true);
     try {
-      const res = (await checkPayout(p.id)) as { normalized?: string; status?: string } | undefined;
-      if (res?.normalized === "terminal_success") toast.success("Provider says paid — payout completed");
+      const res = (await checkPayout(p.id)) as { normalized?: string; status?: string; paid_after_failed?: boolean } | undefined;
+      if (res?.paid_after_failed) toast.error("The provider paid a payout marked failed — the user has been paid twice. Recover the funds.", { duration: 20000 });
+      else if (res?.normalized === "terminal_success") toast.success("Provider says paid — payout completed");
       else if (res?.normalized === "terminal_failure") toast.warning("Provider says failed — the user has their money back");
       else toast.info(`Provider: ${(res?.normalized ?? "no answer").replace(/_/g, " ")} — still open`);
     } catch (err) {
@@ -157,10 +161,23 @@ function PayoutSheet({ id, onClose }: { id: string | null; onClose: () => void }
               </div>
             </div>
 
+            {p.paidAfterFailed && (
+              <div className="rounded-lg border border-destructive bg-destructive/10 p-3 flex gap-2">
+                <AlertTriangle className="w-5 h-5 text-destructive shrink-0" />
+                <div>
+                  <p className="font-medium text-destructive">The provider paid this after it was marked failed</p>
+                  <p>The person has the money back in their Bag and was also paid out ({formatDistanceToNow(p.paidAfterFailed, { addSuffix: true })}). Recover the funds.</p>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-1">
               <p><span className="text-muted-foreground">Person:</span> {String(data?.user?.full_name ?? p.userName ?? "")} {data?.user?.email ? `· ${String(data.user.email)}` : ""}</p>
               <p><span className="text-muted-foreground">Reference:</span> <span className="font-mono">{p.reference}</span></p>
-              {p.providerRef && <p><span className="text-muted-foreground">Provider ref:</span> <span className="font-mono">{p.providerRef}</span></p>}
+              {p.providerRef && <p><span className="text-muted-foreground">Provider ref:</span> <span className="font-mono break-all">{p.providerRef}</span></p>}
+              {p.ngnAmount != null && <p><span className="text-muted-foreground">Taken from Bag:</span> {formatAmount(p.ngnAmount, "NGN")}</p>}
+              {p.address && <p><span className="text-muted-foreground">To address:</span> <span className="font-mono break-all">{p.address}</span></p>}
+              {p.txHash && <p><span className="text-muted-foreground">On-chain hash:</span> <span className="font-mono break-all">{p.txHash}</span></p>}
               <p><span className="text-muted-foreground">Created:</span> {format(p.createdAt, "MMM d, yyyy HH:mm")}</p>
               {p.failureReason && <p className="text-destructive">{p.failureReason}</p>}
             </div>
@@ -183,6 +200,13 @@ function PayoutSheet({ id, onClose }: { id: string | null; onClose: () => void }
                 <p>{p.manualResolution.reason}</p>
                 <p className="text-xs text-muted-foreground">{format(p.manualResolution.at, "MMM d, yyyy HH:mm")}</p>
               </div>
+            )}
+
+            {canAct && p.status === "failed" && canAskProvider(p) && (
+              <Button variant="outline" onClick={check} disabled={checking}>
+                {checking ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+                Re-check with provider
+              </Button>
             )}
 
             {canAct && isOpen(p) && (
@@ -340,7 +364,10 @@ export const AdminPayouts = () => {
                   <TableCell className="whitespace-nowrap text-sm">{format(p.createdAt, "MMM d, HH:mm")}</TableCell>
                   <TableCell>{p.userName || p.userId}</TableCell>
                   <TableCell className="text-sm">{p.kind === "sale" ? `Sale${p.bundles ? ` · ${p.bundles}` : ""}` : "Withdrawal"}</TableCell>
-                  <TableCell className="font-medium">{formatAmount(p.amount, p.currency)}</TableCell>
+                  <TableCell className="font-medium">
+                    {formatAmount(p.amount, p.currency)}
+                    {p.paidAfterFailed && <AlertTriangle className="inline w-4 h-4 ml-1 text-destructive" />}
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
                       {statusBadge(p.status)}

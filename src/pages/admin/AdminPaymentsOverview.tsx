@@ -24,8 +24,17 @@ function formatNgnFromDisplay(naira: number) {
 }
 
 export const AdminPaymentsOverview = () => {
-  const { data: overview, isLoading, isFetching: overviewLoading, refetch } = useAdminPaymentsOverview();
+  const { data: overview, isLoading, isError, isFetching: overviewLoading, refetch } = useAdminPaymentsOverview();
   const fetchOverview = () => void refetch();
+
+  if (isError && !overview) {
+    return (
+      <div className="p-8 space-y-3 text-muted-foreground">
+        <p>Couldn't load the payments overview.</p>
+        <Button variant="outline" onClick={fetchOverview}>Try again</Button>
+      </div>
+    );
+  }
 
   if (isLoading || !overview) {
     return (
@@ -282,6 +291,7 @@ export const AdminPaymentsOverview = () => {
         </CardContent>
       </Card>
 
+      {data.money.treasuryVisible && (
       <Card>
         <CardHeader>
           <CardTitle className="text-lg">Treasury</CardTitle>
@@ -321,6 +331,7 @@ export const AdminPaymentsOverview = () => {
           </div>
         </CardContent>
       </Card>
+      )}
     </div>
   );
 };

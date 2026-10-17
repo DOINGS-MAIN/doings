@@ -35,11 +35,15 @@ function RefundDialog({ order, onClose }: { order: AdminBundleOrder | null; onCl
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
+  // Reset only when a different order opens: background refetches replace the order object and
+  // must not wipe what the admin is typing. The amount starts blank — the expected amount isn't
+  // necessarily what the person paid.
+  const orderId = order?.id;
   useEffect(() => {
     setReference("");
-    setAmount(order ? String(order.amount) : "");
+    setAmount("");
     setNote("");
-  }, [order]);
+  }, [orderId]);
 
   if (!order) return null;
   const naira = Number(amount);
@@ -78,7 +82,7 @@ function RefundDialog({ order, onClose }: { order: AdminBundleOrder | null; onCl
             <Input value={reference} onChange={(e) => setReference(e.target.value)} className="font-mono" />
           </div>
           <div className="space-y-2">
-            <Label>Amount refunded (₦)</Label>
+            <Label>Amount refunded (₦) — at most {formatAmount(order.amount, order.currency)}</Label>
             <Input type="number" min="0" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
           </div>
           <div className="space-y-2">
