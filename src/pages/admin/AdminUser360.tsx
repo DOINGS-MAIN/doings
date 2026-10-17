@@ -394,7 +394,12 @@ export const AdminUser360 = () => {
               <CardTitle className="text-lg">Activity</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
-              <p>Giveaways created: {data.activity.giveawaysCreated}</p>
+              <p>
+                Giveaways created:{" "}
+                {data.activity.giveawaysCreated > 0 ? (
+                  <Link to={`/admin/giveaways?creator=${u.id}`} className="hover:underline">{data.activity.giveawaysCreated}</Link>
+                ) : 0}
+              </p>
               <p className="font-medium">Events hosted</p>
               {data.activity.eventsHosted.length === 0 ? (
                 <p className="text-muted-foreground">None.</p>
