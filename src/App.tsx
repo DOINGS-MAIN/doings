@@ -29,6 +29,7 @@ import { AdminUsers } from "./pages/admin/AdminUsers";
 import { AdminTransactions } from "./pages/admin/AdminTransactions";
 import { AdminPayouts } from "./pages/admin/AdminPayouts";
 import { AdminBundleOrders } from "./pages/admin/AdminBundleOrders";
+import { AdminUser360 } from "./pages/admin/AdminUser360";
 import { AdminKYC } from "./pages/admin/AdminKYC";
 import { AdminEvents } from "./pages/admin/AdminEvents";
 import { AdminLogin } from "./pages/admin/AdminLogin";
@@ -91,6 +92,7 @@ const App = () => (
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />
               <Route path="users" element={<AdminUsers />} />
+              <Route path="users/:id" element={<AdminUser360 />} />
               <Route path="transactions" element={<AdminTransactions />} />
               <Route path="transactions/:txnId" element={<AdminTransactionDetail />} />
               <Route path="payouts" element={<AdminPayouts />} />
