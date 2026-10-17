@@ -277,7 +277,9 @@ export interface AdminGiveaway {
   creatorId: string;
   creatorName: string;
   title: string;
+  /** Masked (••••XX) while active: the server never sends a claimable code to the list or detail. */
   code: string;
+  codeMasked: boolean;
   status: "active" | "stopped" | "exhausted";
   type: "live" | "scheduled";
   /** Naira. */
@@ -304,6 +306,23 @@ export interface AdminGiveawayDetail {
   fundingTransactionId?: string;
   refundTransactionId?: string;
   stoppedByEmail?: string;
+}
+
+export interface AdminLiveEvent {
+  event: {
+    id: string; title: string; code: string; status: string; type: string; isPrivate: boolean; participants: number;
+    /** Naira. */
+    totalSprayed: number; flagged: boolean; flagReason?: string; startedAt?: Date; endedAt?: Date;
+  };
+  host: { id: string; name: string; email?: string } | null;
+  /** Naira. */
+  totals: { holdsActive: number; held: number; sprayed: number };
+  floor: {
+    id: string; sprayerId: string; name: string; held: number; slot: number; seconds: number;
+    startedAt?: Date; endsAt?: Date; chargedSoFar: number; noteCount: number; denomination: number;
+  }[];
+  queue: { id: string; sprayerId: string; name: string; held: number; queuedAt?: Date; position: number }[];
+  holds: { id: string; sprayerId: string; name: string; held: number; createdAt: Date; expiresAt?: Date }[];
 }
 
 export type PspCapability = "wallet_funding" | "disbursement" | "bank_verify";
@@ -360,7 +379,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, readonly string[]> = {
   compliance: ["dashboard", "kyc", "users.view", "users.suspend"],
   moderation: [
     "dashboard", "events.view", "events.flag", "events.end", "ads", "floor_avatars", "users.view",
-    "giveaways.view", "giveaways.stop",
+    "giveaways.view", "giveaways.stop", "events.floor",
   ],
 };
 

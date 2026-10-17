@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { can, escapeLikePattern, failedResolutionGate, giveawayCodeMatches, maskAccountNumber, nameConfirmMatches, payoutCheckRefusal, payoutConfirmMatches, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed, user360Sections } from "./adminAccess.ts";
+import { can, escapeLikePattern, eventHoldRoute, failedResolutionGate, giveawayCodeMatches, maskAccountNumber, maskGiveawayCode, nameConfirmMatches, payoutCheckRefusal, payoutConfirmMatches, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed, user360Sections } from "./adminAccess.ts";
 
 const ROLES = ["super_admin", "finance", "support", "compliance", "moderation"] as const;
 
@@ -238,4 +238,41 @@ Deno.test("giveawayCodeMatches: the code, any case, spaces trimmed, never empty"
   assertEquals(giveawayCodeMatches("", ""), false);
   assertEquals(giveawayCodeMatches(undefined, "T098AAA"), false);
   assertEquals(giveawayCodeMatches("x", null), false);
+});
+
+Deno.test("maskGiveawayCode: an active giveaway's code is effectively cash, so it is masked", () => {
+  assertEquals(maskGiveawayCode("ABC123", "active"), "••••23");
+  assertEquals(maskGiveawayCode("ABC123", "stopped"), "ABC123");
+  assertEquals(maskGiveawayCode("ABC123", "exhausted"), "ABC123");
+  assertEquals(maskGiveawayCode("", "active"), "");
+  assertEquals(maskGiveawayCode(null, "active"), "");
+});
+
+Deno.test("permissionFor: revealing a giveaway code needs giveaways.stop", () => {
+  assertEquals(permissionFor("giveaways", "POST", "reveal-code", true), "giveaways.stop");
+  assertEquals(permissionFor("giveaways", "POST", "reveal-code", false), null);
+  assertEquals(can("support", "giveaways.stop"), false);
+});
+
+Deno.test("permissionFor + matrix: live event floor control", () => {
+  assertEquals(permissionFor("events", "GET", undefined, true), "events.view");
+  assertEquals(permissionFor("events", "POST", "advance-floor", true), "events.end");
+  assertEquals(permissionFor("events", "POST", "remove-hold", true), "events.floor");
+  assertEquals(permissionFor("events", "POST", "remove-hold", false), null);
+  assertEquals(can("moderation", "events.floor"), true);
+  assertEquals(can("super_admin", "events.floor"), true);
+  for (const r of ["support", "finance", "compliance"]) assertEquals(can(r, "events.floor"), false, r);
+  assertEquals(can("support", "events.end"), true);
+  assertEquals(can("finance", "events.end"), false);
+});
+
+Deno.test("eventHoldRoute: only events/:id/holds/:holdId/remove", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const hold = "22222222-2222-4222-8222-222222222222";
+  assertEquals(eventHoldRoute(["events", id, "holds", hold, "remove"]), { id, holdId: hold });
+  assertEquals(eventHoldRoute(["events", id, "holds", hold]), null);
+  assertEquals(eventHoldRoute(["events", id, "holds", "", "remove"]), null);
+  assertEquals(eventHoldRoute(["giveaways", id, "holds", hold, "remove"]), null);
+  assertEquals(eventHoldRoute(["events", id, "end"]), null);
+  assertEquals(eventHoldRoute(["events", id, "holds", hold, "remove", "x"]), null);
 });

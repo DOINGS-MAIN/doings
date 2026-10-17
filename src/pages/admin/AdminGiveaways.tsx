@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAdminGiveaway, useAdminGiveaways, useAdminMutations } from "@/hooks/admin/useAdminQueries";
+import { admin as adminApi } from "@/lib/supabase";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { can, type AdminGiveaway } from "@/types/admin";
 
@@ -32,7 +33,16 @@ function StopDialog({ giveaway, onClose }: { giveaway: AdminGiveaway; onClose: (
   const [reason, setReason] = useState("");
   const [confirm, setConfirm] = useState("");
   const [saving, setSaving] = useState(false);
-  const ready = reason.trim() !== "" && confirm.trim().toUpperCase() === giveaway.code.toUpperCase();
+  // The code is masked everywhere else; revealing it here is audited on the server.
+  const [code, setCode] = useState<string | null>(giveaway.codeMasked ? null : giveaway.code);
+  useEffect(() => {
+    if (!giveaway.codeMasked) return;
+    adminApi.giveaways.revealCode(giveaway.id)
+      .then((r) => setCode(String((r as { code?: string }).code ?? "")))
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Couldn't show the code"));
+  }, [giveaway.id, giveaway.codeMasked]);
+  const norm = (v: string) => v.replace(/\s+/g, "").toUpperCase();
+  const ready = reason.trim() !== "" && !!code && norm(confirm) === norm(code);
 
   const submit = async () => {
     setSaving(true);
@@ -63,7 +73,10 @@ function StopDialog({ giveaway, onClose }: { giveaway: AdminGiveaway; onClose: (
             <Textarea value={reason} onChange={(e) => setReason(e.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label>Type the code <span className="font-mono">{giveaway.code}</span> to confirm</Label>
+            <Label>
+              Type the code <span className="font-mono">{code ?? "…"}</span> to confirm
+              <span className="block text-xs text-muted-foreground font-normal">Showing the code is recorded in the audit log.</span>
+            </Label>
             <Input value={confirm} onChange={(e) => setConfirm(e.target.value)} className="font-mono" />
           </div>
         </div>
@@ -214,7 +227,7 @@ export const AdminGiveaways = () => {
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input className="pl-10" placeholder="Search code or title…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+          <Input className="pl-10" placeholder="Search title, or the full code…" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         </div>
         <Select value={status} onValueChange={setStatus}>
           <SelectTrigger className="w-[150px]"><SelectValue /></SelectTrigger>

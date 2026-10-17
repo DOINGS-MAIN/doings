@@ -1,11 +1,11 @@
 import { withCors } from "../_shared/cors.ts";
-import { orIlike, parsePaging } from "../_shared/adminSearch.ts";
-import { giveawayCodeMatches } from "../_shared/adminAccess.ts";
+import { cleanSearch, orIlike, parsePaging, quoteValue } from "../_shared/adminSearch.ts";
+import { giveawayCodeMatches, maskGiveawayCode } from "../_shared/adminAccess.ts";
 import type { AdminRouteCtx } from "./payouts.ts";
 
 const COLUMNS =
   "id, creator_id, title, total_amount, per_person_amount, remaining_amount, max_recipients, code, status, type, event_id, " +
-  "is_private, show_on_event_screen, funding_transaction_id, refund_transaction_id, stopped_at, stopped_by, stop_reason, created_at";
+  "is_private, show_on_event_screen, funding_transaction_id, refund_transaction_id, stopped_at, stop_reason, created_at";
 const STATUSES = new Set(["active", "stopped", "exhausted"]);
 const TYPES = new Set(["live", "scheduled"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -28,8 +28,13 @@ export async function handleGiveaways(ctx: AdminRouteCtx): Promise<Response | nu
     const creator = url.searchParams.get("creator_id");
     if (creator && !UUID.test(creator)) return withCors({ error: "creator_id must be a user id" }, { status: 400 });
     if (creator) q = q.eq("creator_id", creator);
-    const search = orIlike(["code", "title"], url.searchParams.get("search"));
-    if (search) q = q.or(search);
+    // Codes match only in full: partial matching would let a view-only role rebuild a masked code
+    // letter by letter. Titles match partially as usual.
+    const text = cleanSearch(url.searchParams.get("search"));
+    if (text) {
+      const exactCode = quoteValue(text.replace(/\s+/g, "").toUpperCase());
+      q = q.or(`${orIlike(["title"], text)},code.eq.${exactCode}`);
+    }
     const { data, count, error } = await q
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
@@ -38,7 +43,13 @@ export async function handleGiveaways(ctx: AdminRouteCtx): Promise<Response | nu
     const rows = (data ?? []) as Record<string, unknown>[];
     // creator names (attachUserFields keys on user_id)
     const named = await ctx.attachUserFields(rows.map((g) => ({ ...g, user_id: g.creator_id })));
-    return withCors({ giveaways: named, total: count, page, limit });
+    // Never send an active giveaway's code: it's effectively cash.
+    const giveaways = named.map((g) => ({
+      ...g,
+      code: maskGiveawayCode(g.code as string, g.status as string),
+      code_masked: g.status === "active",
+    }));
+    return withCors({ giveaways, total: count, page, limit });
   }
 
   if (req.method === "GET" && id) {
@@ -65,12 +76,17 @@ export async function handleGiveaways(ctx: AdminRouteCtx): Promise<Response | nu
         : Promise.resolve({ data: null, error: null }),
     ]);
     let stoppedByEmail: string | null = null;
-    if (g.stopped_by) {
-      const { data: u } = await supabase.auth.admin.getUserById(g.stopped_by as string);
-      stoppedByEmail = u?.user?.email ?? null;
+    // Who stopped it is kept only in the audit log (creators can read the giveaway row).
+    if (g.status === "stopped") {
+      const { data: audit } = await supabase.from("admin_audit_log").select("admin_user_id")
+        .eq("action", "stop_giveaway").eq("target_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+      if (audit?.admin_user_id) {
+        const { data: u } = await supabase.auth.admin.getUserById(audit.admin_user_id as string);
+        stoppedByEmail = u?.user?.email ?? null;
+      }
     }
     return withCors({
-      giveaway: g,
+      giveaway: { ...g, code: maskGiveawayCode(g.code as string, g.status as string), code_masked: g.status === "active" },
       creator: must(creator),
       event: must(event),
       redemptions: await ctx.attachUserFields((must(redemptions) ?? []) as Record<string, unknown>[]),
@@ -100,6 +116,19 @@ export async function handleGiveaways(ctx: AdminRouteCtx): Promise<Response | nu
     });
     if (rpcErr) return withCors({ error: rpcErr.message }, { status: 409 });
     return withCors({ ok: true, refunded: Number((data as { refunded?: number })?.refunded ?? 0) });
+  }
+
+  // ── POST giveaways/:id/reveal-code ── stop roles only (the role gate checks giveaways.stop); audited.
+  if (req.method === "POST" && id && action === "reveal-code") {
+    const { data: g, error } = await supabase.from("giveaways").select("id, code, status").eq("id", id).maybeSingle();
+    if (error) throw error;
+    if (!g) return withCors({ error: "Giveaway not found" }, { status: 404 });
+    const { error: logErr } = await supabase.rpc("log_admin_action", {
+      p_admin_id: authId, p_action: "reveal_giveaway_code", p_target_type: "giveaway", p_target_id: id,
+      p_details: { status: g.status },
+    });
+    if (logErr) throw logErr;
+    return withCors({ code: g.code });
   }
 
   return null;
