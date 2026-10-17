@@ -195,9 +195,11 @@ export function useAdminMutations() {
   const refresh = (...keys: (keyof typeof adminKeys)[]) =>
     Promise.all(keys.map((k) => qc.invalidateQueries({ queryKey: ["admin", k] })));
   const m = useMutation({ mutationFn: (fn: () => Promise<unknown>) => fn() });
-  const run = async (fn: () => Promise<unknown>, ...keys: (keyof typeof adminKeys)[]) => {
-    await m.mutateAsync(fn);
+  // Runs the call, refreshes the affected lists, and returns the server's answer.
+  const run = async (fn: () => Promise<unknown>, ...keys: (keyof typeof adminKeys)[]): Promise<unknown> => {
+    const out = await m.mutateAsync(fn);
     await refresh(...keys);
+    return out;
   };
   return {
     suspendUser: (id: string, reason: string) => run(() => adminApi.users.suspend(id, reason), "users", "stats"),

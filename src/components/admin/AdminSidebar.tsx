@@ -14,6 +14,8 @@ import {
   Activity,
   ArrowLeftRight,
   Music, Megaphone,
+  Banknote,
+  ShoppingBag,
   UserCog,
   ScrollText,
 } from "lucide-react";
@@ -38,6 +40,8 @@ const navItems = [
   { path: "/admin/payments", label: "Payments", icon: BarChart3, permissions: ["payments"] },
   { path: "/admin/queue", label: "Review Queue", icon: ListTodo, permissions: ["queue"] },
   { path: "/admin/transactions", label: "Transactions", icon: CreditCard, permissions: ["transactions.view"] },
+  { path: "/admin/payouts", label: "Payouts", icon: Banknote, permissions: ["transactions.view"] },
+  { path: "/admin/bundle-orders", label: "Bundle Orders", icon: ShoppingBag, permissions: ["transactions.view"] },
   { path: "/admin/psp-events", label: "PSP Activity", icon: Activity, permissions: ["psp_events"] },
   { path: "/admin/webhooks", label: "Webhooks", icon: Webhook, permissions: ["webhooks.view"] },
   { path: "/admin/payment-rails", label: "Payment Rails", icon: Route, permissions: ["payment_rails"] },

@@ -27,6 +27,8 @@ import { AdminLayout } from "./components/admin/AdminLayout";
 import { AdminDashboard } from "./pages/admin/AdminDashboard";
 import { AdminUsers } from "./pages/admin/AdminUsers";
 import { AdminTransactions } from "./pages/admin/AdminTransactions";
+import { AdminPayouts } from "./pages/admin/AdminPayouts";
+import { AdminBundleOrders } from "./pages/admin/AdminBundleOrders";
 import { AdminKYC } from "./pages/admin/AdminKYC";
 import { AdminEvents } from "./pages/admin/AdminEvents";
 import { AdminLogin } from "./pages/admin/AdminLogin";
@@ -91,6 +93,8 @@ const App = () => (
               <Route path="users" element={<AdminUsers />} />
               <Route path="transactions" element={<AdminTransactions />} />
               <Route path="transactions/:txnId" element={<AdminTransactionDetail />} />
+              <Route path="payouts" element={<AdminPayouts />} />
+              <Route path="bundle-orders" element={<AdminBundleOrders />} />
               <Route path="payments" element={<AdminPaymentsOverview />} />
               <Route path="queue" element={<AdminQueue />} />
               <Route path="psp-events" element={<AdminPspEvents />} />

@@ -107,7 +107,7 @@ export const AdminUsers = () => {
     }
   };
 
-  const runAction = async (action: () => Promise<void>, success: string) => {
+  const runAction = async (action: () => Promise<unknown>, success: string) => {
     try {
       await action();
       toast.success(success);
