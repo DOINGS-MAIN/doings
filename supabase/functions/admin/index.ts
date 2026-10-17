@@ -8,6 +8,7 @@ import { cleanSearch, orIlike, parsePaging, quoteValue } from "../_shared/adminS
 import { chunk, collectAll } from "../_shared/adminExport.ts";
 import { handlePayouts } from "./payouts.ts";
 import { handleBundleOrders } from "./bundleOrders.ts";
+import { handleUser360 } from "./users360.ts";
 import { can, escapeLikePattern, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
 
 const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") ?? "15");
@@ -15,7 +16,7 @@ const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") 
 const RESERVED_ACTIONS = new Set([
   "suspend", "unsuspend", "ban", "unban", "flag", "unflag", "approve", "reject", "end",
   "invite", "accept", "disable", "enable", "role", "refund", "reprocess", "export", "probe-all", "health",
-  "check", "resolve",
+  "check", "resolve", "revoke", "kyc-reset",
 ]);
 
 // The platform treasury's wallets belong to this user (see migration 083).
@@ -23,11 +24,6 @@ const TREASURY_USER_ID = "00000000-0000-4000-8000-000000000001";
 
 // Bans last until an admin lifts them (100 years).
 const AUTH_BAN_DURATION = "876000h";
-
-// Explicit user detail columns: never PIN hashes or other secrets.
-const USER_DETAIL_COLUMNS =
-  "id, auth_id, phone, email, full_name, username, avatar_url, kyc_level, status, suspended_reason, suspended_at, suspended_by, " +
-  "date_of_birth, address, referral_code, referred_by, last_active_at, transaction_pin_set_at, transaction_pin_locked_until, created_at, updated_at";
 
 function csvEscape(value: unknown): string {
   const s = value == null ? "" : String(value);
@@ -276,6 +272,18 @@ Deno.serve(async (req) => {
       return res ?? withCors({ error: "Not found" }, { status: 404 });
     }
 
+    // ── USER 360 / KYC ACTIONS ── (route file; the role gate above already ran)
+    if (
+      (route.resource === "users" && routeId && ((req.method === "GET" && !routeAction) || routeAction === "kyc-reset")) ||
+      (route.resource === "kyc" && routeId && routeAction === "revoke")
+    ) {
+      const res = await handleUser360({
+        req, supabase, authId, role, action: routeAction, id: routeId, resource: route.resource,
+        attachUserFields: (rows: Record<string, unknown>[]) => attachUserFields(supabase, rows),
+      });
+      return res ?? withCors({ error: "Not found" }, { status: 404 });
+    }
+
     // ── STATS ──
     if (route.resource === "stats" && req.method === "GET") {
       const { data: stats, error } = await supabase.rpc("admin_dashboard_stats", { p_stuck_minutes: STUCK_AFTER_MINUTES });
@@ -322,16 +330,6 @@ Deno.serve(async (req) => {
         const { data, count, error } = await query;
         if (error) throw error;
         return withCors({ users: data, total: count, page, limit });
-      }
-
-      if (req.method === "GET" && route.id) {
-        const { data, error } = await supabase
-          .from("users")
-          .select(`${USER_DETAIL_COLUMNS}, wallets(id, currency, balance, locked_balance)`)
-          .eq("id", route.id)
-          .single();
-        if (error) throw error;
-        return withCors(data);
       }
 
       if (req.method === "POST" && route.action === "suspend" && route.id) {
