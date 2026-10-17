@@ -92,8 +92,10 @@ export async function handleLiveEvent(ctx: AdminRouteCtx & { holdId?: string }):
       p_event_id: id, p_hold_id: holdId, p_admin_auth_id: authId, p_reason: body.reason,
     });
     if (rpcErr) return rpcFailure(rpcErr.message);
-    const out = data as { was_status?: string; charged_kobo?: number };
-    return withCors({ ok: true, was_status: out?.was_status, charged_kobo: Number(out?.charged_kobo ?? 0) });
+    const out = data as { was_status?: string; charged_kobo?: number; already_paid?: boolean };
+    return withCors({
+      ok: true, was_status: out?.was_status, charged_kobo: Number(out?.charged_kobo ?? 0), already_paid: out?.already_paid === true,
+    });
   }
 
   return null;
