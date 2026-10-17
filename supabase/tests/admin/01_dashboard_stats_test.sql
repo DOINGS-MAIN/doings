@@ -9,9 +9,10 @@ BEGIN
   ASSERT (s->>'total_users')::bigint = (SELECT count(*) FROM public.users), 'total_users';
   ASSERT (s->>'active_users')::bigint = (SELECT count(*) FROM public.users WHERE status = 'active'), 'active_users';
   ASSERT (s->>'blocked_users')::bigint = (SELECT count(*) FROM public.users WHERE status IN ('suspended','banned')), 'blocked_users';
-  ASSERT (s->>'total_transactions')::bigint = (SELECT count(*) FROM public.transactions WHERE status = 'completed' AND amount > 0), 'total_transactions';
+  -- Customer transactions only since 096: the treasury's bookkeeping legs are left out.
+  ASSERT (s->>'total_transactions')::bigint = (SELECT count(*) FROM public.transactions WHERE status = 'completed' AND amount > 0 AND user_id <> '00000000-0000-4000-8000-000000000001'), 'total_transactions';
   -- total_volume is NGN only since 096 (USDC is reported separately as usdc_volume).
-  ASSERT (s->>'total_volume')::bigint = (SELECT COALESCE(sum(abs(amount)),0) FROM public.transactions WHERE status = 'completed' AND amount > 0 AND currency = 'NGN'), 'total_volume';
+  ASSERT (s->>'total_volume')::bigint = (SELECT COALESCE(sum(abs(amount)),0) FROM public.transactions WHERE status = 'completed' AND amount > 0 AND currency = 'NGN' AND user_id <> '00000000-0000-4000-8000-000000000001'), 'total_volume';
   ASSERT (s->>'total_fee_revenue')::bigint = (public.get_fee_revenue_stats()->>'total_fee_kobo')::bigint, 'total_fee_revenue';
   ASSERT (s->>'total_events')::bigint = (SELECT count(*) FROM public.events), 'total_events';
   ASSERT (s->>'live_events')::bigint = (SELECT count(*) FROM public.events WHERE status = 'live'), 'live_events';
