@@ -9,6 +9,7 @@ import { chunk, collectAll } from "../_shared/adminExport.ts";
 import { handlePayouts } from "./payouts.ts";
 import { handleBundleOrders } from "./bundleOrders.ts";
 import { handleUser360 } from "./users360.ts";
+import { handleGiveaways } from "./giveaways.ts";
 import { can, escapeLikePattern, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
 
 const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") ?? "15");
@@ -16,7 +17,7 @@ const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") 
 const RESERVED_ACTIONS = new Set([
   "suspend", "unsuspend", "ban", "unban", "flag", "unflag", "approve", "reject", "end",
   "invite", "accept", "disable", "enable", "role", "refund", "reprocess", "export", "probe-all", "health",
-  "check", "resolve", "revoke", "kyc-reset",
+  "check", "resolve", "revoke", "kyc-reset", "stop",
 ]);
 
 // The platform treasury's wallets belong to this user (see migration 083).
@@ -123,6 +124,7 @@ type RouteAction =
   | { resource: "psp-events" }
   | { resource: "payouts"; action?: string; id?: string }
   | { resource: "bundle-orders"; action?: string; id?: string }
+  | { resource: "giveaways"; action?: string; id?: string }
   | { resource: "unknown" };
 
 function parseRoute(url: string): RouteAction {
@@ -155,7 +157,7 @@ function parseRoute(url: string): RouteAction {
   if (rest[0] === "queue") return { resource: "queue" };
   if (rest[0] === "psp-events") return { resource: "psp-events" };
 
-  if (["users", "transactions", "kyc", "events", "team", "audit", "payouts", "bundle-orders"].includes(resource)) {
+  if (["users", "transactions", "kyc", "events", "team", "audit", "payouts", "bundle-orders", "giveaways"].includes(resource)) {
     return { resource: resource as RouteAction["resource"], action, id } as RouteAction;
   }
   return { resource: "unknown" };
@@ -269,6 +271,15 @@ Deno.serve(async (req) => {
         attachUserFields: (rows: Record<string, unknown>[]) => attachUserFields(supabase, rows),
       };
       const res = route.resource === "payouts" ? await handlePayouts(ctx) : await handleBundleOrders(ctx);
+      return res ?? withCors({ error: "Not found" }, { status: 404 });
+    }
+
+    // ── GIVEAWAYS ── (route file; the role gate above already ran)
+    if (route.resource === "giveaways") {
+      const res = await handleGiveaways({
+        req, supabase, authId, action: routeAction, id: routeId,
+        attachUserFields: (rows: Record<string, unknown>[]) => attachUserFields(supabase, rows),
+      });
       return res ?? withCors({ error: "Not found" }, { status: 404 });
     }
 
