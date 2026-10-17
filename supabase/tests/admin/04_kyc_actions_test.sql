@@ -71,4 +71,28 @@ BEGIN
   ASSERT has_function_privilege('service_role', 'public.admin_reset_kyc_attempts(uuid,uuid)'::regprocedure, 'execute'), 'service_role reset';
 END $$;
 
+-- The realistic re-verified user: an old verified Level 2 record that kyc-dojah-verify superseded,
+-- plus the current one. Revoking the current record must still drop them to Level 1, and the
+-- superseded record can't be revoked (it no longer decides anything).
+INSERT INTO public.kyc_verifications (user_id, level, status, provider, bvn_hmac, bvn_last_four, verification_method, verified_at, superseded_at)
+SELECT user_id, 2, 'verified', 'dojah', v.h, '5678', 'bvn_selfie', now() - interval '30 days', v.sup
+FROM fx CROSS JOIN (VALUES ('test-097-old', now() - interval '1 day'), ('test-097-cur', NULL::timestamptz)) AS v(h, sup);
+
+DO $$
+DECLARE
+  a uuid := (SELECT auth_id FROM fx);
+  u uuid := (SELECT user_id FROM fx);
+  k_old uuid := (SELECT id FROM public.kyc_verifications WHERE bvn_hmac = 'test-097-old');
+  k_cur uuid := (SELECT id FROM public.kyc_verifications WHERE bvn_hmac = 'test-097-cur');
+  r jsonb;
+BEGIN
+  ASSERT (SELECT kyc_level FROM public.users WHERE id = u) = 2, 'current verified record raised the user to Level 2';
+  ASSERT pg_temp.err(format('SELECT public.admin_revoke_kyc(%L, %L, %L)', k_old, a, 'x')) = 'This record was replaced by a newer one',
+    'a superseded record cannot be revoked';
+  r := public.admin_revoke_kyc(k_cur, a, 'Account takeover');
+  ASSERT (r->>'kyc_level')::int = 1, 'superseded verified record does not keep Level 2';
+  ASSERT (SELECT kyc_level FROM public.users WHERE id = u) = 1, 'user row at Level 1';
+  ASSERT (SELECT status FROM public.kyc_verifications WHERE id = k_old) = 'verified', 'superseded record untouched';
+END $$;
+
 SELECT 'kyc actions tests passed' AS result;

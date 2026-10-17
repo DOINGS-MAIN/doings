@@ -279,7 +279,6 @@ Deno.serve(async (req) => {
     ) {
       const res = await handleUser360({
         req, supabase, authId, role, action: routeAction, id: routeId, resource: route.resource,
-        attachUserFields: (rows: Record<string, unknown>[]) => attachUserFields(supabase, rows),
       });
       return res ?? withCors({ error: "Not found" }, { status: 404 });
     }
@@ -590,7 +589,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── KYC ── read-only: verification is automated (Dojah), admins only see results.
+    // ── KYC ── results list (verification is automated; revoke and attempt reset live in users360.ts)
     if (route.resource === "kyc") {
       if (req.method === "GET" && !route.id) {
         const url = new URL(req.url);

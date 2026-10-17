@@ -12,6 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useAdminMutations, useAdminUser360 } from "@/hooks/admin/useAdminQueries";
+import { useAdminAuth } from "@/hooks/useAdminAuth";
+import { can } from "@/types/admin";
 import type { AdminUser360 as User360 } from "@/types/admin";
 
 const formatAmount = (amount: number, currency: string) =>
@@ -179,7 +181,10 @@ function KycCard({ data }: { data: User360 }) {
                   <TableCell className="text-sm text-muted-foreground max-w-xs">{r.rejectionReason ?? "—"}</TableCell>
                   <TableCell className="text-xs whitespace-nowrap">{format(r.verifiedAt ?? r.submittedAt, "MMM d, yyyy")}</TableCell>
                   <TableCell>
-                    {r.status === "verified" && !r.superseded && (
+                    {r.status === "verified" && !r.superseded && !who && (
+                      <span className="text-xs text-muted-foreground">No name or email to confirm with</span>
+                    )}
+                    {r.status === "verified" && !r.superseded && who && (
                       <Button variant="destructive" size="sm" onClick={() => setRevoking(r.id)}>
                         <ShieldOff className="w-4 h-4 mr-1" />
                         Revoke
@@ -292,9 +297,15 @@ function MoneyCard({ money }: { money: NonNullable<User360["money"]> }) {
 
 export const AdminUser360 = () => {
   const { id } = useParams();
+  const { session } = useAdminAuth();
   const { data, isLoading, isError, refetch } = useAdminUser360(id ?? null);
   const { suspendUser, unsuspendUser, banUser, unbanUser } = useAdminMutations();
   const [dialog, setDialog] = useState<"suspend" | "ban" | null>(null);
+
+  // The query never runs for a role without users.view (e.g. finance), so say so instead of spinning.
+  if (!can(session?.role, "users.view")) {
+    return <div className="p-8 text-muted-foreground">Your admin role can't view user profiles.</div>;
+  }
 
   if (isError && !data) {
     return (

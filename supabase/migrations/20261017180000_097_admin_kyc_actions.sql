@@ -16,6 +16,9 @@ BEGIN
   SELECT * INTO v_kyc FROM public.kyc_verifications WHERE id = p_kyc_id FOR UPDATE;
   IF NOT FOUND THEN RAISE EXCEPTION 'KYC record not found'; END IF;
   IF v_kyc.status <> 'verified' THEN RAISE EXCEPTION 'Only a verified KYC record can be revoked'; END IF;
+  IF v_kyc.superseded_at IS NOT NULL THEN RAISE EXCEPTION 'This record was replaced by a newer one'; END IF;
+  -- One revoke per user at a time, so two revokes can't each see the other's record as still verified.
+  PERFORM 1 FROM public.users WHERE id = v_kyc.user_id FOR UPDATE;
   IF v_reason = '' THEN RAISE EXCEPTION 'A reason is required'; END IF;
 
   -- The status change fires tr_notify_kyc_status, which tells the user with this reason.

@@ -8,7 +8,7 @@ const KYC_COLUMNS =
   "rejection_reason, submitted_at, verified_at, reviewed_at, superseded_at";
 const KYC_ATTEMPTS_MAX = 5;
 
-type Ctx = AdminRouteCtx & { role: string; resource: "users" | "kyc" };
+type Ctx = Omit<AdminRouteCtx, "attachUserFields"> & { role: string; resource: "users" | "kyc" };
 
 export async function handleUser360(ctx: Ctx): Promise<Response | null> {
   const { req, supabase, authId, action, id, role, resource } = ctx;
@@ -17,9 +17,18 @@ export async function handleUser360(ctx: Ctx): Promise<Response | null> {
   // ── GET users/:id: only the sections this role may see are queried and returned ──
   if (resource === "users" && req.method === "GET" && !action) {
     const can = user360Sections(role);
-    const { data: user, error } = await supabase.from("users").select(USER_COLUMNS).eq("id", id).maybeSingle();
+    // PIN state rides on the same row; only read it when the role may see the security section.
+    const pinColumns = can.security ? ", transaction_pin_set_at, transaction_pin_failed_attempts, transaction_pin_locked_until" : "";
+    const { data: row, error } = await supabase.from("users").select(USER_COLUMNS + pinColumns).eq("id", id).maybeSingle();
     if (error) throw error;
-    if (!user) return withCors({ error: "User not found" }, { status: 404 });
+    if (!row) return withCors({ error: "User not found" }, { status: 404 });
+    const {
+      transaction_pin_set_at: pinSetAt,
+      transaction_pin_failed_attempts: pinFailed,
+      transaction_pin_locked_until: pinLockedUntil,
+      ...user
+    } = row as Record<string, unknown>;
+    const userId = user.id as string; // canonical id from the database, not the URL text
 
     const since = new Date(Date.now() - 86_400_000).toISOString();
     const must = <T>(r: { data: T | null; error: unknown }) => {
@@ -27,65 +36,71 @@ export async function handleUser360(ctx: Ctx): Promise<Response | null> {
       return r.data;
     };
     const sections: Record<string, unknown> = {};
-
     if (can.security) {
-      const pin = must(await supabase.from("users")
-        .select("transaction_pin_set_at, transaction_pin_failed_attempts, transaction_pin_locked_until").eq("id", id).maybeSingle()) as
-        Record<string, unknown> | null;
       sections.security = {
-        pin_set: !!pin?.transaction_pin_set_at,
-        pin_failed_attempts: Number(pin?.transaction_pin_failed_attempts ?? 0),
-        pin_locked_until: pin?.transaction_pin_locked_until ?? null,
+        pin_set: !!pinSetAt,
+        pin_failed_attempts: Number(pinFailed ?? 0),
+        pin_locked_until: pinLockedUntil ?? null,
       };
     }
 
+    // Every section the role may see is fetched in one parallel batch; the rest are never queried.
+    const tasks: Promise<void>[] = [];
+
     if (can.kyc) {
-      const [records, attempts] = await Promise.all([
-        supabase.from("kyc_verifications").select(KYC_COLUMNS).eq("user_id", id).order("submitted_at", { ascending: false }),
-        supabase.from("rate_limit_hits").select("key", { count: "exact", head: true }).eq("key", `kyc-l2:${id}`).gte("hit_at", since),
-      ]);
-      if (attempts.error) throw attempts.error;
-      sections.kyc = { records: must(records) ?? [], attempts_24h: attempts.count ?? 0, attempts_max: KYC_ATTEMPTS_MAX };
+      tasks.push((async () => {
+        const [records, attempts] = await Promise.all([
+          supabase.from("kyc_verifications").select(KYC_COLUMNS).eq("user_id", userId).order("submitted_at", { ascending: false }),
+          supabase.from("rate_limit_hits").select("key", { count: "exact", head: true }).eq("key", `kyc-l2:${userId}`).gte("hit_at", since),
+        ]);
+        if (attempts.error) throw attempts.error;
+        sections.kyc = { records: must(records) ?? [], attempts_24h: attempts.count ?? 0, attempts_max: KYC_ATTEMPTS_MAX };
+      })());
     }
 
     if (can.money) {
-      const [wallets, txns, payouts, orders, banks] = await Promise.all([
-        supabase.from("wallets").select("currency, balance, locked_balance").eq("user_id", id),
-        supabase.from("transactions").select("id, type, currency, amount, status, idempotency_key, created_at")
-          .eq("user_id", id).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(20),
-        supabase.from("transactions").select("id, currency, amount, status, idempotency_key, metadata, created_at")
-          .eq("user_id", id).eq("type", "withdrawal").in("status", ["pending", "processing"]).order("created_at", { ascending: false }),
-        supabase.from("bundle_orders").select("id, currency, bundles, amount, status, tx_ref, refunded_at, created_at")
-          .eq("user_id", id).order("created_at", { ascending: false }).limit(10),
-        supabase.from("bank_accounts").select("id, bank_name, account_name, account_number, is_default, created_at")
-          .eq("user_id", id).order("created_at", { ascending: false }),
-      ]);
-      sections.money = {
-        wallets: must(wallets) ?? [],
-        transactions: must(txns) ?? [],
-        open_payouts: ((must(payouts) ?? []) as Record<string, unknown>[]).map(({ metadata, ...p }) => ({
-          ...p,
-          needs_review: (metadata as Record<string, unknown> | null)?.needs_review === true,
-        })),
-        bundle_orders: must(orders) ?? [],
-        // Never send full account numbers to the browser.
-        bank_accounts: ((must(banks) ?? []) as Record<string, unknown>[]).map(({ account_number, ...b }) => ({
-          ...b,
-          account_number: maskAccountNumber(account_number as string),
-        })),
-      };
+      tasks.push((async () => {
+        const [wallets, txns, payouts, orders, banks] = await Promise.all([
+          supabase.from("wallets").select("currency, balance, locked_balance").eq("user_id", userId),
+          supabase.from("transactions").select("id, type, currency, amount, status, idempotency_key, created_at")
+            .eq("user_id", userId).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(20),
+          supabase.from("transactions").select("id, currency, amount, status, idempotency_key, metadata, created_at")
+            .eq("user_id", userId).eq("type", "withdrawal").in("status", ["pending", "processing"]).order("created_at", { ascending: false }),
+          supabase.from("bundle_orders").select("id, currency, bundles, amount, status, tx_ref, refunded_at, created_at")
+            .eq("user_id", userId).order("created_at", { ascending: false }).limit(10),
+          supabase.from("bank_accounts").select("id, bank_name, account_name, account_number, is_default, created_at")
+            .eq("user_id", userId).order("created_at", { ascending: false }),
+        ]);
+        sections.money = {
+          wallets: must(wallets) ?? [],
+          transactions: must(txns) ?? [],
+          open_payouts: ((must(payouts) ?? []) as Record<string, unknown>[]).map(({ metadata, ...p }) => ({
+            ...p,
+            needs_review: (metadata as Record<string, unknown> | null)?.needs_review === true,
+          })),
+          bundle_orders: must(orders) ?? [],
+          // Never send full account numbers to the browser.
+          bank_accounts: ((must(banks) ?? []) as Record<string, unknown>[]).map(({ account_number, ...b }) => ({
+            ...b,
+            account_number: maskAccountNumber(account_number as string),
+          })),
+        };
+      })());
     }
 
     if (can.activity) {
-      const [events, giveaways] = await Promise.all([
-        supabase.from("events").select("id, title, status, event_code, created_at").eq("host_id", id)
-          .order("created_at", { ascending: false }).limit(10),
-        supabase.from("giveaways").select("id", { count: "exact", head: true }).eq("creator_id", id),
-      ]);
-      if (giveaways.error) throw giveaways.error;
-      sections.activity = { events_hosted: must(events) ?? [], giveaways_created: giveaways.count ?? 0 };
+      tasks.push((async () => {
+        const [events, giveaways] = await Promise.all([
+          supabase.from("events").select("id, title, status, event_code, created_at").eq("host_id", userId)
+            .order("created_at", { ascending: false }).limit(10),
+          supabase.from("giveaways").select("id", { count: "exact", head: true }).eq("creator_id", userId),
+        ]);
+        if (giveaways.error) throw giveaways.error;
+        sections.activity = { events_hosted: must(events) ?? [], giveaways_created: giveaways.count ?? 0 };
+      })());
     }
 
+    await Promise.all(tasks);
     return withCors({ user, sections, can });
   }
 
