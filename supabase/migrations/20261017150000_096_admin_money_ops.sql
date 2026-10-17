@@ -100,6 +100,7 @@ BEGIN
   IF v_order.refunded_at IS NOT NULL THEN RAISE EXCEPTION 'A refund is already recorded'; END IF;
   IF v_ref = '' THEN RAISE EXCEPTION 'A refund reference is required'; END IF;
   IF p_amount_kobo IS NULL OR p_amount_kobo <= 0 THEN RAISE EXCEPTION 'Refund amount must be positive'; END IF;
+  IF p_amount_kobo > v_order.amount THEN RAISE EXCEPTION 'Refund amount can''t be more than the order amount'; END IF;
 
   UPDATE public.bundle_orders
   SET refund_reference = v_ref, refund_amount_kobo = p_amount_kobo, refund_note = NULLIF(btrim(COALESCE(p_note, '')), ''),
@@ -136,7 +137,8 @@ AS $$
            COALESCE(sum(abs(amount)) FILTER (WHERE currency = 'USDC'), 0) AS usdc,
            COALESCE(sum(abs(amount)) FILTER (WHERE currency = 'USDC' AND created_at >= date_trunc('day', now(), 'UTC')), 0) AS usdc_today
     FROM public.transactions
-    WHERE status = 'completed' AND amount > 0
+    -- The treasury's own legs (e.g. a USDC sale's NGN-in credit) are bookkeeping, not customer volume.
+    WHERE status = 'completed' AND amount > 0 AND user_id <> '00000000-0000-4000-8000-000000000001'
   ),
   e AS (
     SELECT count(*) AS total, count(*) FILTER (WHERE status = 'live') AS live
@@ -187,6 +189,7 @@ AS $$
            COALESCE(sum(abs(t.amount)), 0) AS amount_7d
     FROM public.transactions t
     WHERE t.status = 'completed' AND t.created_at >= now() - interval '7 days'
+      AND t.user_id <> '00000000-0000-4000-8000-000000000001'
     GROUP BY 1, 2
   )
   SELECT jsonb_build_object(
@@ -197,7 +200,7 @@ AS $$
         WHERE type = 'withdrawal' AND status IN ('pending', 'processing') AND metadata->>'needs_review' = 'true'),
       'orders_paid_failed', (
         SELECT count(*) FROM public.bundle_orders
-        WHERE currency = 'NGN' AND status = 'failed' AND provider_ref IS NOT NULL AND refunded_at IS NULL),
+        WHERE currency = 'NGN' AND status = 'failed' AND NULLIF(btrim(provider_ref), '') IS NOT NULL AND refunded_at IS NULL),
       'orders_pending_float', (SELECT count(*) FROM public.bundle_orders WHERE status = 'pending_float')
     )
   );
@@ -205,3 +208,74 @@ $$;
 
 REVOKE ALL ON FUNCTION public.admin_money_overview() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_money_overview() TO service_role;
+
+-- ── Settling an NGN order: a recorded outside refund is final (078's definition otherwise unchanged) ──
+CREATE OR REPLACE FUNCTION public.settle_ngn_bundle_order(
+  p_tx_ref TEXT,
+  p_paid_kobo BIGINT,
+  p_currency TEXT,
+  p_provider_ref TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_order public.bundle_orders%ROWTYPE;
+  v_price BIGINT;
+  v_wallet UUID;
+  v_txn UUID;
+BEGIN
+  SELECT * INTO v_order FROM public.bundle_orders WHERE tx_ref = p_tx_ref FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Bundle order not found: %', p_tx_ref;
+  END IF;
+  IF v_order.status = 'credited' THEN
+    RETURN jsonb_build_object('order_id', v_order.id, 'status', 'credited', 'already', true,
+      'bundles', v_order.bundles);
+  END IF;
+  IF v_order.currency <> 'NGN' THEN
+    RAISE EXCEPTION 'Not an NGN bundle order';
+  END IF;
+  -- An admin recorded that the person was refunded outside the app: never credit bundles as well.
+  IF v_order.refunded_at IS NOT NULL THEN
+    UPDATE public.bundle_orders
+      SET failure_reason = left(COALESCE(failure_reason, '') || format(' | Payment %s seen after refund %s', p_provider_ref, v_order.refund_reference), 1000),
+          updated_at = now()
+      WHERE id = v_order.id;
+    RETURN jsonb_build_object('order_id', v_order.id, 'status', 'refunded');
+  END IF;
+  IF upper(COALESCE(p_currency, '')) <> 'NGN' OR COALESCE(p_paid_kobo, 0) < v_order.amount THEN
+    UPDATE public.bundle_orders
+      SET status = 'failed', provider_ref = p_provider_ref,
+          failure_reason = format('Paid %s %s, expected %s NGN kobo', p_paid_kobo, p_currency, v_order.amount),
+          updated_at = now()
+      WHERE id = v_order.id;
+    RETURN jsonb_build_object('order_id', v_order.id, 'status', 'failed');
+  END IF;
+
+  SELECT bundle_price_kobo INTO v_price FROM public.platform_settings LIMIT 1;
+  SELECT id INTO v_wallet FROM public.wallets WHERE user_id = v_order.user_id AND currency = 'NGN';
+  IF v_wallet IS NULL THEN
+    RAISE EXCEPTION 'NGN wallet not found for user %', v_order.user_id;
+  END IF;
+
+  v_txn := public.credit_wallet(
+    v_wallet, v_order.user_id, v_order.bundles * v_price, 0, 'purchase',
+    format('Bought %s bundles', v_order.bundles), 'flutterwave', p_provider_ref,
+    'bundle-order-' || v_order.id::text,
+    jsonb_build_object('bundle_order_id', v_order.id, 'bundles', v_order.bundles,
+      'paid_kobo', p_paid_kobo, 'fee_kobo', v_order.fee_kobo)
+  );
+
+  UPDATE public.bundle_orders
+    SET status = 'credited', provider_ref = p_provider_ref, wallet_id = v_wallet,
+        credit_transaction_id = v_txn, failure_reason = NULL, updated_at = now()
+    WHERE id = v_order.id;
+  RETURN jsonb_build_object('order_id', v_order.id, 'status', 'credited', 'bundles', v_order.bundles);
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.settle_ngn_bundle_order(TEXT, BIGINT, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.settle_ngn_bundle_order(TEXT, BIGINT, TEXT, TEXT) TO service_role;

@@ -80,4 +80,48 @@ BEGIN
   ASSERT has_function_privilege('service_role', 'public.admin_resolve_payout(uuid,text,uuid,text)'::regprocedure, 'execute'), 'service_role can execute';
 END $$;
 
+-- More kinds: an NGN sale marked failed (the user keeps their NGN), and USDC sales, which also
+-- move the treasury's USDC reserve (paid: reserve released and USDC sent, NGN into the treasury;
+-- failed: reserve released only).
+UPDATE public.wallets SET balance = balance + 9000, locked_balance = locked_balance + 9000 WHERE id = (SELECT wallet_id FROM fx);
+UPDATE public.wallets SET balance = balance + 4000000, locked_balance = locked_balance + 2100000 WHERE id = public.get_treasury_wallet_id('USDC');
+INSERT INTO public.transactions (wallet_id, user_id, currency, type, amount, net_amount, status, provider, idempotency_key, description, metadata)
+SELECT fx.wallet_id, fx.user_id, 'NGN', 'withdrawal', -3000, -3000, 'processing', v.prov, 'test-096-' || v.k, 'test 096', v.meta
+FROM fx CROSS JOIN (VALUES
+  ('sale2',    'internal',   '{"kind":"bundle_sale","bundles":3}'::jsonb),
+  ('usdcpaid', 'blockradar', '{"kind":"bundle_sale_usdc","bundles":3,"usdc_micro":1000000,"network_fee_micro":50000}'::jsonb),
+  ('usdcfail', 'blockradar', '{"kind":"bundle_sale_usdc","bundles":3,"usdc_micro":1000000,"network_fee_micro":50000}'::jsonb)
+) AS v(k, prov, meta);
+CREATE TEMP TABLE w1 AS
+SELECT (SELECT balance FROM public.wallets WHERE id = (SELECT wallet_id FROM fx)) AS ub,
+       (SELECT locked_balance FROM public.wallets WHERE id = (SELECT wallet_id FROM fx)) AS ul,
+       (SELECT balance FROM public.wallets WHERE id = public.get_treasury_wallet_id('USDC')) AS tub,
+       (SELECT locked_balance FROM public.wallets WHERE id = public.get_treasury_wallet_id('USDC')) AS tul,
+       (SELECT balance FROM public.wallets WHERE id = public.get_treasury_wallet_id('NGN')) AS tnb;
+
+DO $$
+DECLARE
+  a uuid := (SELECT auth_id FROM fx);
+  id_of text := 'SELECT id FROM public.transactions WHERE idempotency_key = %L';
+  sale2 uuid; usdcpaid uuid; usdcfail uuid; w record;
+BEGIN
+  EXECUTE format(id_of, 'test-096-sale2') INTO sale2;
+  EXECUTE format(id_of, 'test-096-usdcpaid') INTO usdcpaid;
+  EXECUTE format(id_of, 'test-096-usdcfail') INTO usdcfail;
+  SELECT * INTO w FROM w1;
+
+  ASSERT public.admin_resolve_payout(sale2, 'failed', a, 'Provider rejected')->>'status' = 'failed', 'sale failed';
+  ASSERT public.admin_resolve_payout(usdcpaid, 'paid', a, 'On-chain confirmed')->>'status' = 'completed', 'usdc sale paid';
+  ASSERT public.admin_resolve_payout(usdcfail, 'failed', a, 'Never broadcast')->>'status' = 'failed', 'usdc sale failed';
+
+  -- user NGN wallet: only the paid USDC sale leaves; all three holds are released
+  ASSERT (SELECT balance FROM public.wallets WHERE id = (SELECT wallet_id FROM fx)) = w.ub - 3000, 'user balance';
+  ASSERT (SELECT locked_balance FROM public.wallets WHERE id = (SELECT wallet_id FROM fx)) = w.ul - 9000, 'user holds released';
+  -- treasury USDC: both reserves released (2 × 1,050,000); only the paid one is sent
+  ASSERT (SELECT locked_balance FROM public.wallets WHERE id = public.get_treasury_wallet_id('USDC')) = w.tul - 2100000, 'treasury USDC reserves released';
+  ASSERT (SELECT balance FROM public.wallets WHERE id = public.get_treasury_wallet_id('USDC')) = w.tub - 1050000, 'treasury USDC sent once';
+  -- treasury NGN receives the paid sale's NGN
+  ASSERT (SELECT balance FROM public.wallets WHERE id = public.get_treasury_wallet_id('NGN')) = w.tnb + 3000, 'treasury NGN in';
+END $$;
+
 SELECT 'admin_resolve_payout tests passed' AS result;

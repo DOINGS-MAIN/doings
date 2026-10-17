@@ -89,4 +89,59 @@ BEGIN
   ASSERT has_function_privilege('service_role', 'public.admin_money_overview()'::regprocedure, 'execute'), 'service_role overview';
 END $$;
 
+-- A recorded outside refund is final: a later "payment found" must not also credit the bundles.
+DO $$
+DECLARE
+  o_paid uuid := (SELECT id FROM public.bundle_orders WHERE tx_ref = 'test-096-paidfail');
+  r jsonb; purchases_before int; purchases_after int;
+BEGIN
+  SELECT count(*) INTO purchases_before FROM public.transactions WHERE idempotency_key = 'bundle-order-' || o_paid::text;
+  r := public.settle_ngn_bundle_order('test-096-paidfail', 5000, 'NGN', 'flw-1b');
+  ASSERT r->>'status' = 'refunded', 'refunded order is not credited: ' || r::text;
+  ASSERT (SELECT status FROM public.bundle_orders WHERE id = o_paid) = 'failed', 'order stays failed';
+  ASSERT (SELECT credit_transaction_id IS NULL FROM public.bundle_orders WHERE id = o_paid), 'no credit transaction';
+  SELECT count(*) INTO purchases_after FROM public.transactions WHERE idempotency_key = 'bundle-order-' || o_paid::text;
+  ASSERT purchases_after = purchases_before, 'no purchase credit written';
+END $$;
+
+-- Refund cap, empty payment references, and the treasury's own bookkeeping legs.
+INSERT INTO public.bundle_orders (user_id, currency, bundles, amount, tx_ref, status, provider, provider_ref, failure_reason)
+SELECT user_id, 'NGN', 10, 5000, 'test-096-' || k, 'failed', 'flutterwave', pref, 'test'
+FROM fx CROSS JOIN (VALUES ('cap', 'flw-3'), ('emptyref', '')) AS v(k, pref);
+CREATE TEMP TABLE s1 AS SELECT public.admin_dashboard_stats() AS s, public.admin_money_overview() AS o;
+INSERT INTO public.transactions (wallet_id, user_id, currency, type, amount, net_amount, status, provider, idempotency_key, description)
+SELECT public.get_treasury_wallet_id('NGN'), '00000000-0000-4000-8000-000000000001', 'NGN', 'purchase', 4321, 4321, 'completed', 'internal', 'test-096-treasury-leg', 'test 096';
+
+DO $$
+DECLARE
+  a uuid := (SELECT auth_id FROM fx);
+  o_cap uuid := (SELECT id FROM public.bundle_orders WHERE tx_ref = 'test-096-cap');
+  o_empty uuid := (SELECT id FROM public.bundle_orders WHERE tx_ref = 'test-096-emptyref');
+  b jsonb := (SELECT s FROM s1); bo jsonb := (SELECT o FROM s1);
+  s jsonb := public.admin_dashboard_stats(); o jsonb := public.admin_money_overview();
+  q text := 'SELECT public.admin_record_bundle_refund(%L, %L, %L, %s, %L)';
+  p_before int; p_after int;
+BEGIN
+  ASSERT pg_temp.err(format(q, o_cap, a, 'R9', 5001, '')) = 'Refund amount can''t be more than the order amount', 'refund capped at the order amount';
+  ASSERT pg_temp.err(format(q, o_empty, a, 'R9', 5000, '')) = 'This order has no recorded payment', 'empty provider_ref is unpaid';
+  ASSERT (s->>'ngn_volume') = (b->>'ngn_volume'), 'treasury legs are not customer volume';
+  SELECT COALESCE(max((e->>'count_today')::int), 0) INTO p_before FROM jsonb_array_elements(bo->'by_type') e WHERE e->>'type' = 'purchase' AND e->>'currency' = 'NGN';
+  SELECT COALESCE(max((e->>'count_today')::int), 0) INTO p_after FROM jsonb_array_elements(o->'by_type') e WHERE e->>'type' = 'purchase' AND e->>'currency' = 'NGN';
+  ASSERT p_after = p_before, 'treasury legs are not in money flows';
+  -- of the two new failed orders only 'cap' (a real payment ref) is waiting for a refund
+  ASSERT (o->'queue'->>'orders_paid_failed')::int - (bo->'queue'->>'orders_paid_failed')::int = 0, 'counts were taken after both inserts';
+  ASSERT (SELECT count(*) FROM public.bundle_orders WHERE tx_ref IN ('test-096-cap','test-096-emptyref')
+          AND currency = 'NGN' AND status = 'failed' AND NULLIF(btrim(provider_ref), '') IS NOT NULL AND refunded_at IS NULL) = 1, 'oracle';
+END $$;
+
+DO $$
+DECLARE before_n int; after_n int;
+BEGIN
+  -- the queue count must agree with the refund guard: an order with provider_ref '' is not "paid"
+  before_n := (public.admin_money_overview()->'queue'->>'orders_paid_failed')::int;
+  UPDATE public.bundle_orders SET provider_ref = '' WHERE tx_ref = 'test-096-cap';
+  after_n := (public.admin_money_overview()->'queue'->>'orders_paid_failed')::int;
+  ASSERT before_n - after_n = 1, 'empty provider_ref leaves the paid-failed queue';
+END $$;
+
 SELECT 'money ops tests passed' AS result;
