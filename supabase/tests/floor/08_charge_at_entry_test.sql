@@ -177,6 +177,32 @@ BEGIN
   ASSERT w.balance = 9800000 AND w.locked = 0, 'legacy: money moved once';
 END $$;
 
+-- J. (review Important 1) the charge AND its no-charge fallback both fail (the head of the line has a
+-- drifted lock): the advance must still commit — turn ends settle, the bad hold goes back in line
+-- untouched, and the people behind it are still promoted and charged.
+DO $$
+DECLARE host uuid; ev uuid; fills uuid[] := '{}'; i int; g uuid; hg uuid; k uuid; hk uuid; r record;
+BEGIN
+  host := pg_temp.mk_user('dj-host@test.local', 0);
+  ev := pg_temp.mk_event(host);
+  FOR i IN 1..8 LOOP
+    fills := fills || public.queue_floor_spray(ev, pg_temp.mk_user('dj-fill-' || i || '@test.local', 10000000), 20000, 200, 1);
+  END LOOP;
+  g := pg_temp.mk_user('dj-g@test.local', 10000000);
+  hg := public.queue_floor_spray(ev, g, 20000, 200, 1);
+  k := pg_temp.mk_user('dj-k@test.local', 10000000);
+  hk := public.queue_floor_spray(ev, k, 20000, 200, 1);
+  UPDATE public.wallets SET locked_balance = 0 WHERE user_id = g AND currency = 'NGN';   -- drift: unlock will violate the check
+  UPDATE public.spray_holds SET floor_started_at = now() - interval '61 seconds', floor_ends_at = now() - interval '1 second' WHERE id = fills[1];
+  PERFORM public.advance_event_floor(ev);                                                -- must not raise
+  ASSERT (SELECT status FROM public.spray_holds WHERE id = fills[1]) = 'settled', 'turn end still committed';
+  SELECT * INTO r FROM public.spray_holds WHERE id = hg;
+  ASSERT r.status = 'queued' AND r.floor_slot IS NULL AND r.floor_started_at IS NULL AND r.transfer_id IS NULL,
+    format('bad hold back in line untouched, got %s/%s', r.status, r.floor_slot);
+  SELECT * INTO r FROM public.spray_holds WHERE id = hk;
+  ASSERT r.status = 'on_floor' AND r.floor_slot = 1 AND r.transfer_id IS NOT NULL, 'the next person was promoted and charged';
+END $$;
+
 -- I. grants
 DO $$
 DECLARE r text; f text;

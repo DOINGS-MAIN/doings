@@ -158,6 +158,10 @@ describe("admin mappers", () => {
     expect(m.floor[0]).toMatchObject({ name: "Ada", held: 2000, slot: 1, seconds: 60, chargedSoFar: 1000 });
     // the floor rows carry what the browser needs to keep "charged so far" ticking
     expect(m.floor[0]).toMatchObject({ noteCount: 10, denomination: 200 });
+    expect(m.floor[0].paid).toBe(false);
+    // 101: a spray paid on stepping onto the floor is marked paid
+    expect(mapLiveEvent({ floor: [{ id: "h9", paid: true, charged_so_far_kobo: 200000, planned_amount_kobo: 200000 }] }).floor[0])
+      .toMatchObject({ paid: true, chargedSoFar: 2000 });
     expect(m.queue.map((q) => [q.name, q.position])).toEqual([["Ben", 1], ["Chi", 2]]);
     expect(m.host).toMatchObject({ name: "Host" });
   });

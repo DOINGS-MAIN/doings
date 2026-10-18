@@ -80,19 +80,26 @@ BEGIN
 END;
 $$;
 
--- Charge on promotion without letting one bad row block the floor: on failure the charge rolls back to
--- the savepoint, the hold is released at no charge ('charge_failed', lock returned), and the slot frees.
+-- Charge on promotion without letting one bad row block the floor. Returns 'charged'; or 'released'
+-- (the charge rolled back to its savepoint and the hold was released at no charge, 'charge_failed', lock
+-- returned, slot free); or 'stuck' (the release failed too, e.g. a drifted lock: everything rolled back,
+-- the caller puts the hold back in line and skips it so the people behind it still step up).
 CREATE OR REPLACE FUNCTION public._floor_try_charge(p_hold_id uuid)
-RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
   BEGIN
     PERFORM public._charge_floor_hold(p_hold_id);
-    RETURN true;
+    RETURN 'charged';
   EXCEPTION WHEN others THEN
     RAISE WARNING 'floor charge failed for hold %: %', p_hold_id, SQLERRM;
   END;
-  PERFORM public._settle_floor_hold(p_hold_id, 0, 'charge_failed');
-  RETURN false;
+  BEGIN
+    PERFORM public._settle_floor_hold(p_hold_id, 0, 'charge_failed');
+    RETURN 'released';
+  EXCEPTION WHEN others THEN
+    RAISE WARNING 'floor charge-failed release also failed for hold %: %', p_hold_id, SQLERRM;
+    RETURN 'stuck';
+  END;
 END;
 $$;
 
@@ -195,6 +202,7 @@ DECLARE
   v_slot int;
   v_waiting int;
   v_secs int;
+  v_skip uuid[] := '{}';
   r RECORD;
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.spray_holds WHERE event_id = p_event_id AND status IN ('queued', 'on_floor')) THEN
@@ -251,7 +259,7 @@ BEGIN
     EXIT WHEN v_slot IS NULL;
 
     SELECT id, floor_band_seconds INTO r FROM public.spray_holds
-     WHERE event_id = p_event_id AND status = 'queued'
+     WHERE event_id = p_event_id AND status = 'queued' AND id <> ALL (v_skip)
      ORDER BY queued_at, id LIMIT 1 FOR UPDATE;
     EXIT WHEN NOT FOUND;
 
@@ -263,8 +271,14 @@ BEGIN
        SET status = 'on_floor', floor_slot = v_slot, floor_seconds = v_secs,
            floor_started_at = now(), floor_ends_at = now() + make_interval(secs => v_secs)
      WHERE id = r.id;
-    -- Paid in full on stepping on. A failure releases the hold and frees the slot for the next loop.
-    PERFORM public._floor_try_charge(r.id);
+    -- Paid in full on stepping on. A failure releases the hold and frees the slot for the next loop; if
+    -- even that fails, the hold goes back in line untouched and is skipped this pass (next advance retries).
+    IF public._floor_try_charge(r.id) = 'stuck' THEN
+      UPDATE public.spray_holds
+         SET status = 'queued', floor_slot = NULL, floor_seconds = NULL, floor_started_at = NULL, floor_ends_at = NULL
+       WHERE id = r.id;
+      v_skip := v_skip || r.id;
+    END IF;
     v_changed := true;
   END LOOP;
 

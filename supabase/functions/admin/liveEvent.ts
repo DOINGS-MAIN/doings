@@ -1,4 +1,5 @@
 import { withCors } from "../_shared/cors.ts";
+import { floorHoldMoney } from "../_shared/floorMoney.ts";
 import type { AdminRouteCtx } from "./payouts.ts";
 
 const EVENT_COLUMNS =
@@ -6,7 +7,7 @@ const EVENT_COLUMNS =
   "started_at, ended_at, scheduled_at";
 const HOLD_COLUMNS =
   "id, event_id, sprayer_id, planned_amount_kobo, denomination, note_count, status, floor_slot, floor_seconds, " +
-  "floor_started_at, floor_ends_at, queued_at, created_at, expires_at";
+  "floor_started_at, floor_ends_at, queued_at, created_at, expires_at, transfer_id, charged_amount_kobo";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // The floor functions' own refusals (shown to the admin as 409); anything else is a real failure (500).
@@ -16,13 +17,6 @@ const REFUSALS = [
 ];
 const rpcFailure = (message: string) =>
   withCors({ error: message }, { status: REFUSALS.some((r) => message.startsWith(r)) ? 409 : 500 });
-
-// Same rule as floor_charged_kobo (088): whole notes for the share of the turn already danced.
-function chargedSoFar(n: number, d: number, secs: number, startedAt: string | null): number {
-  if (!startedAt || !secs) return 0;
-  const ms = Math.min(Math.max(Date.now() - new Date(startedAt).getTime(), 0), secs * 1000);
-  return Math.floor((n * ms) / (secs * 1000)) * d * 100;
-}
 
 // One live event from the inside: who's on the dance floor, who's queued, other active sprays, and
 // floor control (advance a stuck floor; remove one spray using the floor's own settle rules).
@@ -47,14 +41,13 @@ export async function handleLiveEvent(ctx: AdminRouteCtx & { holdId?: string }):
       ((holdsRes.data ?? []) as Record<string, unknown>[]).map((h) => ({ ...h, user_id: h.sprayer_id })),
     )).map(({ user_phone: _p, user_email: _e, user_id: _u, ...h }) => h);
     const time = (v: unknown) => (v ? new Date(v as string).getTime() : 0);
+    const now = Date.now();
     const floor = named.filter((h) => h.status === "on_floor")
       .sort((a, b) => Number(a.floor_slot ?? 0) - Number(b.floor_slot ?? 0))
-      .map((h) => ({
-        ...h,
-        charged_so_far_kobo: chargedSoFar(
-          Number(h.note_count ?? 0), Number(h.denomination ?? 0), Number(h.floor_seconds ?? 0), (h.floor_started_at as string) ?? null,
-        ),
-      }));
+      .map((h) => {
+        const m = floorHoldMoney(h as Parameters<typeof floorHoldMoney>[0], now);
+        return { ...h, paid: m.paid, charged_so_far_kobo: m.charged_so_far_kobo };
+      });
     const queue = named.filter((h) => h.status === "queued").sort((a, b) => time(a.queued_at) - time(b.queued_at));
     const holds = named.filter((h) => h.status === "pending").sort((a, b) => time(a.created_at) - time(b.created_at));
 
@@ -63,7 +56,8 @@ export async function handleLiveEvent(ctx: AdminRouteCtx & { holdId?: string }):
       host: hostRes.data ?? null,
       totals: {
         holds_active: named.length,
-        held_kobo: named.reduce((s, h) => s + Number(h.planned_amount_kobo ?? 0), 0),
+        // Sprays paid on stepping onto the floor (101) aren't held any more; they're already in total_sprayed.
+        held_kobo: named.reduce((s, h) => s + floorHoldMoney(h as Parameters<typeof floorHoldMoney>[0], now).held_kobo, 0),
         sprayed_kobo: Number(event.total_sprayed ?? 0),
       },
       floor,

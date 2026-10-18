@@ -227,10 +227,16 @@ export const AdminLiveEvent = () => {
                 {f ? (
                   <>
                     <Link to={`/admin/users/${f.sprayerId}`} className="font-medium hover:underline">{f.name || f.sprayerId}</Link>
-                    <p>{naira(f.held)} held · {countdown(f.endsAt, now)} left</p>
-                    <p className="text-muted-foreground">
-                      Charged so far {naira(floorChargedSoFar(f.noteCount, f.denomination, f.seconds, f.startedAt, now))}
-                    </p>
+                    {f.paid ? (
+                      <p>{naira(f.chargedSoFar)} paid · {countdown(f.endsAt, now)} left</p>
+                    ) : (
+                      <>
+                        <p>{naira(f.held)} held · {countdown(f.endsAt, now)} left</p>
+                        <p className="text-muted-foreground">
+                          Charged so far {naira(floorChargedSoFar(f.noteCount, f.denomination, f.seconds, f.startedAt, now))}
+                        </p>
+                      </>
+                    )}
                     {canRemove && live && (
                       <Button variant="ghost" size="sm" className="mt-1 px-2 text-destructive"
                         onClick={() => setRemoving({ holdId: f.id, name: f.name, onFloor: true })}>
