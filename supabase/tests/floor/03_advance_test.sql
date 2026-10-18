@@ -72,7 +72,7 @@ BEGIN
   ASSERT r.status = 'released' AND r.release_reason = 'max_wait' AND r.charged_amount_kobo = 0, 'max wait release';
 END $$;
 
--- event ends: on-floor settled for elapsed time, queued released (Review Focus 2).
+-- event ends: on-floor (paid on the way in) finished with no money moving, queued released.
 DO $$
 DECLARE ev uuid := (SELECT v FROM t WHERE k = 'bev'); r record;
 BEGIN
@@ -83,7 +83,8 @@ BEGIN
   -- the end trigger settles the floor; an explicit advance afterwards has nothing left to do
   ASSERT NOT public.advance_event_floor(ev), 'already settled by the end trigger';
   SELECT * INTO r FROM public.spray_holds WHERE id = (SELECT v FROM t WHERE k = 'b2');
-  ASSERT r.status = 'settled' AND r.charged_amount_kobo = 1000000, format('half of 20 notes = 10 × ₦1,000, got %s', r.charged_amount_kobo);
+  ASSERT r.status = 'settled' AND r.charged_amount_kobo = 2000000 AND r.release_reason = 'event_ended_on_floor',
+    format('paid in full on stepping on, finished at the end, got %s/%s', r.status, r.charged_amount_kobo);
   SELECT * INTO r FROM public.spray_holds WHERE id = (SELECT v FROM t WHERE k = 'b20');
   ASSERT r.status = 'released' AND r.release_reason = 'event_ended', 'queue released at event end';
   ASSERT NOT EXISTS (SELECT 1 FROM public.spray_holds WHERE event_id = ev AND status IN ('queued', 'on_floor')), 'floor cleared';
@@ -106,7 +107,7 @@ END $$;
 -- cron backstop
 DO $$ BEGIN ASSERT public.advance_live_floors() >= 0, 'advance_live_floors runs'; END $$;
 
--- one settlement that fails (sprayer lost verification mid-turn) must not break the floor for everyone.
+-- a sprayer who loses verification mid-turn: their turn still ends normally (they paid on the way in).
 DO $$
 DECLARE host uuid; ev uuid; bad uuid; good uuid; hb uuid; hg uuid; i int; r record;
 BEGIN
@@ -117,12 +118,13 @@ BEGIN
   FOR i IN 1..7 LOOP PERFORM public.queue_floor_spray(ev, pg_temp.mk_user('iso-' || i || '@test.local', 10000000), 100000, 500, 2); END LOOP;
   good := pg_temp.mk_user('iso-good@test.local', 10000000);
   hg := public.queue_floor_spray(ev, good, 100000, 500, 2);   -- 9th, waiting
-  UPDATE public.users SET kyc_level = 0 WHERE id = bad;       -- debit_wallet will refuse
+  UPDATE public.users SET kyc_level = 0 WHERE id = bad;
   UPDATE public.spray_holds SET floor_started_at = now() - interval '61 seconds', floor_ends_at = now() - interval '1 second' WHERE id = hb;
-  PERFORM public.advance_event_floor(ev);                       -- must not raise
+  PERFORM public.advance_event_floor(ev);
   SELECT * INTO r FROM public.spray_holds WHERE id = hb;
-  ASSERT r.status = 'on_floor', 'the failed settlement is left for a later retry';
-  ASSERT (SELECT locked_balance FROM public.wallets WHERE user_id = bad AND currency = 'NGN') = 100000, 'its hold is intact';
+  ASSERT r.status = 'settled' AND r.charged_amount_kobo = 100000, 'turn ended; charged once, on the way in';
+  SELECT * INTO r FROM public.spray_holds WHERE id = hg;
+  ASSERT r.status = 'on_floor' AND r.transfer_id IS NOT NULL, 'next person stepped up and paid';
 END $$;
 
 SELECT 'advance tests passed' AS result;

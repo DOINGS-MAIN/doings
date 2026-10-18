@@ -59,44 +59,16 @@ BEGIN
   PERFORM public.leave_floor_queue((SELECT v FROM t WHERE k = 'ha'), (SELECT v FROM t WHERE k = 'a'));  -- no error the second time
 END $$;
 
--- stop on the floor: partial charge (60 s of 240 s = floor(62.5) = 62 notes), host credited, second stop a no-op
+-- Stop is retired (101): refused, and the spray is unchanged.
 DO $$
-DECLARE h uuid; r record; wa record; wh record;
+DECLARE h uuid;
 BEGIN
-  h := public.queue_floor_spray((SELECT v FROM t WHERE k = 'ev'), (SELECT v FROM t WHERE k = 'a'), 5000000, 200, 250);
-  UPDATE public.spray_holds SET status = 'released', floor_slot = NULL
-   WHERE event_id = (SELECT v FROM t WHERE k = 'ev') AND floor_slot = 8 AND status = 'on_floor';
-  UPDATE public.spray_holds SET status = 'on_floor', floor_slot = 8, floor_seconds = 240,
-         floor_started_at = now() - interval '60 seconds', floor_ends_at = now() + interval '180 seconds' WHERE id = h;
-  PERFORM public.stop_floor_spray(h, (SELECT v FROM t WHERE k = 'a'));
-  SELECT * INTO r FROM public.spray_holds WHERE id = h;
-  ASSERT r.status = 'settled' AND r.settlement_type = 'partial', 'partial';
-  ASSERT r.charged_amount_kobo = 1240000, format('62 notes of ₦200, got %s', r.charged_amount_kobo);
-  SELECT * INTO wa FROM pg_temp.wallet((SELECT v FROM t WHERE k = 'a'));
-  ASSERT wa.locked = 0 AND wa.balance = 10000000 - 1240000, 'sprayer charged 62 notes, rest unlocked';
-  SELECT * INTO wh FROM pg_temp.wallet((SELECT v FROM t WHERE k = 'host'));
-  ASSERT wh.balance = 1240000, 'host credited';
-  ASSERT EXISTS (SELECT 1 FROM public.spray_records WHERE event_id = (SELECT v FROM t WHERE k = 'ev')
-                   AND amount = 1240000 AND note_count = 62), 'spray record';
-  PERFORM public.stop_floor_spray(h, (SELECT v FROM t WHERE k = 'a'));
-  SELECT * INTO r FROM public.spray_holds WHERE id = h;
-  ASSERT r.charged_amount_kobo = 1240000, 'second stop changes nothing';
-END $$;
-
--- under one note at Stop: nothing charged, purse fully unlocked (Review Focus 5)
-DO $$
-DECLARE h uuid; r record; w record;
-BEGIN
-  h := public.queue_floor_spray((SELECT v FROM t WHERE k = 'ev'), (SELECT v FROM t WHERE k = 'b'), 20000, 200, 1);  -- one ₦200 note
-  UPDATE public.spray_holds SET status = 'released', floor_slot = NULL
-   WHERE event_id = (SELECT v FROM t WHERE k = 'ev') AND floor_slot = 8 AND status = 'on_floor' AND id <> h;
-  UPDATE public.spray_holds SET status = 'on_floor', floor_slot = 8, floor_seconds = 60,
-         floor_started_at = now() - interval '1 second', floor_ends_at = now() + interval '59 seconds' WHERE id = h;
-  PERFORM public.stop_floor_spray(h, (SELECT v FROM t WHERE k = 'b'));
-  SELECT * INTO r FROM public.spray_holds WHERE id = h;
-  ASSERT r.status = 'released' AND r.charged_amount_kobo = 0 AND r.release_reason IS NULL, 'under one note: nothing charged';
-  SELECT * INTO w FROM pg_temp.wallet((SELECT v FROM t WHERE k = 'b'));
-  ASSERT w.locked = 0 AND w.balance = 10000000, 'b fully unlocked';
+  h := public.queue_floor_spray((SELECT v FROM t WHERE k = 'ev'), (SELECT v FROM t WHERE k = 'a'), 5000000, 200, 250);  -- 9th, waits
+  BEGIN
+    PERFORM public.stop_floor_spray(h, (SELECT v FROM t WHERE k = 'a'));
+    RAISE EXCEPTION 'expected stop refusal';
+  EXCEPTION WHEN others THEN ASSERT SQLERRM = 'Sprays can''t be stopped once they start', SQLERRM; END;
+  ASSERT (SELECT status FROM public.spray_holds WHERE id = h) = 'queued', 'unchanged';
 END $$;
 
 SELECT 'queue/settle tests passed' AS result;

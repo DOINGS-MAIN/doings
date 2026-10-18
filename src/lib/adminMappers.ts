@@ -535,6 +535,7 @@ export function mapLiveEvent(res: Record<string, unknown>): AdminLiveEvent {
       startedAt: dateOr(f.floor_started_at),
       endsAt: dateOr(f.floor_ends_at),
       chargedSoFar: naira(f.charged_so_far_kobo),
+      paid: f.paid === true,
       noteCount: Number(f.note_count ?? 0),
       denomination: Number(f.denomination ?? 0),
     })),

@@ -26,7 +26,10 @@ export function parseFloorAction(body: Record<string, unknown>): FloorAction | {
   return { action, eventId: body.event_id, amount, denomination, pin: body.pin };
 }
 
+export const STOP_REFUSED = "Sprays can't be stopped once they start";
+
 export function floorErrorResponse(message: string): { status: number; error: string; code?: string } {
+  if (message.includes(STOP_REFUSED)) return { status: 409, error: STOP_REFUSED, code: "SPRAY_CANNOT_STOP" };
   if (message.includes("FLOOR_ALREADY_IN")) {
     return { status: 409, error: "You already have a spray in line or on the floor", code: "FLOOR_ALREADY_IN" };
   }

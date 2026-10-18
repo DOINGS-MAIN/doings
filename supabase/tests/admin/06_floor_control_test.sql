@@ -99,7 +99,8 @@ BEGIN
   ASSERT r->>'was_status' = 'on_floor', 'was on floor';
   ASSERT (r->>'charged_kobo')::bigint = expected AND expected > 0, 'charged for the time danced: ' || r::text;
   ASSERT pg_temp.bal(aw) = ab - expected AND pg_temp.lck(aw) = al - 200000, 'sprayer charged exactly, lock returned';
-  ASSERT pg_temp.bal(hw) = hb + expected, 'host paid exactly';
+  -- plus the next person's full spray, paid as they step into the freed slot (101)
+  ASSERT pg_temp.bal(hw) = hb + expected + 200000, 'host paid exactly: the time danced, then the next spray in full';
   ASSERT (SELECT release_reason FROM public.spray_holds WHERE id = h_floor) = 'removed_by_admin', 'reason on settled hold';
   ASSERT (SELECT status::text FROM public.spray_holds WHERE id = h_next) = 'on_floor', 'next person stepped up';
   ASSERT pg_temp.err(format(q, e_floor, h_floor, adm, 'again')) = 'This spray isn''t on the floor or in the queue', 'settled hold refused';

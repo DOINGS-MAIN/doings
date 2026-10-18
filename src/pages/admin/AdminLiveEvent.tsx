@@ -41,9 +41,13 @@ function RemoveDialog({
   const submit = async () => {
     setSaving(true);
     try {
-      const res = (await removeFloorHold(eventId, target.holdId, reason.trim())) as { charged_kobo?: number } | undefined;
+      const res = (await removeFloorHold(eventId, target.holdId, reason.trim())) as
+        { charged_kobo?: number; already_paid?: boolean } | undefined;
       const charged = Number(res?.charged_kobo ?? 0) / 100;
-      toast.success(charged > 0 ? `Removed — charged ${naira(charged)}` : "Removed — no charge");
+      toast.success(
+        res?.already_paid ? `Removed — their ${naira(charged)} spray had already gone to the host`
+          : charged > 0 ? `Removed — charged ${naira(charged)}` : "Removed — no charge",
+      );
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "That didn't work");
@@ -59,7 +63,7 @@ function RemoveDialog({
           <DialogTitle>Remove {target.name || "this person"} from the {target.onFloor ? "dance floor" : "queue"}</DialogTitle>
           <DialogDescription>
             {target.onFloor
-              ? "They're charged only for the time they danced; the host keeps that. The next person steps up."
+              ? "Ends their turn. Their spray has already gone to the host, so there's no refund."
               : "They're released with no charge."}
           </DialogDescription>
         </DialogHeader>
@@ -223,10 +227,16 @@ export const AdminLiveEvent = () => {
                 {f ? (
                   <>
                     <Link to={`/admin/users/${f.sprayerId}`} className="font-medium hover:underline">{f.name || f.sprayerId}</Link>
-                    <p>{naira(f.held)} held · {countdown(f.endsAt, now)} left</p>
-                    <p className="text-muted-foreground">
-                      Charged so far {naira(floorChargedSoFar(f.noteCount, f.denomination, f.seconds, f.startedAt, now))}
-                    </p>
+                    {f.paid ? (
+                      <p>{naira(f.chargedSoFar)} paid · {countdown(f.endsAt, now)} left</p>
+                    ) : (
+                      <>
+                        <p>{naira(f.held)} held · {countdown(f.endsAt, now)} left</p>
+                        <p className="text-muted-foreground">
+                          Charged so far {naira(floorChargedSoFar(f.noteCount, f.denomination, f.seconds, f.startedAt, now))}
+                        </p>
+                      </>
+                    )}
                     {canRemove && live && (
                       <Button variant="ghost" size="sm" className="mt-1 px-2 text-destructive"
                         onClick={() => setRemoving({ holdId: f.id, name: f.name, onFloor: true })}>
