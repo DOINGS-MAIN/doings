@@ -124,3 +124,11 @@ BEGIN
   ASSERT (SELECT balance FROM pg_temp.wallet(host)) = 200000, 'legacy paid the host';
   ASSERT (SELECT receiver_id FROM public.spray_records WHERE event_id = ev) = host, 'record names the host';
 END $$;
+
+-- F. the edge function (service_role) can still call the recreated queue function; clients cannot.
+DO $$
+BEGIN
+  ASSERT has_function_privilege('service_role', 'public.queue_floor_spray(uuid,uuid,bigint,int,int,uuid)', 'EXECUTE'), 'service_role may queue';
+  ASSERT NOT has_function_privilege('authenticated', 'public.queue_floor_spray(uuid,uuid,bigint,int,int,uuid)', 'EXECUTE'), 'clients may not';
+  ASSERT NOT has_function_privilege('anon', 'public.queue_floor_spray(uuid,uuid,bigint,int,int,uuid)', 'EXECUTE'), 'anon may not';
+END $$;

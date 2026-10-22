@@ -436,3 +436,6 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   LIMIT LEAST(GREATEST(COALESCE(p_limit, 25), 1), 100);
 $$;
 GRANT EXECUTE ON FUNCTION public.get_event_spray_feed(uuid, int) TO authenticated;
+
+-- Explicit, like the other money functions: the recreated queue function keeps service_role access (the edge function calls it).
+GRANT EXECUTE ON FUNCTION public.queue_floor_spray(uuid, uuid, bigint, int, int, uuid) TO service_role;
