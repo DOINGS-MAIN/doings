@@ -1,4 +1,5 @@
 /** Dance floor requests on the spray function (spec: DOINGSNEWFACE 2026-10-15-dance-floor-queue-design.md). */
+import { parseWholeAmount } from "./money.ts";
 export type FloorAction =
   | { action: "queue"; eventId: string; amount: number; denomination: 200 | 500 | 1000; pin: string }
   | { action: "stop" | "leave"; holdId: string };
@@ -18,8 +19,8 @@ export function parseFloorAction(body: Record<string, unknown>): FloorAction | {
   if (denomination !== 200 && denomination !== 500 && denomination !== 1000) {
     return { error: "denomination must be 200, 500, or 1000" };
   }
-  const amount = Number(body.amount);
-  if (!Number.isInteger(amount) || amount <= 0 || amount % denomination !== 0) {
+  const amount = parseWholeAmount(body.amount);
+  if (amount === null || amount % denomination !== 0) {
     return { error: "amount must be a positive multiple of the denomination" };
   }
   if (typeof body.pin !== "string") return { error: "pin is required" };

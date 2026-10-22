@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { koboToMajor, parseMajorAmount } from "../_shared/money.ts";
 import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { checkWithdrawalLimit } from "../_shared/limits.ts";
@@ -59,9 +60,10 @@ Deno.serve(async (req) => {
     return withCors({ error: "amount, bank_code, account_number, and account_name are required" }, { status: 400 });
   }
 
-  const amountKobo = Math.round(body.amount * 100);
+  const amountKobo = parseMajorAmount(body.amount, "NGN");
+  if (amountKobo === null) return withCors({ error: "amount must be a positive number" }, { status: 400 });
   if (amountKobo < NGN_WITHDRAWAL_MIN_KOBO) {
-    return withCors({ error: `Minimum withdrawal is ₦${NGN_WITHDRAWAL_MIN_KOBO / 100}` }, { status: 400 });
+    return withCors({ error: `Minimum withdrawal is ₦${koboToMajor(NGN_WITHDRAWAL_MIN_KOBO)}` }, { status: 400 });
   }
 
   const { allowed, reason } = await checkWithdrawalLimit(user.id, user.kyc_level, "NGN", amountKobo);
@@ -150,7 +152,7 @@ Deno.serve(async (req) => {
       eventType: "api_request",
       reference,
       requestSummary: {
-        amount_naira: amountKobo / 100,
+        amount_naira: koboToMajor(amountKobo),
         bank_code: body.bank_code,
         account_number: body.account_number,
       },
@@ -161,7 +163,7 @@ Deno.serve(async (req) => {
       providerId,
       env: platform.pspEnv,
       reference,
-      amountNaira: amountKobo / 100,
+      amountNaira: koboToMajor(amountKobo),
       destinationBankCode: body.bank_code,
       destinationAccountNumber: body.account_number,
       destinationAccountName: body.account_name,

@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { MICRO_PER_USDC, parseMajorAmount } from "../_shared/money.ts";
 import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { checkWithdrawalLimit } from "../_shared/limits.ts";
@@ -53,8 +54,9 @@ Deno.serve(async (req) => {
   if (network === "solana" && !isSolanaAddress(body.address)) {
     return withCors({ error: "Invalid Solana address" }, { status: 400 });
   }
-  const amountMicro = Math.round(body.amount * 1_000_000);
-  if (amountMicro < 1_000_000) return withCors({ error: "Minimum withdrawal is 1 USDC" }, { status: 400 });
+  const amountMicro = parseMajorAmount(body.amount, "USDC");
+  if (amountMicro === null) return withCors({ error: "amount must be a positive number" }, { status: 400 });
+  if (amountMicro < MICRO_PER_USDC) return withCors({ error: "Minimum withdrawal is 1 USDC" }, { status: 400 });
 
   const { allowed, reason } = await checkWithdrawalLimit(user.id, user.kyc_level, "USDC", amountMicro);
   if (!allowed) return withCors({ error: reason }, { status: 403 });

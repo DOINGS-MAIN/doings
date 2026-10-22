@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { parseMajorAmount } from "../_shared/money.ts";
 import { getAuthUserIdFromRequest, getServiceClient, resolveAppUserId } from "../_shared/db.ts";
 import { fetchBinanceUsdcNgnRateKobo } from "../_shared/fx/binance.ts";
 
@@ -85,8 +86,8 @@ Deno.serve(async (req) => {
     return withCors({ error: "side must be sell or buy" }, { status: 400 });
   }
 
-  const usdcMicro = Math.round(body.usdc_amount * 1_000_000);
-  if (usdcMicro <= 0) return withCors({ error: "usdc_amount must be positive" }, { status: 400 });
+  const usdcMicro = parseMajorAmount(body.usdc_amount, "USDC");
+  if (usdcMicro === null) return withCors({ error: "usdc_amount must be positive" }, { status: 400 });
 
   const refresh = await ensureFreshMarketRate(supabase);
 
