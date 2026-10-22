@@ -1,3 +1,4 @@
+import { koboToMajor } from "./money.ts";
 /** Deno mirror of src/lib/sprayTheatrePlan.ts — keep in sync. */
 
 export type SprayCurrency = "NGN" | "USDC";
@@ -58,7 +59,7 @@ export function parseSprayTheatreSettingsRow(row: Record<string, unknown>): Spra
     stage_min_per_100k_denom_500: Number(row.spray_stage_min_per_100k_denom_500 ?? 2.5),
     stage_min_per_100k_denom_1000: Number(row.spray_stage_min_per_100k_denom_1000 ?? 2),
     stage_min_per_100_usdc: Number(row.spray_stage_min_per_100_usdc ?? 4),
-    max_single_spray_ngn: maxKobo / 100,
+    max_single_spray_ngn: koboToMajor(maxKobo),
     max_single_spray_ngn_kobo: maxKobo,
     guest_session_cap_sec: Number(row.spray_guest_session_cap_sec ?? 180),
     max_stage_sec: Number(row.spray_max_stage_sec ?? 2700),

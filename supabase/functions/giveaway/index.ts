@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { parseMajorAmount } from "../_shared/money.ts";
 import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
@@ -281,8 +282,11 @@ Deno.serve(async (req) => {
       return withCors({ error: "title, total_amount, per_person_amount, and type are required" }, { status: 400 });
     }
 
-    const totalKobo = Math.round(body.total_amount * 100);
-    const perPersonKobo = Math.round(body.per_person_amount * 100);
+    const totalKobo = parseMajorAmount(body.total_amount, "NGN");
+    const perPersonKobo = parseMajorAmount(body.per_person_amount, "NGN");
+    if (totalKobo === null || perPersonKobo === null) {
+      return withCors({ error: "total_amount and per_person_amount must be positive numbers" }, { status: 400 });
+    }
 
     if (body.idempotency_key !== undefined && !CLIENT_IDEMPOTENCY_RE.test(String(body.idempotency_key))) {
       return withCors({ error: "Invalid idempotency_key" }, { status: 400 });

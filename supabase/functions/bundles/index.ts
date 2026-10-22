@@ -1,3 +1,4 @@
+import { parseWholeAmount } from "../_shared/money.ts";
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
@@ -34,8 +35,7 @@ function allowedOrigins(): string[] {
 }
 
 function parseBundles(raw: unknown): number | null {
-  const n = Number(raw);
-  return Number.isInteger(n) && n > 0 && n <= MAX_BUNDLES ? n : null;
+  return parseWholeAmount(raw, MAX_BUNDLES);
 }
 
 Deno.serve(async (req) => {

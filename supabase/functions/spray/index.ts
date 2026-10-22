@@ -1,5 +1,6 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { accountBlock } from "../_shared/account.ts";
+import { bundlesToKobo, koboToMajor, parseMajorAmount } from "../_shared/money.ts";
 import { getAuthUserIdFromRequest, getAuthedClient, getServiceClient } from "../_shared/db.ts";
 import { floorErrorResponse, floorRateLimit, parseFloorAction, STOP_REFUSED } from "../_shared/floor.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
@@ -53,12 +54,12 @@ function parseSprayBody(body: SprayBody) {
     return { error: withCors({ error: "denomination must be 200, 500, or 1000" }, { status: 400 }) };
   }
 
-  const amountKobo = Math.round(body.amount * 100);
-  if (amountKobo <= 0) {
+  const amountKobo = parseMajorAmount(body.amount, "NGN");
+  if (amountKobo === null) {
     return { error: withCors({ error: "amount must be positive" }, { status: 400 }) };
   }
 
-  const noteCount = amountKobo / (body.denomination * 100);
+  const noteCount = amountKobo / bundlesToKobo(body.denomination);
   if (!Number.isInteger(noteCount) || noteCount <= 0) {
     return { error: withCors({ error: "amount must be divisible by denomination" }, { status: 400 }) };
   }
@@ -135,7 +136,7 @@ async function settleHoldAndRespond(
     ok: true,
     settlement,
     transfer_id: transferId ?? null,
-    charged_amount: chargedKobo / 100,
+    charged_amount: koboToMajor(chargedKobo),
     theatre_plan: holdRow?.metadata ?? null,
   });
 }
@@ -156,7 +157,7 @@ async function handleFloorAction(
   let eventId: string;
   try {
     if (parsed.action === "queue") {
-      const amountKobo = parsed.amount * 100;
+      const amountKobo = bundlesToKobo(parsed.amount);
       const settings = await loadSprayTheatreSettings(supabase);
       if (amountKobo > settings.max_single_spray_ngn_kobo) {
         return withCors({
@@ -230,10 +231,11 @@ Deno.serve(async (req) => {
 
     let sprayedKobo = 0;
     if (body.settlement === "partial") {
-      if (body.sprayed_amount == null || body.sprayed_amount <= 0) {
+      const parsedSprayed = parseMajorAmount(body.sprayed_amount, "NGN");
+      if (parsedSprayed === null) {
         return withCors({ error: "sprayed_amount is required for partial settlement" }, { status: 400 });
       }
-      sprayedKobo = Math.round(body.sprayed_amount * 100);
+      sprayedKobo = parsedSprayed;
     }
 
     try {

@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { parseMajorAmount } from "../_shared/money.ts";
 import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient, resolveAppUserId } from "../_shared/db.ts";
 import { checkTransferLimit } from "../_shared/limits.ts";
@@ -64,11 +65,8 @@ Deno.serve(async (req) => {
   }
 
   /** Amount in major units (naira or USDC); converted to smallest unit server-side. */
-  const smallestUnit = currency === "NGN"
-    ? Math.round(body.amount * 100)
-    : Math.round(body.amount * 1_000_000);
-
-  if (smallestUnit <= 0) return withCors({ error: "amount must be positive" }, { status: 400 });
+  const smallestUnit = parseMajorAmount(body.amount, currency);
+  if (smallestUnit === null) return withCors({ error: "amount must be positive" }, { status: 400 });
 
   const { allowed, reason } = await checkTransferLimit(sender.id, sender.kyc_level, currency, smallestUnit);
   if (!allowed) return withCors({ error: reason }, { status: 403 });
