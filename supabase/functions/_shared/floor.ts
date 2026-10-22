@@ -1,7 +1,7 @@
 /** Dance floor requests on the spray function (spec: DOINGSNEWFACE 2026-10-15-dance-floor-queue-design.md). */
 import { parseWholeAmount } from "./money.ts";
 export type FloorAction =
-  | { action: "queue"; eventId: string; amount: number; denomination: 200 | 500 | 1000; pin: string }
+  | { action: "queue"; eventId: string; amount: number; denomination: 200 | 500 | 1000; pin: string; recipientId?: string }
   | { action: "stop" | "leave"; holdId: string };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -24,7 +24,14 @@ export function parseFloorAction(body: Record<string, unknown>): FloorAction | {
     return { error: "amount must be a positive multiple of the denomination" };
   }
   if (typeof body.pin !== "string") return { error: "pin is required" };
-  return { action, eventId: body.event_id, amount, denomination, pin: body.pin };
+  const rec = body.recipient_id;
+  if (rec !== undefined && rec !== null && (typeof rec !== "string" || !UUID.test(rec))) {
+    return { error: "recipient_id must be a valid id" };
+  }
+  return {
+    action, eventId: body.event_id, amount, denomination, pin: body.pin,
+    ...(typeof rec === "string" ? { recipientId: rec } : {}),
+  };
 }
 
 export const STOP_REFUSED = "Sprays can't be stopped once they start";
@@ -33,6 +40,9 @@ export function floorErrorResponse(message: string): { status: number; error: st
   if (message.includes(STOP_REFUSED)) return { status: 409, error: STOP_REFUSED, code: "SPRAY_CANNOT_STOP" };
   if (message.includes("FLOOR_ALREADY_IN")) {
     return { status: 409, error: "You already have a spray in line or on the floor", code: "FLOOR_ALREADY_IN" };
+  }
+  if (message.includes("CALLUP_RECIPIENT_INVALID")) {
+    return { status: 400, error: "That guest isn't called up any more", code: "CALLUP_RECIPIENT_INVALID" };
   }
   if (message.includes("Event is not live")) return { status: 400, error: "Event is not live", code: "EVENT_NOT_LIVE" };
   if (message.includes("Insufficient balance")) return { status: 400, error: "Insufficient balance" };

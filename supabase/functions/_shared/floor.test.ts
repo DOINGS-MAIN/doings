@@ -52,3 +52,22 @@ Deno.test("stop is refused with a 409 and a clear message", () => {
   assertEquals(floorErrorResponse(STOP_REFUSED), { status: 409, error: STOP_REFUSED, code: "SPRAY_CANNOT_STOP" });
   assertEquals(floorErrorResponse(`ERROR: ${STOP_REFUSED}`).status, 409);
 });
+
+Deno.test("parseFloorAction: queue with a recipient", () => {
+  const REC = "33333333-3333-4333-8333-333333333303";
+  assertEquals(parseFloorAction({ action: "queue", event_id: EV, amount: 50000, denomination: 200, pin: "1234", recipient_id: REC }), {
+    action: "queue", eventId: EV, amount: 50000, denomination: 200, pin: "1234", recipientId: REC,
+  });
+  assertEquals(parseFloorAction({ action: "queue", event_id: EV, amount: 50000, denomination: 200, pin: "1234", recipient_id: null }), {
+    action: "queue", eventId: EV, amount: 50000, denomination: 200, pin: "1234",
+  });
+  assertEquals(parseFloorAction({ action: "queue", event_id: EV, amount: 50000, denomination: 200, pin: "1234", recipient_id: "nope" }), {
+    error: "recipient_id must be a valid id",
+  });
+});
+
+Deno.test("floorErrorResponse: recipient no longer called up", () => {
+  assertEquals(floorErrorResponse("CALLUP_RECIPIENT_INVALID"), {
+    status: 400, error: "That guest isn't called up any more", code: "CALLUP_RECIPIENT_INVALID",
+  });
+});

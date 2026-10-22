@@ -196,3 +196,210 @@ GRANT EXECUTE ON FUNCTION public.cancel_call_up(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.respond_call_up(uuid, boolean) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.remove_call_up(uuid) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.accept_all_call_ups(uuid) TO authenticated;
+
+
+-- ── Part 2: the recipient of a floor spray ──
+ALTER TABLE public.spray_holds ADD COLUMN IF NOT EXISTS recipient_id uuid REFERENCES public.users(id);
+COMMENT ON COLUMN public.spray_holds.recipient_id IS 'Called-up guest who receives the spray; NULL = the event host.';
+
+DROP FUNCTION IF EXISTS public.queue_floor_spray(uuid, uuid, bigint, int, int);
+
+CREATE OR REPLACE FUNCTION public.queue_floor_spray(
+  p_event_id uuid, p_sprayer_id uuid, p_amount_kobo bigint, p_denomination int, p_note_count int,
+  p_recipient_id uuid DEFAULT NULL)
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_event RECORD;
+  v_wallet RECORD;
+  v_settings jsonb := public.floor_settings();
+  v_hold_id uuid;
+BEGIN
+  IF p_amount_kobo <= 0 THEN RAISE EXCEPTION 'Spray amount must be positive'; END IF;
+  IF p_denomination NOT IN (200, 500, 1000) THEN RAISE EXCEPTION 'Invalid denomination'; END IF;
+  IF p_note_count <= 0 OR p_amount_kobo <> p_denomination::bigint * 100 * p_note_count THEN
+    RAISE EXCEPTION 'amount must be divisible by denomination';
+  END IF;
+
+  SELECT id, host_id, status INTO v_event FROM public.events WHERE id = p_event_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Event not found'; END IF;
+  IF v_event.status <> 'live' THEN RAISE EXCEPTION 'Event is not live'; END IF;
+  IF v_event.host_id = p_sprayer_id THEN RAISE EXCEPTION 'Host cannot spray own event'; END IF;
+
+  -- The host, or a guest the host has called up (never the sprayer). Locked in here: removal later does not undo it.
+  IF p_recipient_id IS NOT NULL AND p_recipient_id <> v_event.host_id THEN
+    IF p_recipient_id = p_sprayer_id OR NOT EXISTS (
+         SELECT 1 FROM public.event_call_ups WHERE event_id = p_event_id AND guest_id = p_recipient_id AND status = 'accepted') THEN
+      RAISE EXCEPTION 'CALLUP_RECIPIENT_INVALID';
+    END IF;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM public.spray_holds WHERE event_id = p_event_id AND sprayer_id = p_sprayer_id
+                AND status IN ('queued', 'on_floor')) THEN
+    RAISE EXCEPTION 'FLOOR_ALREADY_IN';
+  END IF;
+
+  SELECT id, balance, locked_balance INTO v_wallet
+    FROM public.wallets WHERE user_id = p_sprayer_id AND currency = 'NGN' FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Wallet not found'; END IF;
+  IF v_wallet.balance - v_wallet.locked_balance < p_amount_kobo THEN RAISE EXCEPTION 'Insufficient balance'; END IF;
+
+  UPDATE public.wallets SET locked_balance = locked_balance + p_amount_kobo, updated_at = now() WHERE id = v_wallet.id;
+
+  BEGIN
+    INSERT INTO public.spray_holds (
+      event_id, sprayer_id, wallet_id, recipient_id, planned_amount_kobo, denomination, note_count, metadata,
+      status, queued_at, floor_band_seconds, expires_at)
+    VALUES (
+      p_event_id, p_sprayer_id, v_wallet.id, NULLIF(p_recipient_id, v_event.host_id), p_amount_kobo, p_denomination, p_note_count, '{"floor": true}'::jsonb,
+      'queued', clock_timestamp(), public.floor_band_seconds(v_settings, p_amount_kobo),
+      now() + make_interval(secs => (v_settings->>'max_wait_seconds')::int))
+    RETURNING id INTO v_hold_id;
+  EXCEPTION WHEN unique_violation THEN
+    RAISE EXCEPTION 'FLOOR_ALREADY_IN';
+  END;
+
+  PERFORM public.advance_event_floor(p_event_id);
+  PERFORM public._floor_ping(p_event_id);
+  RETURN v_hold_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public._charge_floor_hold(p_hold_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_hold RECORD;
+  v_host uuid;
+  v_receiver_wallet uuid;
+  v_transfer_id uuid;
+  v_sender_txn_id uuid;
+  v_receiver_txn_id uuid;
+  v_idem_key text;
+  v_metadata jsonb;
+BEGIN
+  SELECT * INTO v_hold FROM public.spray_holds WHERE id = p_hold_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Spray hold not found'; END IF;
+  IF v_hold.status <> 'on_floor' OR v_hold.transfer_id IS NOT NULL THEN RETURN; END IF;
+
+  PERFORM 1 FROM public.wallets WHERE id = v_hold.wallet_id FOR UPDATE;
+  -- Release the hold before the debit so the available balance includes the reserved funds.
+  UPDATE public.wallets
+     SET locked_balance = locked_balance - v_hold.planned_amount_kobo, updated_at = now()
+   WHERE id = v_hold.wallet_id;
+
+  -- The recipient is the called-up guest chosen at PIN, else the host (also for holds from before 104).
+  SELECT COALESCE(v_hold.recipient_id, host_id) INTO v_host FROM public.events WHERE id = v_hold.event_id;
+  SELECT id INTO v_receiver_wallet FROM public.wallets WHERE user_id = v_host AND currency = 'NGN';
+  IF v_receiver_wallet IS NULL THEN RAISE EXCEPTION 'Receiver wallet not found'; END IF;
+
+  v_idem_key := 'spray-hold-' || p_hold_id::text;
+  v_metadata := v_hold.metadata || jsonb_build_object(
+    'hold_id', p_hold_id, 'recipient_id', v_host, 'settlement', 'full', 'floor', true, 'charged_at', 'floor_entry',
+    'planned_amount_kobo', v_hold.planned_amount_kobo, 'charged_amount_kobo', v_hold.planned_amount_kobo,
+    'floor_seconds', v_hold.floor_seconds);
+
+  v_sender_txn_id := public.debit_wallet(
+    v_hold.wallet_id, v_hold.sprayer_id, v_hold.planned_amount_kobo, 0, 'spray',
+    'Spray at event ' || v_hold.event_id::text || ' (sent)', 'internal', v_idem_key || '-send', v_metadata);
+
+  v_receiver_txn_id := public.credit_wallet(
+    v_receiver_wallet, v_host, v_hold.planned_amount_kobo, 0, 'receive',
+    'Spray at event ' || v_hold.event_id::text || ' (received)', 'internal', NULL, v_idem_key || '-recv', v_metadata);
+
+  INSERT INTO public.transfers (
+    sender_wallet_id, receiver_wallet_id, sender_user_id, receiver_user_id, currency, amount, fee,
+    status, sender_transaction_id, receiver_transaction_id, description)
+  SELECT v_hold.wallet_id, v_receiver_wallet, v_hold.sprayer_id, v_host, w.currency, v_hold.planned_amount_kobo, 0,
+         'completed', v_sender_txn_id, v_receiver_txn_id, 'Spray at event ' || v_hold.event_id::text
+    FROM public.wallets w WHERE w.id = v_hold.wallet_id
+  RETURNING id INTO v_transfer_id;
+
+  INSERT INTO public.spray_records (event_id, sprayer_id, receiver_id, transaction_id, amount, denomination, note_count, metadata)
+  VALUES (v_hold.event_id, v_hold.sprayer_id, v_host, v_sender_txn_id, v_hold.planned_amount_kobo, v_hold.denomination,
+          v_hold.note_count, COALESCE(v_metadata, '{}'::jsonb));
+
+  UPDATE public.spray_holds
+     SET charged_amount_kobo = v_hold.planned_amount_kobo, settlement_type = 'full', transfer_id = v_transfer_id
+   WHERE id = p_hold_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public._settle_floor_hold(p_hold_id uuid, p_charged_kobo bigint, p_release_reason text DEFAULT NULL)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_hold RECORD;
+  v_host uuid;
+  v_receiver_wallet uuid;
+  v_transfer_id uuid;
+  v_sender_txn_id uuid;
+  v_receiver_txn_id uuid;
+  v_idem_key text;
+  v_note_count int;
+  v_metadata jsonb;
+  v_settlement public.spray_settlement_type;
+BEGIN
+  SELECT * INTO v_hold FROM public.spray_holds WHERE id = p_hold_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Spray hold not found'; END IF;
+  IF v_hold.status NOT IN ('queued', 'on_floor') THEN RETURN; END IF;
+  IF p_charged_kobo IS NULL OR p_charged_kobo < 0 OR p_charged_kobo > v_hold.planned_amount_kobo
+     OR p_charged_kobo % (v_hold.denomination * 100) <> 0 THEN
+    RAISE EXCEPTION 'Invalid floor charge';
+  END IF;
+  IF v_hold.transfer_id IS NOT NULL THEN RAISE EXCEPTION 'Floor spray already charged'; END IF;
+  IF v_hold.status = 'queued' AND p_charged_kobo <> 0 THEN RAISE EXCEPTION 'Queued spray cannot be charged'; END IF;
+
+  PERFORM 1 FROM public.wallets WHERE id = v_hold.wallet_id FOR UPDATE;
+
+  -- Release the hold before the debit so the available balance includes the reserved funds.
+  UPDATE public.wallets
+     SET locked_balance = locked_balance - v_hold.planned_amount_kobo, updated_at = now()
+   WHERE id = v_hold.wallet_id;
+
+  IF p_charged_kobo = 0 THEN
+    UPDATE public.spray_holds
+       SET status = 'released', settlement_type = 'cancelled', charged_amount_kobo = 0,
+           release_reason = p_release_reason, settled_at = now()
+     WHERE id = p_hold_id;
+    RETURN;
+  END IF;
+
+  -- The recipient is the called-up guest chosen at PIN, else the host (also for holds from before 104).
+  SELECT COALESCE(v_hold.recipient_id, host_id) INTO v_host FROM public.events WHERE id = v_hold.event_id;
+  SELECT id INTO v_receiver_wallet FROM public.wallets WHERE user_id = v_host AND currency = 'NGN';
+  IF v_receiver_wallet IS NULL THEN RAISE EXCEPTION 'Receiver wallet not found'; END IF;
+
+  v_settlement := CASE WHEN p_charged_kobo = v_hold.planned_amount_kobo THEN 'full' ELSE 'partial' END;
+  v_note_count := p_charged_kobo / (v_hold.denomination * 100);
+  v_idem_key := 'spray-hold-' || p_hold_id::text;
+  v_metadata := v_hold.metadata || jsonb_build_object(
+    'hold_id', p_hold_id, 'recipient_id', v_host, 'settlement', v_settlement::text, 'floor', true,
+    'planned_amount_kobo', v_hold.planned_amount_kobo, 'charged_amount_kobo', p_charged_kobo,
+    'floor_seconds', v_hold.floor_seconds);
+
+  v_sender_txn_id := public.debit_wallet(
+    v_hold.wallet_id, v_hold.sprayer_id, p_charged_kobo, 0, 'spray',
+    'Spray at event ' || v_hold.event_id::text || ' (sent)', 'internal', v_idem_key || '-send', v_metadata);
+
+  v_receiver_txn_id := public.credit_wallet(
+    v_receiver_wallet, v_host, p_charged_kobo, 0, 'receive',
+    'Spray at event ' || v_hold.event_id::text || ' (received)', 'internal', NULL, v_idem_key || '-recv', v_metadata);
+
+  INSERT INTO public.transfers (
+    sender_wallet_id, receiver_wallet_id, sender_user_id, receiver_user_id, currency, amount, fee,
+    status, sender_transaction_id, receiver_transaction_id, description)
+  SELECT v_hold.wallet_id, v_receiver_wallet, v_hold.sprayer_id, v_host, w.currency, p_charged_kobo, 0,
+         'completed', v_sender_txn_id, v_receiver_txn_id, 'Spray at event ' || v_hold.event_id::text
+    FROM public.wallets w WHERE w.id = v_hold.wallet_id
+  RETURNING id INTO v_transfer_id;
+
+  INSERT INTO public.spray_records (event_id, sprayer_id, receiver_id, transaction_id, amount, denomination, note_count, metadata)
+  VALUES (v_hold.event_id, v_hold.sprayer_id, v_host, v_sender_txn_id, p_charged_kobo, v_hold.denomination, v_note_count,
+          COALESCE(v_metadata, '{}'::jsonb));
+
+  UPDATE public.spray_holds
+     SET status = 'settled', settlement_type = v_settlement, charged_amount_kobo = p_charged_kobo,
+         transfer_id = v_transfer_id, release_reason = NULL, settled_at = now()
+   WHERE id = p_hold_id;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.queue_floor_spray(uuid, uuid, bigint, int, int, uuid) FROM PUBLIC, anon, authenticated;

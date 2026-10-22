@@ -173,6 +173,7 @@ async function handleFloorAction(
         p_amount_kobo: amountKobo,
         p_denomination: parsed.denomination,
         p_note_count: parsed.amount / parsed.denomination,
+        p_recipient_id: parsed.recipientId ?? null,
       });
       if (error) throw new Error(error.message);
       eventId = parsed.eventId;
