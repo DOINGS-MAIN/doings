@@ -47,7 +47,7 @@ BEGIN
 
   IF v_member THEN
     SELECT COALESCE(jsonb_agg(jsonb_build_object(
-             'id', u.id,
+             'call_up_id', c.id, 'id', u.id,
              'name', COALESCE(NULLIF(trim(u.full_name), ''), NULLIF(trim(u.username), ''), 'Guest'),
              'username', u.username, 'avatar_url', u.avatar_url) ORDER BY c.responded_at), '[]'::jsonb)
       INTO v_called

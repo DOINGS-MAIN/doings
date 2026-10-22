@@ -39,6 +39,7 @@ BEGIN
   PERFORM pg_temp.auth_as(g2);
   st := public.get_call_ups(ev);
   ASSERT jsonb_array_length(st->'called_up') = 1 AND st->'called_up'->0->>'id' = g1::text, 'g2 sees g1 called up';
+  ASSERT (st->'called_up'->0->>'call_up_id')::uuid = cid, 'called_up carries the call_up_id (host needs it to remove)';
   PERFORM pg_temp.auth_as(g1);
   ASSERT public.get_call_ups(ev)->'me'->>'status' = 'accepted', 'g1 accepted';
 
