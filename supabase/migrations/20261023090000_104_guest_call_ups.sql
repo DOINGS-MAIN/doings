@@ -99,6 +99,8 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM public.event_participants WHERE event_id = p_event_id AND user_id = v_me) THEN
     RAISE EXCEPTION 'CALLUP_NOT_JOINED';
   END IF;
+  -- A verified email is compulsory: crediting a wallet needs it, so an unverified guest could never be paid.
+  IF COALESCE((SELECT kyc_level FROM public.users WHERE id = v_me), 0) < 1 THEN RAISE EXCEPTION 'CALLUP_NOT_VERIFIED'; END IF;
 
   -- One request at a time per guest and event, so double taps and the throttle count are exact.
   PERFORM pg_advisory_xact_lock(hashtextextended(p_event_id::text || v_me::text, 0));
@@ -439,3 +441,17 @@ GRANT EXECUTE ON FUNCTION public.get_event_spray_feed(uuid, int) TO authenticate
 
 -- Explicit, like the other money functions: the recreated queue function keeps service_role access (the edge function calls it).
 GRANT EXECUTE ON FUNCTION public.queue_floor_spray(uuid, uuid, bigint, int, int, uuid) TO service_role;
+
+-- ── Part 4: what the host actually received (sprays paid to the host); the event total counts every spray ──
+CREATE OR REPLACE FUNCTION public.get_event_host_received(p_event_id uuid) RETURNS bigint
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE v_host uuid;
+BEGIN
+  SELECT host_id INTO v_host FROM public.events WHERE id = p_event_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Event not found'; END IF;
+  IF v_host IS DISTINCT FROM public._call_up_user() THEN RAISE EXCEPTION 'CALLUP_NOT_HOST'; END IF;
+  RETURN COALESCE((SELECT sum(amount) FROM public.spray_records WHERE event_id = p_event_id AND receiver_id = v_host), 0)::bigint;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.get_event_host_received(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_event_host_received(uuid) TO authenticated;

@@ -74,6 +74,11 @@ BEGIN
   ASSERT pg_temp.err(format('SELECT public.request_call_up(%L)', ev)) = 'CALLUP_HOST', 'host cannot request';
   PERFORM pg_temp.auth_as(outsider);
   ASSERT pg_temp.err(format('SELECT public.request_call_up(%L)', ev)) = 'CALLUP_NOT_JOINED', 'outsider cannot request';
+  -- a verified email is compulsory
+  UPDATE public.users SET kyc_level = 0 WHERE id = g3;
+  PERFORM pg_temp.auth_as(g3);
+  ASSERT pg_temp.err(format('SELECT public.request_call_up(%L)', ev)) = 'CALLUP_NOT_VERIFIED', 'unverified email cannot request';
+  PERFORM pg_temp.auth_as(outsider);
   ev2 := pg_temp.mk_event(host);
   INSERT INTO public.event_participants (event_id, user_id) VALUES (ev2, outsider);
   UPDATE public.events SET status = 'ended' WHERE id = ev2;
