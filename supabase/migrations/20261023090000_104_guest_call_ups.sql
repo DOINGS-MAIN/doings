@@ -403,3 +403,36 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.queue_floor_spray(uuid, uuid, bigint, int, int, uuid) FROM PUBLIC, anon, authenticated;
+
+-- ── Part 3: the spray feed names who received each spray, and the receiver can see sprays paid to them ──
+-- (056's definition plus receiver columns. Top gifters stays as is: it ranks sprayers, which is unchanged.)
+DROP FUNCTION IF EXISTS public.get_event_spray_feed(uuid, int);
+CREATE FUNCTION public.get_event_spray_feed(p_event_id uuid, p_limit int DEFAULT 25)
+RETURNS TABLE (
+  id uuid, amount bigint, denomination int, sprayed_at timestamptz,
+  sprayer_name text, sprayer_username text, sprayer_avatar_url text, sprayer_avatar_data jsonb, hold_id text,
+  receiver_name text, receiver_username text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT
+    sr.id, sr.amount, sr.denomination, sr.sprayed_at,
+    COALESCE(NULLIF(trim(u.full_name), ''), NULLIF(trim(u.username), ''), 'Guest') AS sprayer_name,
+    u.username AS sprayer_username,
+    u.avatar_url AS sprayer_avatar_url,
+    COALESCE(u.avatar_data, '{}'::jsonb) AS sprayer_avatar_data,
+    sr.metadata->>'hold_id' AS hold_id,
+    COALESCE(NULLIF(trim(ru.full_name), ''), NULLIF(trim(ru.username), ''), 'Guest') AS receiver_name,
+    ru.username AS receiver_username
+  FROM public.spray_records sr
+  JOIN public.events e ON e.id = sr.event_id
+  JOIN public.users u ON u.id = sr.sprayer_id
+  LEFT JOIN public.users ru ON ru.id = sr.receiver_id
+  WHERE sr.event_id = p_event_id
+    AND (
+      e.host_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid())
+      OR sr.sprayer_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid())
+      OR sr.receiver_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid())
+    )
+  ORDER BY sr.sprayed_at DESC
+  LIMIT LEAST(GREATEST(COALESCE(p_limit, 25), 1), 100);
+$$;
+GRANT EXECUTE ON FUNCTION public.get_event_spray_feed(uuid, int) TO authenticated;
