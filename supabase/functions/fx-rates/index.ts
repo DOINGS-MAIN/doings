@@ -40,6 +40,17 @@ Deno.serve(async (req) => {
 
     if (error) throw error;
 
+    // The database refuses an automatic rate that jumped too far (migration 107); say so plainly.
+    if ((data as { rejected?: boolean } | null)?.rejected === true) {
+      return withCors({
+        ok: false,
+        rejected: true,
+        error: "The fetched rate is too far from the rate in force and was not applied. Set a manual rate if the market really moved.",
+        offered_rate_kobo: marketRateKobo,
+        ...(data as Record<string, unknown>),
+      }, { status: 409 });
+    }
+
     return withCors({
       ok: true,
       market_rate_kobo: marketRateKobo,

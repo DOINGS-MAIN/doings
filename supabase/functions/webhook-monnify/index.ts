@@ -1,8 +1,7 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { sha512Hex } from "../_shared/crypto.ts";
 import { getServiceClient } from "../_shared/db.ts";
-import { isSamePersonName } from "../_shared/name-match.ts";
-import { insertWebhookLog, markWebhookProcessed } from "../_shared/webhook.ts";
+import { insertWebhookLog, markWebhookProcessed, safeProviderRef } from "../_shared/webhook.ts";
 import { applyWithdrawalStatus } from "../_shared/psp/withdrawalFinalize.ts";
 
 type PaymentSource = {
@@ -22,12 +21,6 @@ type MonnifyEventData = {
   customerName?: string;
   paymentSourceInformation?: PaymentSource[];
 };
-
-function toKobo(amount: number | string | undefined): number {
-  const parsed = Number(amount ?? 0);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-  return Math.round(parsed * 100);
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -77,13 +70,14 @@ Deno.serve(async (req) => {
 
     // Handle disbursement callbacks (withdrawal completion/failure)
     if (eventType === "SUCCESSFUL_DISBURSEMENT" || eventType === "FAILED_DISBURSEMENT") {
-      const ref = eventData.transactionReference ?? eventData.paymentReference;
+      const ref = safeProviderRef(String(eventData.transactionReference ?? eventData.paymentReference ?? ""));
       if (ref) {
         const supabase = getServiceClient();
         const { data: txn } = await supabase
           .from("transactions")
           .select("id, provider, provider_ref, idempotency_key, status")
           .eq("type", "withdrawal")
+          .eq("provider", "monnify")
           .in("status", ["pending", "processing"])
           .or(`provider_ref.eq.${ref},idempotency_key.eq.${ref}`)
           .maybeSingle();
@@ -106,75 +100,9 @@ Deno.serve(async (req) => {
       return withCors({ ok: true });
     }
 
-    if (eventType !== "SUCCESSFUL_TRANSACTION" || eventData.paymentStatus !== "PAID") {
-      await markWebhookProcessed(logId);
-      return withCors({ ok: true, skipped: true });
-    }
-
-    const accountReference = eventData.accountReference;
-    const transactionReference = eventData.transactionReference;
-    if (!accountReference || !transactionReference) {
-      await markWebhookProcessed(logId, "Missing accountReference or transactionReference");
-      return withCors({ error: "Invalid Monnify event payload" }, { status: 400 });
-    }
-
-    const amountKobo = toKobo(eventData.amountPaid);
-    if (amountKobo <= 0) {
-      await markWebhookProcessed(logId, "Invalid amountPaid");
-      return withCors({ error: "Invalid amountPaid" }, { status: 400 });
-    }
-
-    const supabase = getServiceClient();
-    const { data: monnifyAccount, error: monnifyErr } = await supabase
-      .from("reserved_accounts")
-      .select("wallet_id, user_id")
-      .eq("account_reference", accountReference)
-      .eq("provider_id", "monnify")
-      .single();
-
-    if (monnifyErr || !monnifyAccount) {
-      await markWebhookProcessed(logId, `Account reference not found: ${accountReference}`);
-      return withCors({ error: "Account reference not found" }, { status: 404 });
-    }
-
-    // AML: verify sender name matches the account holder's BVN-verified name
-    const payerName =
-      eventData.paymentSourceInformation?.[0]?.accountName ?? eventData.customerName ?? "";
-    if (payerName) {
-      const { data: owner } = await supabase
-        .from("users")
-        .select("full_name")
-        .eq("id", monnifyAccount.user_id)
-        .single();
-
-      if (owner?.full_name && !isSamePersonName(owner.full_name, payerName)) {
-        await markWebhookProcessed(logId, `AML name mismatch: payer="${payerName}" owner="${owner.full_name}"`);
-        return withCors({ error: "Deposit rejected: sender name does not match account holder" }, { status: 403 });
-      }
-    }
-
-    const { error: creditErr } = await supabase.rpc("credit_wallet", {
-      p_wallet_id: monnifyAccount.wallet_id,
-      p_user_id: monnifyAccount.user_id,
-      p_amount: amountKobo,
-      p_fee: 0,
-      p_type: "deposit",
-      p_description: "Monnify bank transfer deposit",
-      p_provider: "monnify",
-      p_provider_ref: transactionReference,
-      p_idempotency_key: `monnify:${transactionReference}`,
-      p_metadata: {
-        event_type: eventType,
-        payment_reference: eventData.paymentReference ?? null,
-        account_reference: accountReference,
-        paid_on: eventData.paidOn ?? null,
-      },
-    });
-
-    if (creditErr) throw creditErr;
-
+    // Bank transfers into per-user reserved accounts are no longer credited (2026-11).
     await markWebhookProcessed(logId);
-    return withCors({ ok: true });
+    return withCors({ ok: true, skipped: true });
   } catch (error) {
     if (logId) await markWebhookProcessed(logId, String(error));
     return withCors({ error: "Failed to process webhook" }, { status: 500 });

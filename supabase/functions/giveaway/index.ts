@@ -131,6 +131,11 @@ Deno.serve(async (req) => {
   }
 
   if (req.method === "GET" && action === "get_by_code" && id) {
+    // Each lookup is a guess at a code; without a count the 6 characters can be searched.
+    const lookups = await checkRateLimit(RATE_LIMITS.giveawayLookup(user.id));
+    if (!lookups.allowed) {
+      return withCors({ error: "Too many lookups. Try again shortly." }, { status: 429 });
+    }
     const { data, error } = await supabase
       .from("giveaways")
       .select(

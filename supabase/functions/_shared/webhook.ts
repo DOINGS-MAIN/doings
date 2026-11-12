@@ -1,16 +1,12 @@
 import { getServiceClient } from "./db.ts";
+import { UNVERIFIED_ROWS_PER_HOUR, webhookLogRow, type WebhookLogInput } from "./webhookLog.ts";
 
-export async function insertWebhookLog(params: {
-  provider: string;
-  payload: unknown;
-  headers: Record<string, string>;
-  signature: string | null;
-  signatureValid: boolean;
-  idempotencyKey: string | null;
-  eventType: string | null;
-}) {
+export { safeProviderRef } from "./webhookLog.ts";
+
+/** `id` is "" when an unverified request was not logged (flood guard); nothing more should happen to it. */
+export async function insertWebhookLog(params: WebhookLogInput) {
   const supabase = getServiceClient();
-  if (params.idempotencyKey) {
+  if (params.signatureValid && params.idempotencyKey) {
     const { data: existing } = await supabase
       .from("webhook_logs")
       .select("id, processed")
@@ -24,17 +20,19 @@ export async function insertWebhookLog(params: {
     }
   }
 
+  if (!params.signatureValid) {
+    // Anyone can post here; a flood must not fill the table.
+    const { data: allowed } = await supabase.rpc("consume_rate_limit", {
+      p_key: `webhook-unverified:${params.provider}`,
+      p_max: UNVERIFIED_ROWS_PER_HOUR,
+      p_window_seconds: 3600,
+    });
+    if (allowed === false) return { id: "", duplicate: false, alreadyProcessed: false };
+  }
+
   const { data, error } = await supabase
     .from("webhook_logs")
-    .insert({
-      provider: params.provider,
-      payload: params.payload,
-      headers: params.headers,
-      signature: params.signature,
-      signature_valid: params.signatureValid,
-      idempotency_key: params.idempotencyKey,
-      event_type: params.eventType,
-    })
+    .insert(webhookLogRow(params))
     .select("id")
     .single();
 
@@ -43,6 +41,7 @@ export async function insertWebhookLog(params: {
 }
 
 export async function markWebhookProcessed(id: string, errorMessage?: string) {
+  if (!id) return; // an unlogged, unverified request
   const supabase = getServiceClient();
   const patch = errorMessage
     ? { processed: false, processing_error: errorMessage }

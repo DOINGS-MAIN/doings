@@ -4,7 +4,7 @@
  */
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { getServiceClient } from "../_shared/db.ts";
-import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
+import { checkRateLimitInMemory, RATE_LIMITS } from "../_shared/rate-limit.ts";
 
 function clientIp(req: Request): string {
   const forwarded = req.headers.get("x-forwarded-for");
@@ -45,7 +45,7 @@ Deno.serve(async (req) => {
 
   const ip = clientIp(req);
   const limit = RATE_LIMITS.publicProjector(`${ip}:${event.id}`);
-  const rate = await checkRateLimit(limit);
+  const rate = checkRateLimitInMemory(limit);
   if (!rate.allowed) {
     return withCors(
       {

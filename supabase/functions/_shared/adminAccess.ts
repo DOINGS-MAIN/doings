@@ -148,6 +148,15 @@ export function failedResolutionGate(
   return { action: "proceed" };
 }
 
+// Marking a payout failed refunds the user. While the provider has no final answer (or cannot be asked,
+// as with USDC), the transfer may still land, so a refund by hand waits until the payout is a day old.
+const MANUAL_FAIL_AFTER_MS = 24 * 60 * 60 * 1000;
+export function manualFailTooEarly(createdAt: string | null | undefined, nowMs: number): string | null {
+  const created = createdAt ? Date.parse(createdAt) : NaN;
+  if (Number.isFinite(created) && nowMs - created >= MANUAL_FAIL_AFTER_MS) return null;
+  return "The provider has not given a final answer yet. A payout can be marked failed by hand once it is 24 hours old.";
+}
+
 export type User360Sections = { profile: boolean; actions: boolean; kyc: boolean; money: boolean; security: boolean; activity: boolean };
 
 // Which parts of a user's 360 page a role may see; the server leaves the rest out of the response.

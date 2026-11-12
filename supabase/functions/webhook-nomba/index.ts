@@ -1,7 +1,6 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { getServiceClient } from "../_shared/db.ts";
-import { insertWebhookLog, markWebhookProcessed } from "../_shared/webhook.ts";
-import { creditInboundDeposit } from "../_shared/walletInboundCredit.ts";
+import { insertWebhookLog, markWebhookProcessed, safeProviderRef } from "../_shared/webhook.ts";
 import { applyWithdrawalStatus } from "../_shared/psp/withdrawalFinalize.ts";
 import { mapNombaTransferStatus } from "../_shared/psp/pspStatus.ts";
 import { verifyNombaWebhookSignature } from "../_shared/nombaWebhookSignature.ts";
@@ -12,14 +11,6 @@ function pickString(obj: Record<string, unknown>, keys: string[]): string {
     if (v != null && String(v).trim()) return String(v).trim();
   }
   return "";
-}
-
-function pickNumber(obj: Record<string, unknown>, keys: string[]): number {
-  for (const k of keys) {
-    const v = obj[k];
-    if (v != null && !Number.isNaN(Number(v))) return Number(v);
-  }
-  return 0;
 }
 
 function nombaEventData(data: Record<string, unknown>): Record<string, unknown> {
@@ -51,6 +42,10 @@ Deno.serve(async (req) => {
   if (!raw.trim()) {
     return withCors({ ok: true, message: "ready" });
   }
+  // Fail closed: with no secret nothing can be verified, so nothing is processed.
+  if (!webhookSecret) {
+    return withCors({ error: "NOMBA_WEBHOOK_SECRET not configured" }, { status: 500 });
+  }
 
   let payload: Record<string, unknown>;
   try {
@@ -64,9 +59,7 @@ Deno.serve(async (req) => {
   const fields = nombaEventData(data);
   const idempotencyKey = pickString(fields, ["orderReference", "merchantTxRef", "reference", "transactionId", "id"]);
 
-  const signatureValid = webhookSecret
-    ? await verifyNombaWebhookSignature({ rawBody: raw, signature, timestamp, secret: webhookSecret })
-    : null;
+  const signatureValid = await verifyNombaWebhookSignature({ rawBody: raw, signature, timestamp, secret: webhookSecret });
 
   let logId = "";
   try {
@@ -75,7 +68,7 @@ Deno.serve(async (req) => {
       payload,
       headers: Object.fromEntries(req.headers.entries()),
       signature,
-      signatureValid: signatureValid ?? false,
+      signatureValid,
       idempotencyKey: idempotencyKey || null,
       eventType,
     });
@@ -84,19 +77,17 @@ Deno.serve(async (req) => {
       return withCors({ ok: true, duplicate: true });
     }
 
-    if (webhookSecret) {
-      if (!signature?.trim()) {
-        if (!eventType) {
-          await markWebhookProcessed(logId, "Validation probe (no signature)");
-          return withCors({ ok: true, message: "ready" });
-        }
-        await markWebhookProcessed(logId, "Missing nomba-signature header");
-        return withCors({ error: "Missing signature" }, { status: 401 });
+    if (!signature?.trim()) {
+      if (!eventType) {
+        await markWebhookProcessed(logId, "Validation probe (no signature)");
+        return withCors({ ok: true, message: "ready" });
       }
-      if (signatureValid === false) {
-        await markWebhookProcessed(logId, "Invalid signature");
-        return withCors({ error: "Invalid signature" }, { status: 401 });
-      }
+      await markWebhookProcessed(logId, "Missing nomba-signature header");
+      return withCors({ error: "Missing signature" }, { status: 401 });
+    }
+    if (!signatureValid) {
+      await markWebhookProcessed(logId, "Invalid signature");
+      return withCors({ error: "Invalid signature" }, { status: 401 });
     }
 
     const supabase = getServiceClient();
@@ -118,12 +109,13 @@ Deno.serve(async (req) => {
     ]);
 
     if (eventType && payoutEvents.has(eventType)) {
-      const ref = pickString(fields, ["merchantTxRef", "orderReference", "reference", "transactionRef", "transactionId"]);
+      const ref = safeProviderRef(pickString(fields, ["merchantTxRef", "orderReference", "reference", "transactionRef", "transactionId"]));
       if (ref) {
         const { data: txn } = await supabase
           .from("transactions")
           .select("id, provider, provider_ref, idempotency_key, status")
           .eq("type", "withdrawal")
+          .eq("provider", "nomba")
           .in("status", ["pending", "processing"])
           .or(`idempotency_key.eq.${ref},provider_ref.eq.${ref}`)
           .maybeSingle();
@@ -150,73 +142,9 @@ Deno.serve(async (req) => {
       return withCors({ ok: true, handled: "withdrawal" });
     }
 
-    // Inbound VA credit
-    const creditEvents = new Set(["payment_success", "PAYMENT_SUCCESS", "credit", "successful", ""]);
-    if (eventType && !creditEvents.has(eventType)) {
-      await markWebhookProcessed(logId);
-      return withCors({ ok: true, skipped: true, eventType });
-    }
-
-    const accountNumber = pickString(fields, [
-      "aliasAccountNumber",
-      "bankAccountNumber",
-      "accountNumber",
-      "beneficiaryAccountNumber",
-      "destinationAccountNumber",
-    ]);
-    const amount = pickNumber(fields, ["amount", "transactionAmount", "settledAmount", "creditAmount"]);
-    const paymentReference = pickString(fields, [
-      "orderReference",
-      "merchantTxRef",
-      "reference",
-      "transactionId",
-      "aliasAccountReference",
-      "id",
-    ]);
-    const transactionReference = pickString(fields, ["transactionId", "sessionId", "rrn", "id"]) || paymentReference;
-    const payerName = pickString(fields, ["senderName", "originatorAccountName", "payerName", "customerName"]);
-
-    if (!accountNumber || !paymentReference || amount <= 0) {
-      await markWebhookProcessed(logId, "Missing inbound fields");
-      return withCors({ ok: true, ignored: true, reason: "missing_fields" });
-    }
-
-    const { data: va } = await supabase
-      .from("reserved_accounts")
-      .select("wallet_id, user_id")
-      .eq("provider_id", "nomba")
-      .eq("account_number", accountNumber)
-      .maybeSingle();
-
-    if (!va?.wallet_id || !va?.user_id) {
-      await markWebhookProcessed(logId, `Unknown Nomba VA: ${accountNumber}`);
-      return withCors({ ok: true, ignored: true, reason: "unknown_va" });
-    }
-
-    const result = await creditInboundDeposit(supabase, {
-      walletId: va.wallet_id,
-      userId: va.user_id,
-      amountNaira: amount,
-      paymentReference,
-      transactionReference,
-      providerId: "nomba",
-      payerName,
-      metadata: { nomba_webhook: payload, event_type: eventType },
-      skipNameCheckEnv: "NOMBA_WEBHOOK_SKIP_PAYER_NAME_CHECK",
-    });
-
-    if (result.kind === "error") {
-      await markWebhookProcessed(logId, result.message);
-      return withCors({ error: result.message }, { status: 500 });
-    }
-
-    if (result.kind === "rejected_aml") {
-      await markWebhookProcessed(logId, result.reason);
-      return withCors({ error: result.reason }, { status: 403 });
-    }
-
+    // Bank transfers into per-user virtual accounts are no longer credited (2026-11).
     await markWebhookProcessed(logId);
-    return withCors({ ok: true, result: result.kind });
+    return withCors({ ok: true, skipped: true, eventType });
   } catch (error) {
     if (logId) await markWebhookProcessed(logId, String(error));
     return withCors({ error: "Failed to process webhook" }, { status: 500 });
