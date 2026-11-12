@@ -1,5 +1,6 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { getAuthUserIdFromRequest, getServiceClient, resolveAppUserId } from "../_shared/db.ts";
+import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
 import { normalizeUsername, USERNAME_RE } from "../_shared/username.ts";
 
 type UserRow = {
@@ -87,6 +88,10 @@ Deno.serve(async (req) => {
       return withCors({ ok: true, recipients: recent });
     }
 
+    // A lookup turns a username into a name and picture: enough for typing one, not for scraping.
+    const rl = await checkRateLimit(RATE_LIMITS.userLookup(senderId));
+    if (!rl.allowed) return withCors({ error: "Too many lookups. Try again shortly." }, { status: 429 });
+
     const username = normalizeUsername(url.searchParams.get("username") ?? "");
     if (!username || !USERNAME_RE.test(username)) {
       return withCors(
@@ -102,7 +107,8 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     if (userErr) {
-      return withCors({ error: "Lookup failed", detail: userErr.message }, { status: 500 });
+      console.error("lookup-user failed", userErr.message);
+      return withCors({ error: "Lookup failed" }, { status: 500 });
     }
     if (!user || user.status !== "active") {
       return withCors({ error: "No active user found with that username" }, { status: 404 });

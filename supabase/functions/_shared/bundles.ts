@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
+import { rateRecentlyRefused } from "./fx/refused.ts";
 import { flutterwaveApiRequest } from "./psp/flutterwaveClient.ts";
 import { fetchBinanceUsdcNgnRateKobo } from "./fx/binance.ts";
 
@@ -118,6 +119,7 @@ export async function refreshMarketRateIfStale(supabase: SupabaseClient): Promis
   const missing = !s?.fx_market_rate_kobo;
   if (!missing && Date.now() - updatedAt <= 5 * 60 * 1000) return;
   if ((s?.fx_rate_source ?? "binance") === "manual" && !missing) return;
+  if (await rateRecentlyRefused(supabase)) return;
   try {
     const { marketRateKobo, raw } = await fetchBinanceUsdcNgnRateKobo();
     await supabase.rpc("update_fx_market_rate", {

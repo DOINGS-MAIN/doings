@@ -4,6 +4,7 @@ import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.8
 import { getPlatformPaymentSettings } from "../_shared/psp/platformSettings.ts";
 import { probeProviderHealth } from "../_shared/psp/registry.ts";
 import { reprocessWebhookLog } from "../_shared/reprocessWebhook.ts";
+import { payoutEvent } from "../_shared/payoutEvent.ts";
 import { cleanSearch, orIlike, parsePaging, quoteValue } from "../_shared/adminSearch.ts";
 import { chunk, collectAll } from "../_shared/adminExport.ts";
 import { handlePayouts } from "./payouts.ts";
@@ -603,15 +604,10 @@ Deno.serve(async (req) => {
         return withCors({ ok: true });
       }
 
+      // Disabled (2026-11): this "refund" credited the same wallet again instead of reversing anything, so it
+      // doubled a deposit. Bundle orders are refunded from Bundle orders; payouts are resolved from Payouts.
       if (req.method === "POST" && route.action === "refund" && route.id) {
-        const body = await req.json().catch(() => ({})) as { reason?: string };
-        const { data: refundTxnId, error } = await supabase.rpc("admin_refund_transaction", {
-          p_transaction_id: route.id,
-          p_admin_auth_id: authId,
-          p_reason: body.reason ?? "Admin refund",
-        });
-        if (error) throw error;
-        return withCors({ ok: true, refund_transaction_id: refundTxnId });
+        return withCors({ error: "Transaction refunds are switched off. Use Bundle orders or Payouts." }, { status: 410 });
       }
     }
 
@@ -1102,10 +1098,18 @@ Deno.serve(async (req) => {
 
         const { data: webhook, error } = await supabase
           .from("webhook_logs")
-          .select("id, provider, event_type, payload")
+          .select("id, provider, event_type, payload, signature_valid")
           .eq("id", route.id)
           .single();
         if (error || !webhook) throw error ?? new Error("Webhook not found");
+        // An unverified request is anyone's text: replaying it would let an outsider move money with one admin click.
+        if (webhook.signature_valid !== true) {
+          return withCors({ error: "This webhook's signature was not verified, so it cannot be reprocessed." }, { status: 409 });
+        }
+        // Decided before the row is touched: a deposit or charge keeps its processed state.
+        if (!payoutEvent(String(webhook.provider).toLowerCase(), webhook.payload as Record<string, unknown>)) {
+          return withCors({ error: "Only payout status webhooks can be reprocessed. Deposits are settled by checking the provider." }, { status: 409 });
+        }
 
         await supabase
           .from("webhook_logs")
@@ -1117,6 +1121,7 @@ Deno.serve(async (req) => {
           provider: webhook.provider as string,
           event_type: webhook.event_type as string | null,
           payload: webhook.payload as Record<string, unknown>,
+          signature_valid: webhook.signature_valid as boolean | null,
         });
 
         await supabase.rpc("log_admin_action", {

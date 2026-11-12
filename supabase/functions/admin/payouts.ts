@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { withCors } from "../_shared/cors.ts";
 import { orIlike, parsePaging, quoteValue } from "../_shared/adminSearch.ts";
-import { failedResolutionGate, payoutCheckRefusal, payoutConfirmMatches } from "../_shared/adminAccess.ts";
+import { failedResolutionGate, manualFailTooEarly, payoutCheckRefusal, payoutConfirmMatches } from "../_shared/adminAccess.ts";
 import { getPlatformPaymentSettings } from "../_shared/psp/platformSettings.ts";
 import { fetchTransferStatus } from "../_shared/psp/registry.ts";
 import { applyWithdrawalStatus } from "../_shared/psp/withdrawalFinalize.ts";
@@ -99,6 +99,11 @@ export async function handlePayouts(ctx: AdminRouteCtx): Promise<Response | null
       if (gate.action === "refuse") return withCors({ error: gate.error }, { status: gate.status });
       if (gate.action === "settled") return withCors({ ok: true, status: checked.status, provider_confirmed: true });
     }
+    // Still here with "failed": the provider gave no final answer, or (USDC) cannot be asked.
+    if (body.outcome === "failed" && row.status !== "failed") {
+      const tooEarly = manualFailTooEarly(row.created_at, Date.now());
+      if (tooEarly) return withCors({ error: tooEarly }, { status: 409 });
+    }
 
     const { data, error } = await supabase.rpc("admin_resolve_payout", {
       p_transaction_id: id, p_outcome: body.outcome ?? "", p_admin_auth_id: authId, p_reason: body.reason ?? "",
@@ -117,12 +122,13 @@ type CheckRow = {
   status: string;
   provider: string | null;
   provider_ref: string | null;
+  created_at: string | null;
   idempotency_key: string;
 };
 
 async function loadForCheck(supabase: SupabaseClient, id: string): Promise<CheckRow | null> {
   const { data, error } = await supabase.from("transactions")
-    .select("id, type, currency, status, provider, provider_ref, idempotency_key")
+    .select("id, type, currency, status, provider, provider_ref, idempotency_key, created_at")
     .eq("id", id).maybeSingle();
   if (error) throw error;
   return (data as CheckRow | null) ?? null;

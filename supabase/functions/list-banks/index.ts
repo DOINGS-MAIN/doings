@@ -1,5 +1,6 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
+import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
 import { getPlatformPaymentSettings } from "../_shared/psp/platformSettings.ts";
 import { listBanks } from "../_shared/psp/registry.ts";
 
@@ -12,6 +13,10 @@ Deno.serve(async (req) => {
 
   const authUserId = await getAuthUserIdFromRequest(authHeader);
   if (!authUserId) return withCors({ error: "Unauthorized" }, { status: 401 });
+
+  // The list is fetched from the provider on every call.
+  const rl = await checkRateLimit(RATE_LIMITS.bankList(authUserId));
+  if (!rl.allowed) return withCors({ error: "Too many requests. Try again shortly." }, { status: 429 });
 
   const supabase = getServiceClient();
   let platform;
@@ -29,8 +34,9 @@ Deno.serve(async (req) => {
       banks,
     });
   } catch (err) {
+    console.error("list-banks failed", err instanceof Error ? err.message : String(err));
     return withCors(
-      { error: "Failed to load banks", detail: err instanceof Error ? err.message : String(err) },
+      { error: "Failed to load banks" },
       { status: 502 },
     );
   }

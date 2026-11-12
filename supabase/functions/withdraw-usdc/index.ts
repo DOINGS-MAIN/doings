@@ -153,6 +153,8 @@ Deno.serve(async (req) => {
       return withCors({ ok: true, transaction_id: txnId, reference, status: "processing" });
     }
     await supabase.rpc("fail_withdrawal", { p_transaction_id: txnId });
-    return withCors({ error: "USDC send failed, funds released", detail }, { status: 502 });
+    // The provider's detail names the egress relay host; it is logged, never returned.
+    console.error("withdraw-usdc rejected", detail);
+    return withCors({ error: "USDC send failed, funds released" }, { status: 502 });
   }
 });

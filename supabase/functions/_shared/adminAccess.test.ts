@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { can, escapeLikePattern, eventHoldRoute, failedResolutionGate, giveawayCodeMatches, maskAccountNumber, maskGiveawayCode, nameConfirmMatches, payoutCheckRefusal, payoutConfirmMatches, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed, user360Sections } from "./adminAccess.ts";
+import { can, escapeLikePattern, eventHoldRoute, failedResolutionGate, giveawayCodeMatches, manualFailTooEarly, maskAccountNumber, maskGiveawayCode, nameConfirmMatches, payoutCheckRefusal, payoutConfirmMatches, permissionFor, ROLE_PERMISSIONS, teamChangeAllowed, user360Sections } from "./adminAccess.ts";
 
 const ROLES = ["super_admin", "finance", "support", "compliance", "moderation"] as const;
 
@@ -172,6 +172,17 @@ Deno.test("failedResolutionGate: Mark failed only goes ahead when the provider c
   assertEquals(failedResolutionGate("terminal_failure"), { action: "settled" });
   assertEquals(failedResolutionGate("non_terminal"), { action: "proceed" });
   assertEquals(failedResolutionGate("unknown"), { action: "proceed" });
+});
+
+Deno.test("manualFailTooEarly: a payout without a final answer can only be failed by hand once it is a day old", () => {
+  const now = Date.parse("2026-11-12T12:00:00Z");
+  const msg = "The provider has not given a final answer yet. A payout can be marked failed by hand once it is 24 hours old.";
+  assertEquals(manualFailTooEarly("2026-11-12T11:00:00Z", now), msg); // an hour old: the transfer may still land
+  assertEquals(manualFailTooEarly("2026-11-11T12:00:01Z", now), msg);
+  assertEquals(manualFailTooEarly("2026-11-11T12:00:00Z", now), null); // exactly a day
+  assertEquals(manualFailTooEarly("2026-11-01T00:00:00Z", now), null);
+  assertEquals(manualFailTooEarly(null, now), msg); // no date: never assume it is old
+  assertEquals(manualFailTooEarly("not a date", now), msg);
 });
 
 Deno.test("user360Sections: each role sees only its sections", () => {

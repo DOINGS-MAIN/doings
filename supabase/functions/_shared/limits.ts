@@ -91,6 +91,11 @@ export async function checkWithdrawalLimit(
   return { allowed: true, reason: "" };
 }
 
+/** The sender's daily send limit in smallest units (0 = sending not available at this level). */
+export function transferDailyLimit(currency: string, kycLevel: number): number {
+  return TRANSFER_LIMITS[currency]?.[kycLevel] ?? 0;
+}
+
 export async function checkTransferLimit(
   userId: string,
   kycLevel: number,

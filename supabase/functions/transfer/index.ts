@@ -2,13 +2,12 @@ import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { parseMajorAmount } from "../_shared/money.ts";
 import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient, resolveAppUserId } from "../_shared/db.ts";
-import { checkTransferLimit } from "../_shared/limits.ts";
+import { checkTransferLimit, transferDailyLimit } from "../_shared/limits.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
 import { normalizeUsername, USERNAME_RE } from "../_shared/username.ts";
 
 /** In-app P2P sends are always fee-free — never apply withdrawal/platform fees here. */
-const P2P_TRANSFER_FEE = 0;
 
 type TransferBody = {
   recipient_username: string;
@@ -113,15 +112,16 @@ Deno.serve(async (req) => {
     : `Transfer to @${recipientUsername}`;
 
   try {
-    const { data: transferId, error: transferErr } = await supabase.rpc("internal_transfer", {
+    // The daily limit is checked again inside the database, under a per-sender lock (migration 107):
+    // the check above reads "spent today" before the debit, so parallel requests all passed it.
+    const { data: transferId, error: transferErr } = await supabase.rpc("internal_transfer_checked", {
       p_sender_wallet_id: senderWallet.id,
       p_receiver_wallet_id: recipientWallet.id,
       p_sender_user_id: sender.id,
       p_receiver_user_id: recipient.id,
       p_amount: smallestUnit,
-      p_fee: P2P_TRANSFER_FEE,
       p_description: description,
-      p_type: "send",
+      p_daily_limit: transferDailyLimit(currency, sender.kyc_level),
     });
 
     if (transferErr) throw transferErr;
@@ -134,10 +134,14 @@ Deno.serve(async (req) => {
       recipient_username: recipientUsername,
     });
   } catch (err) {
-    const msg = String(err);
+    const msg = (err as { message?: string })?.message ?? String(err);
     if (msg.includes("Insufficient")) {
       return withCors({ error: "Insufficient balance" }, { status: 400 });
     }
-    return withCors({ error: "Transfer failed", detail: msg }, { status: 500 });
+    if (msg.includes("DAILY_TRANSFER_LIMIT")) {
+      return withCors({ error: "Daily transfer limit exceeded" }, { status: 403 });
+    }
+    console.error("transfer failed", msg);
+    return withCors({ error: "Transfer failed" }, { status: 500 });
   }
 });

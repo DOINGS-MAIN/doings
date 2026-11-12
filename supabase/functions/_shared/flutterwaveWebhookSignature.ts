@@ -36,7 +36,7 @@ export async function verifyFlutterwaveWebhook(input: {
       return true;
     }
   }
-  // Allow URL validation when no secret configured (dev only).
-  if (!input.secretHash && !input.secretKey) return true;
+  // No secret configured verifies nothing: the handler refuses such requests, and a forged one must not
+  // be stored as genuine in the meantime.
   return false;
 }

@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { rateRecentlyRefused } from "../_shared/fx/refused.ts";
 import { parseMajorAmount } from "../_shared/money.ts";
 import { getAuthUserIdFromRequest, getServiceClient, resolveAppUserId } from "../_shared/db.ts";
 import { fetchBinanceUsdcNgnRateKobo } from "../_shared/fx/binance.ts";
@@ -31,15 +32,17 @@ async function ensureFreshMarketRate(supabase: ReturnType<typeof getServiceClien
   const source = settings?.fx_rate_source ?? "binance";
   if (!isStale) return { refreshed: false };
   if (source === "manual" && !missing) return { refreshed: false };
+  if (await rateRecentlyRefused(supabase)) return { refreshed: false };
 
   try {
     const { marketRateKobo, raw } = await fetchBinanceUsdcNgnRateKobo();
-    await supabase.rpc("update_fx_market_rate", {
+    const { data } = await supabase.rpc("update_fx_market_rate", {
       p_market_rate_kobo: marketRateKobo,
       p_source: typeof raw.provider === "string" ? raw.provider : "binance",
       p_raw_payload: raw,
     });
-    return { refreshed: true };
+    // A rate that jumped too far is refused by the database; the old one stays in force.
+    return { refreshed: (data as { rejected?: boolean } | null)?.rejected !== true };
   } catch (err) {
     return { refreshed: false, error: err instanceof Error ? err.message : String(err) };
   }
