@@ -13,6 +13,7 @@ import { handleUser360 } from "./users360.ts";
 import { handleGiveaways } from "./giveaways.ts";
 import { handleLiveEvent } from "./liveEvent.ts";
 import { can, escapeLikePattern, eventHoldRoute, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
+import { tokenAal, twoStepRefusal } from "../_shared/adminTwoStep.ts";
 
 const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") ?? "15");
 
@@ -20,6 +21,7 @@ const RESERVED_ACTIONS = new Set([
   "suspend", "unsuspend", "ban", "unban", "flag", "unflag", "approve", "reject", "end",
   "invite", "accept", "disable", "enable", "role", "refund", "reprocess", "export", "probe-all", "health",
   "check", "resolve", "revoke", "kyc-reset", "stop", "reveal-code", "advance-floor",
+  "two-step", "reset-two-step",
 ]);
 
 // The platform treasury's wallets belong to this user (see migration 083).
@@ -220,6 +222,20 @@ async function findAuthUserIdByEmail(supabase: SupabaseClient, email: string): P
   return null;
 }
 
+/** Whether super admins must have entered their two-step code (migration 111). */
+async function twoStepRequired(supabase: SupabaseClient): Promise<boolean> {
+  const { data, error } = await supabase.from("platform_settings").select("admin_two_step_required").eq("id", 1).maybeSingle();
+  if (error) throw error;
+  return data?.admin_two_step_required === true;
+}
+
+/** True when the person has an authenticator app set up and confirmed. */
+async function hasTwoStep(supabase: SupabaseClient, userId: string): Promise<boolean> {
+  const { data, error } = await supabase.auth.admin.mfa.listFactors({ userId });
+  if (error) throw error;
+  return (data?.factors ?? []).some((f) => f.factor_type === "totp" && f.status === "verified");
+}
+
 async function countActiveSuperAdmins(supabase: SupabaseClient): Promise<number> {
   const { count, error } = await supabase
     .from("admin_roles")
@@ -245,13 +261,22 @@ Deno.serve(async (req) => {
   const route = parseRoute(req.url);
   const routeAction = "action" in route ? route.action : undefined;
   const routeId = "id" in route ? route.id : undefined;
+  const aal = tokenAal(req.headers.get("Authorization"));
 
   try {
+    // ── TWO-STEP ── a super admin's password alone is not enough once the rule is on.
+    // Read only where it matters, so other roles' requests cost nothing extra.
+    const required = (role === "super_admin" && aal !== "aal2") || route.resource === "team"
+      ? await twoStepRequired(supabase)
+      : false;
+    const refusal = twoStepRefusal({ role, required, aal, resource: route.resource, action: routeAction });
+    if (refusal) return withCors({ error: refusal, code: "TWO_STEP_REQUIRED" }, { status: 403 });
+
     // ── ACCEPT INVITE ── called on every admin sign-in: activates a pending invite, else records the login.
     if (route.resource === "team" && req.method === "POST" && routeAction === "accept") {
       if (!invitedRowId) {
         await supabase.from("admin_roles").update({ last_login_at: new Date().toISOString() }).eq("id", activeRowId!);
-        return withCors({ ok: true });
+        return withCors({ ok: true, two_step_required: required });
       }
       const { error } = await supabase
         .from("admin_roles")
@@ -260,7 +285,7 @@ Deno.serve(async (req) => {
         .eq("status", "invited");
       if (error) throw error;
       await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "accept_admin_invite", p_target_type: "admin", p_target_id: invitedRowId });
-      return withCors({ ok: true });
+      return withCors({ ok: true, two_step_required: required });
     }
     if (invitedRowId) return withCors({ error: "Accept your admin invite first" }, { status: 403 });
 
@@ -715,9 +740,51 @@ Deno.serve(async (req) => {
             const { data: u } = await supabase.auth.admin.getUserById(m.user_id as string);
             email = u?.user?.email ?? "";
           }
-          return { ...m, email };
+          return { ...m, email, two_step: await hasTwoStep(supabase, m.user_id as string) };
         }));
-        return withCors({ team });
+        return withCors({ team, two_step_required: required });
+      }
+
+      // Switch the two-step rule for super admins on or off.
+      if (req.method === "POST" && route.action === "two-step" && !route.id) {
+        const body = await req.json().catch(() => ({})) as { required?: unknown };
+        if (typeof body.required !== "boolean") return withCors({ error: "required must be true or false" }, { status: 400 });
+        if (aal !== "aal2") {
+          return withCors({ error: "Sign in with your two-step code before changing this" }, { status: 403 });
+        }
+        if (body.required) {
+          // Nobody may be locked out: two super admins must already have a working authenticator.
+          const { data: supers, error: supersErr } = await supabase
+            .from("admin_roles").select("user_id").eq("role", "super_admin").eq("status", "active");
+          if (supersErr) throw supersErr;
+          const ready = (await Promise.all((supers ?? []).map((m) => hasTwoStep(supabase, m.user_id as string)))).filter(Boolean).length;
+          if (ready < 2) {
+            return withCors({ error: "Two super admins must set up two-step sign-in before it can be required" }, { status: 409 });
+          }
+        }
+        const { error } = await supabase.from("platform_settings").update({ admin_two_step_required: body.required }).eq("id", 1);
+        if (error) throw error;
+        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: body.required ? "require_admin_two_step" : "unrequire_admin_two_step", p_target_type: "platform_settings" });
+        return withCors({ ok: true, two_step_required: body.required });
+      }
+
+      // A lost authenticator: another super admin removes it, and the person sets it up again at sign-in.
+      if (req.method === "POST" && route.id && route.action === "reset-two-step") {
+        const { data: target, error: targetErr } = await supabase
+          .from("admin_roles").select("id, user_id").eq("id", route.id).maybeSingle();
+        if (targetErr) throw targetErr;
+        if (!target) return withCors({ error: "Team member not found" }, { status: 404 });
+        if (target.user_id === authId) {
+          return withCors({ error: "Ask another super admin to reset your two-step sign-in" }, { status: 409 });
+        }
+        const { data: listed, error: listErr } = await supabase.auth.admin.mfa.listFactors({ userId: target.user_id as string });
+        if (listErr) throw listErr;
+        for (const factor of listed?.factors ?? []) {
+          const { error: delErr } = await supabase.auth.admin.mfa.deleteFactor({ id: factor.id, userId: target.user_id as string });
+          if (delErr) throw delErr;
+        }
+        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "reset_admin_two_step", p_target_type: "admin", p_target_id: route.id, p_details: { factors: (listed?.factors ?? []).length } });
+        return withCors({ ok: true });
       }
 
       if (req.method === "POST" && route.action === "invite") {
@@ -727,6 +794,8 @@ Deno.serve(async (req) => {
         if (!isAdminRole(body.role)) return withCors({ error: "Unknown role" }, { status: 400 });
 
         let inviteeId = await findAuthUserIdByEmail(supabase, email);
+        // Someone who already has an account gets no email: they sign in with it and the invite activates.
+        const existingAccount = Boolean(inviteeId);
         if (inviteeId) {
           const { data: existing } = await supabase.from("admin_roles").select("id").eq("user_id", inviteeId).limit(1);
           if (existing?.length) return withCors({ error: "This person is already on the team" }, { status: 409 });
@@ -753,7 +822,7 @@ Deno.serve(async (req) => {
         if (error) throw error;
 
         await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "invite_admin", p_target_type: "admin", p_target_id: row.id, p_details: { email, role: body.role } });
-        return withCors({ ok: true }, { status: 201 });
+        return withCors({ ok: true, existing_account: existingAccount }, { status: 201 });
       }
 
       if (req.method === "POST" && route.id && ["disable", "enable", "role"].includes(route.action ?? "")) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Ban, CheckCircle, MoreVertical, Shield, UserPlus, Users } from "lucide-react";
+import { Ban, CheckCircle, KeyRound, MoreVertical, Shield, ShieldCheck, UserPlus, Users } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,6 +26,7 @@ type TeamMember = {
   status: "active" | "invited" | "disabled";
   last_login_at: string | null;
   created_at: string;
+  two_step?: boolean;
 };
 
 const errorMessage = (err: unknown, fallback: string) => (err instanceof Error ? err.message : fallback);
@@ -37,12 +38,14 @@ export const AdminTeam = () => {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<AdminRole>("support");
   const [busy, setBusy] = useState(false);
+  const [twoStepRequired, setTwoStepRequired] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = (await adminApi.team.list()) as { team?: TeamMember[] };
+      const res = (await adminApi.team.list()) as { team?: TeamMember[]; two_step_required?: boolean };
       setTeam(res.team ?? []);
+      setTwoStepRequired(res.two_step_required === true);
     } catch (err) {
       toast.error(errorMessage(err, "Couldn't load the team"));
     } finally {
@@ -71,7 +74,21 @@ export const AdminTeam = () => {
   const handleInvite = async () => {
     const email = inviteEmail.trim();
     if (!email) return;
-    await run(() => adminApi.team.invite(email, inviteRole), `Invite sent to ${email}`);
+    setBusy(true);
+    try {
+      const res = (await adminApi.team.invite(email, inviteRole)) as { existing_account?: boolean };
+      if (res.existing_account) {
+        // No email goes out for an existing account, so say what the person has to do.
+        toast.success(`${email} already has a Doings account, so no email was sent. Ask them to sign in to the admin with it.`, { duration: 12000 });
+      } else {
+        toast.success(`Invite emailed to ${email}`);
+      }
+      await load();
+    } catch (err) {
+      toast.error(errorMessage(err, "That didn't work"));
+    } finally {
+      setBusy(false);
+    }
     setInviteEmail("");
     setInviteRole("support");
   };
@@ -135,6 +152,36 @@ export const AdminTeam = () => {
       <Card className="bg-card border-border">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-muted-foreground" />
+            Two-step sign-in for super admins
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-muted-foreground max-w-xl">
+              {twoStepRequired
+                ? "Required: a super admin must enter a code from their authenticator app at every sign-in."
+                : "Not required yet. Two super admins must set it up (sidebar → Two-step sign-in) before it can be required, so nobody is locked out."}
+            </p>
+            <Button
+              variant={twoStepRequired ? "outline" : "default"}
+              disabled={busy}
+              onClick={() =>
+                run(
+                  () => adminApi.team.setTwoStepRequired(!twoStepRequired),
+                  twoStepRequired ? "Two-step sign-in is no longer required" : "Two-step sign-in is now required for super admins",
+                )
+              }
+            >
+              {twoStepRequired ? "Stop requiring it" : "Require it"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="bg-card border-border">
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
             <Users className="w-5 h-5 text-muted-foreground" />
             Admins ({team.length})
           </CardTitle>
@@ -163,6 +210,11 @@ export const AdminTeam = () => {
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
+                      {member.two_step ? (
+                        <Badge className="bg-success/20 text-success border-0">Two-step on</Badge>
+                      ) : member.role === "super_admin" ? (
+                        <Badge variant="outline" className="text-muted-foreground">No two-step</Badge>
+                      ) : null}
                       {statusBadge(member.status)}
                       <Badge variant="outline">{ROLE_LABELS[member.role] ?? member.role}</Badge>
                       {!isMe && (
@@ -185,6 +237,14 @@ export const AdminTeam = () => {
                               ) : null,
                             )}
                             <DropdownMenuSeparator />
+                            {member.two_step && (
+                              <DropdownMenuItem
+                                onClick={() => run(() => adminApi.team.resetTwoStep(member.id), "Two-step sign-in reset. They set it up again at next sign-in.")}
+                              >
+                                <KeyRound className="w-4 h-4 mr-2" />
+                                Reset two-step sign-in
+                              </DropdownMenuItem>
+                            )}
                             {member.status === "disabled" ? (
                               <DropdownMenuItem onClick={() => run(() => adminApi.team.enable(member.id), "Access restored")}>
                                 <CheckCircle className="w-4 h-4 mr-2" />
