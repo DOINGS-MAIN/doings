@@ -1,4 +1,5 @@
 import { hmacSha256Base64 } from "./crypto.ts";
+import { safeEqual } from "./safeEqual.ts";
 
 /**
  * Nomba signs webhooks with HMAC-SHA256 (base64) over a colon-delimited string.
@@ -44,5 +45,5 @@ export async function verifyNombaWebhookSignature(input: {
 
   const hashingPayload = buildNombaSignaturePayload(payload, input.timestamp);
   const expected = await hmacSha256Base64(input.secret, hashingPayload);
-  return input.signature.trim().toLowerCase() === expected.toLowerCase();
+  return safeEqual(input.signature.trim().toLowerCase(), expected.toLowerCase());
 }

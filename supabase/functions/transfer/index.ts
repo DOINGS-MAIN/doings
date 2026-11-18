@@ -9,12 +9,16 @@ import { normalizeUsername, USERNAME_RE } from "../_shared/username.ts";
 
 /** In-app P2P sends are always fee-free — never apply withdrawal/platform fees here. */
 
+const IDEMPOTENCY_KEY_RE = /^[A-Za-z0-9_-]{8,64}$/;
+
 type TransferBody = {
   recipient_username: string;
   amount: number;
   currency?: "NGN" | "USDC";
   description?: string;
   pin: string;
+  /** One per send attempt (the app keeps it across a retry), so a repeat returns the first transfer. */
+  idempotency_key?: string;
 };
 
 Deno.serve(async (req) => {
@@ -49,6 +53,11 @@ Deno.serve(async (req) => {
   const rl = await checkRateLimit(RATE_LIMITS.transfer(sender.id));
   if (!rl.allowed) return withCors({ error: "Too many transfer requests. Try again shortly." }, { status: 429 });
 
+  const idempotencyKey = body.idempotency_key == null ? null : String(body.idempotency_key);
+  if (idempotencyKey !== null && !IDEMPOTENCY_KEY_RE.test(idempotencyKey)) {
+    return withCors({ error: "Invalid idempotency_key" }, { status: 400 });
+  }
+
   if (!body.recipient_username || body.amount == null) {
     return withCors({ error: "recipient_username and amount are required" }, { status: 400 });
   }
@@ -66,9 +75,6 @@ Deno.serve(async (req) => {
   /** Amount in major units (naira or USDC); converted to smallest unit server-side. */
   const smallestUnit = parseMajorAmount(body.amount, currency);
   if (smallestUnit === null) return withCors({ error: "amount must be positive" }, { status: 400 });
-
-  const { allowed, reason } = await checkTransferLimit(sender.id, sender.kyc_level, currency, smallestUnit);
-  if (!allowed) return withCors({ error: reason }, { status: 403 });
 
   const { data: recipient, error: recipientErr } = await supabase
     .from("users")
@@ -88,6 +94,34 @@ Deno.serve(async (req) => {
   if (recipient.id === sender.id) {
     return withCors({ error: "Cannot transfer to yourself" }, { status: 400 });
   }
+
+  // A repeat of a send that already went through gets the same answer, before the limit pre-check
+  // (which would now count the first one against it). The database decides again under its lock.
+  if (idempotencyKey) {
+    const { data: earlier } = await supabase
+      .from("transfers")
+      .select("id, amount, currency, receiver_user_id")
+      .eq("sender_user_id", sender.id)
+      .eq("idempotency_key", idempotencyKey)
+      .maybeSingle();
+    // Anything that differs is left to the database, which refuses a key reused for another send.
+    if (
+      earlier && earlier.currency === currency && Number(earlier.amount) === smallestUnit &&
+      earlier.receiver_user_id === recipient.id
+    ) {
+      return withCors({
+        ok: true,
+        transfer_id: earlier.id,
+        currency,
+        amount: body.amount,
+        recipient_username: recipientUsername,
+        repeated: true,
+      });
+    }
+  }
+
+  const { allowed, reason } = await checkTransferLimit(sender.id, sender.kyc_level, currency, smallestUnit);
+  if (!allowed) return withCors({ error: reason }, { status: 403 });
 
   const { data: senderWallet } = await supabase
     .from("wallets")
@@ -122,6 +156,8 @@ Deno.serve(async (req) => {
       p_amount: smallestUnit,
       p_description: description,
       p_daily_limit: transferDailyLimit(currency, sender.kyc_level),
+      // Only sent when the client gave one, so this function also runs against a database without 108.
+      ...(idempotencyKey ? { p_idempotency_key: idempotencyKey } : {}),
     });
 
     if (transferErr) throw transferErr;
@@ -137,6 +173,9 @@ Deno.serve(async (req) => {
     const msg = (err as { message?: string })?.message ?? String(err);
     if (msg.includes("Insufficient")) {
       return withCors({ error: "Insufficient balance" }, { status: 400 });
+    }
+    if (msg.includes("IDEMPOTENCY_KEY_REUSED")) {
+      return withCors({ error: "This send was already used for a different transfer. Start it again." }, { status: 409 });
     }
     if (msg.includes("DAILY_TRANSFER_LIMIT")) {
       return withCors({ error: "Daily transfer limit exceeded" }, { status: 403 });

@@ -1,9 +1,10 @@
 import { hmacSha256Base64 } from "./crypto.ts";
+import { safeEqual } from "./safeEqual.ts";
 
 /** Flutterwave v3: dashboard secret hash sent as `verif-hash` header (plain compare). */
 export function verifyFlutterwaveVerifHash(signature: string | null, secretHash: string): boolean {
   if (!signature?.trim() || !secretHash.trim()) return false;
-  return signature.trim() === secretHash.trim();
+  return safeEqual(signature.trim(), secretHash.trim());
 }
 
 /** Newer Flutterwave webhooks may send HMAC-SHA256 in `flutterwave-signature`. */
@@ -14,7 +15,7 @@ export async function verifyFlutterwaveHmacSignature(input: {
 }): Promise<boolean> {
   if (!input.signature?.trim() || !input.secret.trim()) return false;
   const expected = await hmacSha256Base64(input.secret, input.rawBody);
-  return input.signature.trim().toLowerCase() === expected.toLowerCase();
+  return safeEqual(input.signature.trim().toLowerCase(), expected.toLowerCase());
 }
 
 export async function verifyFlutterwaveWebhook(input: {

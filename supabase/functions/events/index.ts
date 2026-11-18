@@ -2,6 +2,7 @@ import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { formatDbError, isUniqueViolation } from "../_shared/errors.ts";
+import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
 
 /** Path after the function name (e.g. `uuid`, `code/ABC`, `uuid/join`). Gateway uses `/functions/v1/events/...`. */
 function eventsPathTail(reqUrl: string): string {
@@ -111,6 +112,9 @@ Deno.serve(async (req) => {
   const codeMatch = path.match(/^code\/([A-Za-z0-9]+)$/);
   if (method === "GET" && codeMatch) {
     const code = codeMatch[1].toUpperCase();
+    // A look-up by code is a guess at a six-character code (private events included), so it is counted.
+    const rl = await checkRateLimit(RATE_LIMITS.eventCodeLookup(authUserId));
+    if (!rl.allowed) return withCors({ error: "Too many tries. Wait a few minutes and try again." }, { status: 429 });
     const { data: event, error } = await supabase
       .from("events")
       .select("*")

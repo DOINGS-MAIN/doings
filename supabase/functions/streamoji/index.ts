@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { isStreamojiUrl } from "../_shared/streamojiUrl.ts";
 import { MAX_FLOOR_BYTES, readCapped, validateFloorGlb, validateMoves } from "../_shared/avatar.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 
@@ -72,16 +73,23 @@ function isImage(bytes: Uint8Array, contentType: string): boolean {
   return png || jpeg || webp;
 }
 
-async function readImage(res: Response): Promise<Uint8Array | null> {
+/** A thumbnail is a small picture; anything bigger is not stored. */
+const THUMBNAIL_MAX_BYTES = 5 * 1024 * 1024;
+
+/** `followJson` lets a JSON answer name the picture's address (Streamoji's own endpoints do); one hop only. */
+async function readImage(res: Response, followJson: boolean): Promise<Uint8Array | null> {
   const type = res.headers.get("content-type") ?? "";
   if (type.includes("json")) {
+    if (!followJson) return null;
     const json = await res.json().catch(() => null);
     const nested = json?.url ?? json?.data?.url ?? json?.thumbnailUrl ?? json?.data?.thumbnailUrl;
     if (typeof nested !== "string" || !nested.startsWith("https://")) return null;
     const follow = await fetch(nested).catch(() => null);
-    return follow?.ok ? readImage(follow) : null;
+    return follow?.ok ? readImage(follow, false) : null;
   }
+  if (Number(res.headers.get("content-length") ?? 0) > THUMBNAIL_MAX_BYTES) return null;
   const bytes = new Uint8Array(await res.arrayBuffer());
+  if (bytes.byteLength > THUMBNAIL_MAX_BYTES) return null;
   return isImage(bytes, type) ? bytes : null;
 }
 
@@ -89,8 +97,12 @@ async function fetchThumbnail(token: string, avatarId: string, previewUrl?: stri
   const id = encodeURIComponent(avatarId);
   const encodedToken = encodeURIComponent(token);
   const bearer = { Authorization: `Bearer ${token}` };
-  const candidates: Array<{ url: string; init: RequestInit }> = [];
-  if (previewUrl?.startsWith("https://")) candidates.push({ url: previewUrl, init: { method: "GET" } });
+  const candidates: Array<{ url: string; init: RequestInit; fromClient?: boolean }> = [];
+  // The client's preview address is used only when it is Streamoji's, is not followed anywhere else
+  // (no redirect, no address named in a JSON answer), and otherwise the fixed addresses below are tried.
+  if (isStreamojiUrl(previewUrl)) {
+    candidates.push({ url: previewUrl, init: { method: "GET", redirect: "error" }, fromClient: true });
+  }
   candidates.push(
     { url: `https://glb.streamoji.com/api/render-thumbnail?avatarId=${id}`, init: { method: "POST", headers: bearer } },
     { url: `https://glb.streamoji.com/api/avatars/${id}.png?token=${encodedToken}`, init: { method: "GET" } },
@@ -100,7 +112,7 @@ async function fetchThumbnail(token: string, avatarId: string, previewUrl?: stri
   for (const candidate of candidates) {
     const res = await fetch(candidate.url, candidate.init).catch(() => null);
     if (!res?.ok) continue;
-    const bytes = await readImage(res);
+    const bytes = await readImage(res, !candidate.fromClient);
     if (bytes) return bytes;
   }
   return null;
