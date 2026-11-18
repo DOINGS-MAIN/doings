@@ -112,6 +112,13 @@ export const RATE_LIMITS = {
     windowMs: 60_000,
   }),
 
+  /** The older event-by-code route (the new app reads get_event_view, which counts wrong codes itself). */
+  eventCodeLookup: (userId: string): RateLimitConfig => ({
+    key: `ev-lookup:${userId}`,
+    maxRequests: 20,
+    windowMs: 10 * 60_000,
+  }),
+
   /** Looking a giveaway up by code: a guess at a 6-character code, so it is counted. */
   giveawayLookup: (userId: string): RateLimitConfig => ({
     key: `ga-lookup:${userId}`,

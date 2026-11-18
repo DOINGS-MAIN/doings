@@ -1,4 +1,5 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
+import { safeEqual } from "../_shared/safeEqual.ts";
 import { sha512Hex } from "../_shared/crypto.ts";
 import { getServiceClient } from "../_shared/db.ts";
 import { insertWebhookLog, markWebhookProcessed, safeProviderRef } from "../_shared/webhook.ts";
@@ -34,7 +35,7 @@ Deno.serve(async (req) => {
 
   const raw = await req.text();
   const expected = await sha512Hex(clientSecret + raw);
-  const signatureValid = signature.toLowerCase() === expected.toLowerCase();
+  const signatureValid = safeEqual(signature.toLowerCase(), expected.toLowerCase());
 
   let payload: Record<string, unknown>;
   try {
