@@ -81,9 +81,9 @@ Deno.test("can: super_admin has everything, unknown roles and permissions nothin
 
 Deno.test("ROLE_PERMISSIONS matches the agreed matrix", () => {
   assertEquals(ROLE_PERMISSIONS.super_admin, ["*"]);
-  assertEquals([...ROLE_PERMISSIONS.compliance].sort(), ["dashboard", "kyc", "users.suspend", "users.view"]);
+  assertEquals([...ROLE_PERMISSIONS.compliance].sort(), ["dashboard", "kyc", "users.pin_unlock", "users.suspend", "users.view"]);
   assertEquals([...ROLE_PERMISSIONS.support].sort(), [
-    "dashboard", "events.end", "events.view", "floor_avatars", "giveaways.view", "payments", "psp_events", "queue", "transactions.view", "users.view", "webhooks.view",
+    "dashboard", "events.end", "events.view", "floor_avatars", "giveaways.view", "payments", "psp_events", "queue", "transactions.view", "users.pin_unlock", "users.view", "webhooks.view",
   ]);
 });
 
@@ -286,4 +286,14 @@ Deno.test("eventHoldRoute: only events/:id/holds/:holdId/remove", () => {
   assertEquals(eventHoldRoute(["giveaways", id, "holds", hold, "remove"]), null);
   assertEquals(eventHoldRoute(["events", id, "end"]), null);
   assertEquals(eventHoldRoute(["events", id, "holds", hold, "remove", "x"]), null);
+});
+
+Deno.test("clearing a PIN lock is its own permission, held by support and compliance", () => {
+  assertEquals(permissionFor("users", "POST", "clear-pin-lock", true), "users.pin_unlock");
+  assertEquals(permissionFor("users", "POST", "clear-pin-lock", false), null);
+  assertEquals(can("support", "users.pin_unlock"), true);
+  assertEquals(can("compliance", "users.pin_unlock"), true);
+  assertEquals(can("super_admin", "users.pin_unlock"), true);
+  assertEquals(can("finance", "users.pin_unlock"), false);
+  assertEquals(can("moderation", "users.pin_unlock"), false);
 });

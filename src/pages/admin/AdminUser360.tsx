@@ -295,6 +295,47 @@ function MoneyCard({ money }: { money: NonNullable<User360["money"]> }) {
   );
 }
 
+function SecurityCard({ data, canUnlock }: { data: User360; canUnlock: boolean }) {
+  const { clearPinLock } = useAdminMutations();
+  const [clearing, setClearing] = useState(false);
+  const security = data.security!;
+  const locked = !!security.pinLockedUntil && security.pinLockedUntil > new Date();
+  const who = data.user.name.trim() || data.user.email || "this person";
+
+  const clear = async () => {
+    if (!window.confirm(`Unlock the transaction PIN for ${who}? Only do this once you are sure you are talking to the account owner. They will be notified.`)) return;
+    setClearing(true);
+    await runToast(() => clearPinLock(data.user.id), "PIN unlocked");
+    setClearing(false);
+  };
+
+  return (
+    <Card className="bg-card border-border">
+      <CardHeader>
+        <CardTitle className="text-lg">Security</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-1 text-sm">
+        <p>Transaction PIN: {security.pinSet ? "set" : "not set"}</p>
+        <p>Failed PIN attempts: {security.pinFailedAttempts}</p>
+        {locked && (
+          <p className="text-destructive">Locked until {format(security.pinLockedUntil!, "MMM d, HH:mm")}</p>
+        )}
+        {canUnlock && locked && (
+          <div className="pt-3">
+            <Button variant="outline" size="sm" disabled={clearing} onClick={clear}>
+              {clearing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RotateCcw className="w-4 h-4 mr-2" />}
+              Unlock PIN
+            </Button>
+            <p className="text-xs text-muted-foreground mt-2">
+              The PIN itself is not changed or shown. The person is notified and the action is recorded. A PIN can be unlocked 3 times in 24 hours.
+            </p>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export const AdminUser360 = () => {
   const { id } = useParams();
   const { session } = useAdminAuth();
@@ -373,20 +414,7 @@ export const AdminUser360 = () => {
         {data.kyc && <div className="lg:col-span-2"><KycCard data={data} /></div>}
         {data.money && <MoneyCard money={data.money} />}
 
-        {data.security && (
-          <Card className="bg-card border-border">
-            <CardHeader>
-              <CardTitle className="text-lg">Security</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-1 text-sm">
-              <p>Transaction PIN: {data.security.pinSet ? "set" : "not set"}</p>
-              <p>Failed PIN attempts: {data.security.pinFailedAttempts}</p>
-              {data.security.pinLockedUntil && data.security.pinLockedUntil > new Date() && (
-                <p className="text-destructive">Locked until {format(data.security.pinLockedUntil, "MMM d, HH:mm")}</p>
-              )}
-            </CardContent>
-          </Card>
-        )}
+        {data.security && <SecurityCard data={data} canUnlock={can(session?.role, "users.pin_unlock")} />}
 
         {data.activity && (
           <Card className="bg-card border-border">

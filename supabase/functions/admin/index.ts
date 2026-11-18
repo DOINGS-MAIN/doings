@@ -14,6 +14,8 @@ import { handleGiveaways } from "./giveaways.ts";
 import { handleLiveEvent } from "./liveEvent.ts";
 import { can, escapeLikePattern, eventHoldRoute, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
 import { tokenAal, twoStepRefusal } from "../_shared/adminTwoStep.ts";
+import { toCsv } from "../_shared/adminCsv.ts";
+import { clientIp, makeAudit } from "../_shared/adminAudit.ts";
 
 const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") ?? "15");
 
@@ -21,7 +23,7 @@ const RESERVED_ACTIONS = new Set([
   "suspend", "unsuspend", "ban", "unban", "flag", "unflag", "approve", "reject", "end",
   "invite", "accept", "disable", "enable", "role", "refund", "reprocess", "export", "probe-all", "health",
   "check", "resolve", "revoke", "kyc-reset", "stop", "reveal-code", "advance-floor",
-  "two-step", "reset-two-step",
+  "two-step", "reset-two-step", "clear-pin-lock",
 ]);
 
 // The platform treasury's wallets belong to this user (see migration 083).
@@ -29,20 +31,6 @@ const TREASURY_USER_ID = "00000000-0000-4000-8000-000000000001";
 
 // Bans last until an admin lifts them (100 years).
 const AUTH_BAN_DURATION = "876000h";
-
-function csvEscape(value: unknown): string {
-  const s = value == null ? "" : String(value);
-  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
-
-function toCsv(rows: Record<string, unknown>[], columns: string[]): string {
-  const header = columns.join(",");
-  const lines = rows.map((row) => columns.map((col) => csvEscape(row[col])).join(","));
-  return [header, ...lines].join("\n");
-}
 
 // Walks a filtered query for a CSV export. The order has an id tiebreaker (rows written in one
 // database transaction share created_at) and rows created after the export started are left out,
@@ -262,6 +250,8 @@ Deno.serve(async (req) => {
   const routeAction = "action" in route ? route.action : undefined;
   const routeId = "id" in route ? route.id : undefined;
   const aal = tokenAal(req.headers.get("Authorization"));
+  const ip = clientIp(req.headers);
+  const audit = makeAudit((fn, args) => supabase.rpc(fn, args), authId, ip);
 
   try {
     // ── TWO-STEP ── a super admin's password alone is not enough once the rule is on.
@@ -284,7 +274,7 @@ Deno.serve(async (req) => {
         .eq("id", invitedRowId)
         .eq("status", "invited");
       if (error) throw error;
-      await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "accept_admin_invite", p_target_type: "admin", p_target_id: invitedRowId });
+      await audit({ action: "accept_admin_invite", targetType: "admin", targetId: invitedRowId });
       return withCors({ ok: true, two_step_required: required });
     }
     if (invitedRowId) return withCors({ error: "Accept your admin invite first" }, { status: 403 });
@@ -296,7 +286,7 @@ Deno.serve(async (req) => {
     // ── PAYOUTS / BUNDLE ORDERS ── (route files; the role gate above already ran)
     if (route.resource === "payouts" || route.resource === "bundle-orders") {
       const ctx = {
-        req, supabase, authId, action: routeAction, id: routeId,
+        req, supabase, authId, audit, ip, action: routeAction, id: routeId,
         attachUserFields: (rows: Record<string, unknown>[]) => attachUserFields(supabase, rows),
       };
       const res = route.resource === "payouts" ? await handlePayouts(ctx) : await handleBundleOrders(ctx);
@@ -306,7 +296,7 @@ Deno.serve(async (req) => {
     // ── GIVEAWAYS ── (route file; the role gate above already ran)
     if (route.resource === "giveaways") {
       const res = await handleGiveaways({
-        req, supabase, authId, action: routeAction, id: routeId,
+        req, supabase, authId, audit, ip, action: routeAction, id: routeId,
         attachUserFields: (rows: Record<string, unknown>[]) => attachUserFields(supabase, rows),
       });
       return res ?? withCors({ error: "Not found" }, { status: 404 });
@@ -317,7 +307,7 @@ Deno.serve(async (req) => {
       (req.method === "GET" && !routeAction) || routeAction === "advance-floor" || routeAction === "remove-hold"
     )) {
       const res = await handleLiveEvent({
-        req, supabase, authId, action: routeAction, id: routeId,
+        req, supabase, authId, audit, ip, action: routeAction, id: routeId,
         holdId: (route as { holdId?: string }).holdId,
         attachUserFields: (rows: Record<string, unknown>[]) => attachUserFields(supabase, rows),
       });
@@ -326,11 +316,11 @@ Deno.serve(async (req) => {
 
     // ── USER 360 / KYC ACTIONS ── (route file; the role gate above already ran)
     if (
-      (route.resource === "users" && routeId && ((req.method === "GET" && !routeAction) || routeAction === "kyc-reset")) ||
+      (route.resource === "users" && routeId && ((req.method === "GET" && !routeAction) || routeAction === "kyc-reset" || routeAction === "clear-pin-lock")) ||
       (route.resource === "kyc" && routeId && routeAction === "revoke")
     ) {
       const res = await handleUser360({
-        req, supabase, authId, role, action: routeAction, id: routeId, resource: route.resource,
+        req, supabase, authId, audit, ip, role, action: routeAction, id: routeId, resource: route.resource,
       });
       return res ?? withCors({ error: "Not found" }, { status: 404 });
     }
@@ -390,7 +380,7 @@ Deno.serve(async (req) => {
           .update({ status: "suspended", suspended_reason: body.reason ?? "", suspended_at: new Date().toISOString(), suspended_by: authId })
           .eq("id", route.id);
         if (error) throw error;
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "suspend_user", p_target_type: "user", p_target_id: route.id, p_details: { reason: body.reason } });
+        await audit({ action: "suspend_user", targetType: "user", targetId: route.id, details: { reason: body.reason } });
         return withCors({ ok: true });
       }
 
@@ -404,7 +394,7 @@ Deno.serve(async (req) => {
           .select("id");
         if (error) throw error;
         if (!data?.length) return withCors({ error: "User is not suspended" }, { status: 409 });
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "unsuspend_user", p_target_type: "user", p_target_id: route.id });
+        await audit({ action: "unsuspend_user", targetType: "user", targetId: route.id });
         return withCors({ ok: true });
       }
 
@@ -422,7 +412,7 @@ Deno.serve(async (req) => {
           const { error: banErr } = await supabase.auth.admin.updateUserById(banAuthId, { ban_duration: AUTH_BAN_DURATION });
           if (banErr) throw banErr;
         }
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "ban_user", p_target_type: "user", p_target_id: route.id, p_details: { reason: body.reason } });
+        await audit({ action: "ban_user", targetType: "user", targetId: route.id, details: { reason: body.reason } });
         return withCors({ ok: true });
       }
 
@@ -440,7 +430,7 @@ Deno.serve(async (req) => {
           const { error: banErr } = await supabase.auth.admin.updateUserById(unbanAuthId, { ban_duration: "none" });
           if (banErr) throw banErr;
         }
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "unban_user", p_target_type: "user", p_target_id: route.id });
+        await audit({ action: "unban_user", targetType: "user", targetId: route.id });
         return withCors({ ok: true });
       }
     }
@@ -511,6 +501,7 @@ Deno.serve(async (req) => {
             flagged: row.flagged,
             created_at: row.created_at,
           }));
+          await audit({ action: "export_transactions", targetType: "transaction", details: { rows: csvRows.length, truncated, filters: Object.fromEntries(url.searchParams) } });
           return csvResponse(
             "transactions.csv",
             toCsv(csvRows, ["id", "reference", "user_name", "type", "amount", "fee", "currency", "status", "provider", "flagged", "created_at"]),
@@ -609,7 +600,7 @@ Deno.serve(async (req) => {
           .eq("id", route.id);
         if (error) throw error;
 
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "flag_transaction", p_target_type: "transaction", p_target_id: route.id, p_details: { reason: body.reason } });
+        await audit({ action: "flag_transaction", targetType: "transaction", targetId: route.id, details: { reason: body.reason } });
         return withCors({ ok: true });
       }
 
@@ -625,7 +616,7 @@ Deno.serve(async (req) => {
           .eq("id", route.id);
         if (error) throw error;
 
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "unflag_transaction", p_target_type: "transaction", p_target_id: route.id });
+        await audit({ action: "unflag_transaction", targetType: "transaction", targetId: route.id });
         return withCors({ ok: true });
       }
 
@@ -699,7 +690,7 @@ Deno.serve(async (req) => {
           .select("id");
         if (error) throw error;
         if (!data?.length) return withCors({ error: "Event not found" }, { status: 404 });
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "flag_event", p_target_type: "event", p_target_id: route.id, p_details: { reason: body.reason } });
+        await audit({ action: "flag_event", targetType: "event", targetId: route.id, details: { reason: body.reason } });
         return withCors({ ok: true });
       }
 
@@ -711,7 +702,7 @@ Deno.serve(async (req) => {
           .select("id");
         if (error) throw error;
         if (!data?.length) return withCors({ error: "Event not found" }, { status: 404 });
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "unflag_event", p_target_type: "event", p_target_id: route.id });
+        await audit({ action: "unflag_event", targetType: "event", targetId: route.id });
         return withCors({ ok: true });
       }
 
@@ -721,7 +712,7 @@ Deno.serve(async (req) => {
           .update({ status: "ended", ended_at: new Date().toISOString() })
           .eq("id", route.id);
         if (error) throw error;
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "end_event", p_target_type: "event", p_target_id: route.id });
+        await audit({ action: "end_event", targetType: "event", targetId: route.id });
         return withCors({ ok: true });
       }
     }
@@ -764,7 +755,7 @@ Deno.serve(async (req) => {
         }
         const { error } = await supabase.from("platform_settings").update({ admin_two_step_required: body.required }).eq("id", 1);
         if (error) throw error;
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: body.required ? "require_admin_two_step" : "unrequire_admin_two_step", p_target_type: "platform_settings" });
+        await audit({ action: body.required ? "require_admin_two_step" : "unrequire_admin_two_step", targetType: "platform_settings" });
         return withCors({ ok: true, two_step_required: body.required });
       }
 
@@ -783,7 +774,7 @@ Deno.serve(async (req) => {
           const { error: delErr } = await supabase.auth.admin.mfa.deleteFactor({ id: factor.id, userId: target.user_id as string });
           if (delErr) throw delErr;
         }
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "reset_admin_two_step", p_target_type: "admin", p_target_id: route.id, p_details: { factors: (listed?.factors ?? []).length } });
+        await audit({ action: "reset_admin_two_step", targetType: "admin", targetId: route.id, details: { factors: (listed?.factors ?? []).length } });
         return withCors({ ok: true });
       }
 
@@ -821,7 +812,7 @@ Deno.serve(async (req) => {
         }).select("id").single();
         if (error) throw error;
 
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "invite_admin", p_target_type: "admin", p_target_id: row.id, p_details: { email, role: body.role } });
+        await audit({ action: "invite_admin", targetType: "admin", targetId: row.id, details: { email, role: body.role } });
         return withCors({ ok: true, existing_account: existingAccount }, { status: 201 });
       }
 
@@ -837,7 +828,7 @@ Deno.serve(async (req) => {
         if (route.action === "enable") {
           const { error } = await supabase.from("admin_roles").update({ status: "active" }).eq("id", route.id);
           if (error) throw error;
-          await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "enable_admin", p_target_type: "admin", p_target_id: route.id });
+          await audit({ action: "enable_admin", targetType: "admin", targetId: route.id });
           return withCors({ ok: true });
         }
 
@@ -860,14 +851,14 @@ Deno.serve(async (req) => {
         if (route.action === "disable") {
           const { error } = await supabase.from("admin_roles").update({ status: "disabled" }).eq("id", route.id);
           if (error) throw error;
-          await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "disable_admin", p_target_type: "admin", p_target_id: route.id });
+          await audit({ action: "disable_admin", targetType: "admin", targetId: route.id });
           return withCors({ ok: true });
         }
 
         const { error } = await supabase.from("admin_roles").update({ role: body.role }).eq("id", route.id);
         if (error?.code === "23505") return withCors({ error: "This person already has that role" }, { status: 409 });
         if (error) throw error;
-        await supabase.rpc("log_admin_action", { p_admin_id: authId, p_action: "change_admin_role", p_target_type: "admin", p_target_id: route.id, p_details: { from: target.role, to: body.role } });
+        await audit({ action: "change_admin_role", targetType: "admin", targetId: route.id, details: { from: target.role, to: body.role } });
         return withCors({ ok: true });
       }
     }
@@ -937,11 +928,10 @@ Deno.serve(async (req) => {
           results.push({ provider_id: providerId, ...health });
         }
 
-        await supabase.rpc("log_admin_action", {
-          p_admin_id: authId,
-          p_action: "probe_all_providers",
-          p_target_type: "platform_settings",
-          p_details: { count: results.length },
+        await audit({
+          action: "probe_all_providers",
+          targetType: "platform_settings",
+          details: { count: results.length },
         });
 
         return withCors({ ok: true, results });
@@ -1150,6 +1140,7 @@ Deno.serve(async (req) => {
             idempotency_key: row.idempotency_key,
             created_at: row.created_at,
           }));
+          await audit({ action: "export_webhooks", targetType: "webhook", details: { rows: csvRows.length, truncated, filters: Object.fromEntries(url.searchParams) } });
           return csvResponse(
             "webhooks.csv",
             toCsv(csvRows, ["id", "provider", "event_type", "processed", "processing_error", "idempotency_key", "created_at"]),
@@ -1193,12 +1184,11 @@ Deno.serve(async (req) => {
           signature_valid: webhook.signature_valid as boolean | null,
         });
 
-        await supabase.rpc("log_admin_action", {
-          p_admin_id: authId,
-          p_action: "reprocess_webhook",
-          p_target_type: "webhook",
-          p_target_id: route.id,
-          p_details: result,
+        await audit({
+          action: "reprocess_webhook",
+          targetType: "webhook",
+          targetId: route.id,
+          details: result,
         });
 
         return withCors({ ok: result.ok, message: result.message });
@@ -1304,6 +1294,7 @@ Deno.serve(async (req) => {
           reference: row.reference,
           created_at: row.created_at,
         }));
+        await audit({ action: "export_psp_events", targetType: "psp_event", details: { rows: csvRows.length, truncated, filters: Object.fromEntries(url.searchParams) } });
         return csvResponse(
           "psp-events.csv",
           toCsv(csvRows, ["id", "provider_id", "direction", "event_type", "status", "reference", "created_at"]),
@@ -1327,7 +1318,7 @@ Deno.serve(async (req) => {
 
       let query = supabase
         .from("admin_audit_log")
-        .select("id, admin_user_id, action, target_type, target_id, details, created_at", { count: "exact" })
+        .select("id, admin_user_id, action, target_type, target_id, details, ip_address, created_at", { count: "exact" })
         .order("created_at", { ascending: false })
         .order("id", { ascending: false })
         .range(from, to);

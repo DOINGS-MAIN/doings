@@ -393,6 +393,7 @@ export const admin = {
     ban: (id: string, reason: string) => invoke("admin", { method: "POST", path: `users/${id}/ban`, body: { reason } }),
     unban: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/unban` }),
     resetKycAttempts: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/kyc-reset` }),
+    clearPinLock: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/clear-pin-lock` }),
   },
   transactions: {
     list: (params?: {

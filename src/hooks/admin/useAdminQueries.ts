@@ -274,6 +274,7 @@ export function useAdminMutations() {
     revokeKyc: (kycId: string, reason: string, confirm: string) =>
       run(() => adminApi.kyc.revoke(kycId, reason, confirm), "users", "kyc", "stats"),
     resetKycAttempts: (userId: string) => run(() => adminApi.users.resetKycAttempts(userId), "users"),
+    clearPinLock: (userId: string) => run(() => adminApi.users.clearPinLock(userId), "users"),
     advanceFloor: (eventId: string) => run(() => adminApi.events.advanceFloor(eventId), "events", "stats"),
     removeFloorHold: (eventId: string, holdId: string, reason: string) =>
       run(() => adminApi.events.removeHold(eventId, holdId, reason), "events", "stats"),

@@ -6,10 +6,14 @@ import { getPlatformPaymentSettings } from "../_shared/psp/platformSettings.ts";
 import { fetchTransferStatus } from "../_shared/psp/registry.ts";
 import { applyWithdrawalStatus } from "../_shared/psp/withdrawalFinalize.ts";
 
+import type { Audit } from "../_shared/adminAudit.ts";
+
 export type AdminRouteCtx = {
   req: Request;
   supabase: SupabaseClient;
   authId: string;
+  audit: Audit;
+  ip: string | null;
   action?: string;
   id?: string;
   attachUserFields: (rows: Record<string, unknown>[]) => Promise<Record<string, unknown>[]>;
@@ -21,7 +25,7 @@ const STATUSES = new Set(["pending", "processing", "completed", "failed", "refun
 
 // Payouts are withdrawal transactions; bundle sales carry metadata.kind bundle_sale*.
 export async function handlePayouts(ctx: AdminRouteCtx): Promise<Response | null> {
-  const { req, supabase, authId, action, id } = ctx;
+  const { req, supabase, authId, audit, action, id } = ctx;
   const url = new URL(req.url);
 
   if (req.method === "GET" && !id) {
@@ -75,7 +79,7 @@ export async function handlePayouts(ctx: AdminRouteCtx): Promise<Response | null
     const refusal = payoutCheckRefusal(row);
     if (refusal) return withCors({ error: refusal.error }, { status: refusal.status });
 
-    const checked = await checkWithProvider(supabase, authId, row);
+    const checked = await checkWithProvider(supabase, audit, row);
     if ("error" in checked) return withCors({ error: checked.error }, { status: checked.status });
     return withCors({ ok: true, ...checked });
   }
@@ -91,7 +95,7 @@ export async function handlePayouts(ctx: AdminRouteCtx): Promise<Response | null
     // Marking an NGN bank payout failed refunds the user, so ask the provider live first: a stale
     // or missing check must never be the reason money goes out twice.
     if (body.outcome === "failed" && payoutCheckRefusal(row) === null && row.status !== "failed") {
-      const checked = await checkWithProvider(supabase, authId, row);
+      const checked = await checkWithProvider(supabase, audit, row);
       if ("error" in checked) {
         return withCors({ error: "Couldn't reach the provider, so it can't safely be marked failed — try again" }, { status: 502 });
       }
@@ -140,7 +144,7 @@ async function loadForCheck(supabase: SupabaseClient, id: string): Promise<Check
 // so that is flagged loudly and audited instead of being silently ignored.
 async function checkWithProvider(
   supabase: SupabaseClient,
-  authId: string,
+  audit: Audit,
   row: CheckRow,
 ): Promise<
   | { normalized: string; provider_status: string | null; status: string; paid_after_failed: boolean }
@@ -172,13 +176,11 @@ async function checkWithProvider(
 
   const { data: after, error: afterErr } = await supabase.from("transactions").select("status").eq("id", row.id).maybeSingle();
   if (afterErr) throw afterErr;
-  const { error: logErr } = await supabase.rpc("log_admin_action", {
-    p_admin_id: authId,
-    p_action: paidAfterFailed ? "provider_paid_after_failed" : "check_payout",
-    p_target_type: "transaction",
-    p_target_id: row.id,
-    p_details: { normalized: outcome.normalized, provider_status: providerStatus, status_before: row.status },
+  await audit({
+    action: paidAfterFailed ? "provider_paid_after_failed" : "check_payout",
+    targetType: "transaction",
+    targetId: row.id,
+    details: { normalized: outcome.normalized, provider_status: providerStatus, status_before: row.status },
   });
-  if (logErr) throw logErr;
   return { normalized: outcome.normalized, provider_status: providerStatus, status: after?.status ?? row.status, paid_after_failed: paidAfterFailed };
 }

@@ -7,11 +7,12 @@ const KYC_COLUMNS =
   "id, level, status, provider, verification_method, bvn_last_four, nin_last_four, selfie_match_confidence, liveness_score, " +
   "rejection_reason, submitted_at, verified_at, reviewed_at, superseded_at";
 const KYC_ATTEMPTS_MAX = 5;
+const VIEW_RECORD_EVERY_MS = 10 * 60_000;
 
 type Ctx = Omit<AdminRouteCtx, "attachUserFields"> & { role: string; resource: "users" | "kyc" };
 
 export async function handleUser360(ctx: Ctx): Promise<Response | null> {
-  const { req, supabase, authId, action, id, role, resource } = ctx;
+  const { req, supabase, authId, audit, ip, action, id, role, resource } = ctx;
   if (!id) return null;
 
   // ── GET users/:id: only the sections this role may see are queried and returned ──
@@ -101,6 +102,16 @@ export async function handleUser360(ctx: Ctx): Promise<Response | null> {
     }
 
     await Promise.all(tasks);
+    // Opening a person's page shows their contact, KYC and money details, so it is on the record.
+    // The page refetches while it is open, so one record per admin and person every ten minutes is enough.
+    const { count: recentViews, error: viewsErr } = await supabase
+      .from("admin_audit_log").select("id", { count: "exact", head: true })
+      .eq("action", "view_user").eq("admin_user_id", authId).eq("target_id", userId)
+      .gte("created_at", new Date(Date.now() - VIEW_RECORD_EVERY_MS).toISOString());
+    if (viewsErr) throw viewsErr;
+    if (!recentViews) {
+      await audit({ action: "view_user", targetType: "user", targetId: userId, details: { sections: Object.keys(sections) } });
+    }
     return withCors({ user, sections, can });
   }
 
@@ -127,6 +138,13 @@ export async function handleUser360(ctx: Ctx): Promise<Response | null> {
     const { data, error } = await supabase.rpc("admin_reset_kyc_attempts", { p_user_id: id, p_admin_auth_id: authId });
     if (error) return withCors({ error: error.message }, { status: 409 });
     return withCors({ ok: true, removed: (data as { removed?: number })?.removed ?? 0 });
+  }
+
+  // ── POST users/:id/clear-pin-lock ── the change, its audit record and the notice are one database step.
+  if (resource === "users" && req.method === "POST" && action === "clear-pin-lock") {
+    const { error } = await supabase.rpc("admin_clear_pin_lock", { p_user_id: id, p_admin_auth_id: authId, p_ip: ip });
+    if (error) return withCors({ error: error.message }, { status: 409 });
+    return withCors({ ok: true });
   }
 
   return null;

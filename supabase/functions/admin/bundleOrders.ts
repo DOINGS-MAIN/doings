@@ -9,7 +9,7 @@ const COLUMNS =
 const STATUSES = new Set(["awaiting_payment", "credited", "pending_float", "below_minimum", "failed", "expired"]);
 
 export async function handleBundleOrders(ctx: AdminRouteCtx): Promise<Response | null> {
-  const { req, supabase, authId, action, id } = ctx;
+  const { req, supabase, authId, audit, action, id } = ctx;
   const url = new URL(req.url);
 
   if (req.method === "GET" && !id) {
@@ -60,10 +60,7 @@ export async function handleBundleOrders(ctx: AdminRouteCtx): Promise<Response |
       }
       return withCors({ error: "Couldn't reach the provider — try again or resolve manually" }, { status: 502 });
     }
-    const { error: logErr } = await supabase.rpc("log_admin_action", {
-      p_admin_id: authId, p_action: "check_bundle_order", p_target_type: "bundle_order", p_target_id: id, p_details: result,
-    });
-    if (logErr) throw logErr;
+    await audit({ action: "check_bundle_order", targetType: "bundle_order", targetId: id, details: result });
     return withCors({ ok: true, result });
   }
 
