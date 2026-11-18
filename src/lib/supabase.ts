@@ -13,6 +13,15 @@ export const supabase = createClient(
   isSupabaseConfigured ? supabaseAnonKey : "invalid"
 );
 
+/** A client that keeps no session, for checking a password without touching the signed-in one. */
+export function passwordCheckClient() {
+  return createClient(
+    isSupabaseConfigured ? supabaseUrl : "https://invalid.invalid",
+    isSupabaseConfigured ? supabaseAnonKey : "invalid",
+    { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: "doings-password-check" } },
+  );
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
   const session = await getValidSession();
   const token = session?.access_token;
@@ -74,6 +83,16 @@ async function invoke<T = unknown>(fnName: string, options?: {
       readApiField(data.message) ??
       readApiField(data.msg) ??
       `Request failed: ${res.status}`;
+    // The server wants the two-step code and this screen did not ask for it (the rule was switched on
+    // meanwhile, or setup was put off): go and ask.
+    if (data.code === "TWO_STEP_REQUIRED" && typeof window !== "undefined" && window.location.pathname !== "/admin/two-step") {
+      try {
+        sessionStorage.removeItem("doings-admin-two-step-later");
+      } catch {
+        // ignore
+      }
+      window.location.assign("/admin/two-step");
+    }
     const err = new Error(detail ? `${msg}: ${detail}` : msg) as Error & { code?: string };
     if (typeof data.code === "string") err.code = data.code;
     throw err;
@@ -466,6 +485,8 @@ export const admin = {
     enable: (id: string) => invoke("admin", { method: "POST", path: `team/${id}/enable` }),
     setRole: (id: string, role: string) => invoke("admin", { method: "POST", path: `team/${id}/role`, body: { role } }),
     accept: () => invoke("admin", { method: "POST", path: "team/accept" }),
+    resetTwoStep: (id: string) => invoke("admin", { method: "POST", path: `team/${id}/reset-two-step` }),
+    setTwoStepRequired: (required: boolean) => invoke("admin", { method: "POST", path: "team/two-step", body: { required } }),
   },
   audit: (params?: { page?: number; limit?: number; action?: string; admin_id?: string }) =>
     invoke("admin", { method: "GET", path: "audit", params: params as Record<string, string> }),

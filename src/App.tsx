@@ -24,6 +24,7 @@ import RedeemGiveawayLinkPage from "./pages/RedeemGiveawayLinkPage";
 
 import { AdminAuthShell } from "./components/admin/AdminAuthShell";
 import { AdminLayout } from "./components/admin/AdminLayout";
+import { AdminTwoStep } from "./pages/admin/AdminTwoStep";
 import { AdminDashboard } from "./pages/admin/AdminDashboard";
 import { AdminUsers } from "./pages/admin/AdminUsers";
 import { AdminTransactions } from "./pages/admin/AdminTransactions";
@@ -90,6 +91,7 @@ const App = () => (
           <Route element={<AdminAuthShell />}>
             <Route path="/admin/login" element={<AdminLogin />} />
             <Route path="/admin/change-password" element={<AdminChangePassword />} />
+            <Route path="/admin/two-step" element={<AdminTwoStep />} />
 
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />

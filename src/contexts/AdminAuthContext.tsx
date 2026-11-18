@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { supabase, auth, admin as adminApi } from "@/lib/supabase";
+import { supabase, auth, admin as adminApi, passwordCheckClient } from "@/lib/supabase";
 import { AdminRole } from "@/types/admin";
 
 export interface AdminAccount {
@@ -23,11 +23,36 @@ export interface AdminAccount {
   mustChangePassword?: boolean;
 }
 
+/**
+ * Where the session stands on two-step sign-in: "challenge" = an authenticator is set up and its code
+ * has not been entered yet; "setup" = a super admin with no authenticator; "ok" = nothing to do.
+ */
+export type TwoStepState = "ok" | "challenge" | "setup";
+
 interface AdminSession {
   adminId: string;
   email: string;
   role: AdminRole;
   loginAt: Date;
+  twoStep: TwoStepState;
+  /** The verified authenticator to ask a code from, when there is one. */
+  twoStepFactorId: string | null;
+}
+
+/** The session's assurance level, read from its token ("aal2" once a two-step code was entered). */
+function sessionAal(accessToken: string): "aal1" | "aal2" {
+  try {
+    const part = accessToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const claims = JSON.parse(atob(part + "=".repeat((4 - (part.length % 4)) % 4))) as { aal?: unknown };
+    return claims.aal === "aal2" ? "aal2" : "aal1";
+  } catch {
+    return "aal1";
+  }
+}
+
+export function twoStepStateFor(role: string, hasAuthenticator: boolean, aal: "aal1" | "aal2"): TwoStepState {
+  if (hasAuthenticator) return aal === "aal2" ? "ok" : "challenge";
+  return role === "super_admin" ? "setup" : "ok";
 }
 
 interface AdminAuthContextValue {
@@ -76,11 +101,16 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
     }
 
     if (adminRole?.role) {
+      // Read from the session itself: calling the auth client again from inside its own change
+      // listener can stall it.
+      const factor = (authSession.user.factors ?? []).find((f) => f.factor_type === "totp" && f.status === "verified");
       setSession({
         adminId: authSession.user.id,
         email: authSession.user.email ?? "",
         role: adminRole.role as AdminRole,
         loginAt: new Date(),
+        twoStep: twoStepStateFor(adminRole.role as string, Boolean(factor), sessionAal(authSession.access_token)),
+        twoStepFactorId: factor?.id ?? null,
       });
       setLoading(false);
       return true;
@@ -132,7 +162,9 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
         const { data } = await supabase.auth.getUser();
         const email = data.user?.email;
         if (!email) return { success: false, error: "Sign in again to change your password." };
-        const { error: checkErr } = await supabase.auth.signInWithPassword({ email, password: currentPassword });
+        // Checked on a throwaway client: signing in again on the main one would replace a session that
+        // has passed the two-step code with a password-only one, which may not change a password.
+        const { error: checkErr } = await passwordCheckClient().auth.signInWithPassword({ email, password: currentPassword });
         if (checkErr) return { success: false, error: "Your current password is wrong." };
       }
       const { error } = await supabase.auth.updateUser({ password: newPassword });

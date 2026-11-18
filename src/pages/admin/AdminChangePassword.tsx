@@ -9,6 +9,9 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { cameFromEmailLink } from "@/lib/authMethods";
 
+/** Admin accounts open the money controls, so their passwords are longer than the app's minimum. */
+const ADMIN_PASSWORD_MIN = 12;
+
 export const AdminChangePassword = () => {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -27,6 +30,10 @@ export const AdminChangePassword = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (newPassword.length < ADMIN_PASSWORD_MIN) {
+      toast({ title: "Error", description: `Use at least ${ADMIN_PASSWORD_MIN} characters`, variant: "destructive" });
+      return;
+    }
     if (newPassword !== confirmPassword) {
       toast({ title: "Error", description: "Passwords don't match", variant: "destructive" });
       return;
@@ -90,7 +97,7 @@ export const AdminChangePassword = () => {
                   onChange={(e) => setNewPassword(e.target.value)}
                   className="pl-11"
                   required
-                  minLength={6}
+                  minLength={ADMIN_PASSWORD_MIN}
                 />
               </div>
             </div>
@@ -103,7 +110,7 @@ export const AdminChangePassword = () => {
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="pl-11"
                   required
-                  minLength={6}
+                  minLength={ADMIN_PASSWORD_MIN}
                 />
               </div>
             </div>

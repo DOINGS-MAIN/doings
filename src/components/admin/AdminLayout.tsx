@@ -3,9 +3,10 @@ import { AdminSidebar } from "./AdminSidebar";
 import { useAdminStats } from "@/hooks/admin/useAdminQueries";
 import { useAdminRealtime } from "@/hooks/admin/useAdminRealtime";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
+import { twoStepPutOff } from "@/pages/admin/AdminTwoStep";
 
 export const AdminLayout = () => {
-  const { isAuthenticated, currentAccount, logout, loading } = useAdminAuth();
+  const { isAuthenticated, currentAccount, session, logout, loading } = useAdminAuth();
   const { data: stats } = useAdminStats();
   useAdminRealtime();
 
@@ -19,6 +20,12 @@ export const AdminLayout = () => {
 
   if (!isAuthenticated || !currentAccount) {
     return <Navigate to="/admin/login" replace />;
+  }
+
+  // An authenticator code is owed, or a super admin has none yet (they may put setup off until the
+  // rule is switched on; the server is what enforces it).
+  if (session?.twoStep === "challenge" || (session?.twoStep === "setup" && !twoStepPutOff())) {
+    return <Navigate to="/admin/two-step" replace />;
   }
 
   return (

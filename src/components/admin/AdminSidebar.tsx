@@ -6,6 +6,7 @@ import {
   Calendar,
   Settings,
   LogOut,
+  ShieldCheck,
   Shield,
   Route,
   Webhook,
@@ -140,6 +141,13 @@ export const AdminSidebar = ({
         >
           <Settings className="w-5 h-5" />
           <span className="font-medium">Settings</span>
+        </NavLink>
+        <NavLink
+          to="/admin/two-step"
+          className="flex items-center gap-3 px-4 py-3 rounded-xl text-muted-foreground hover:bg-muted hover:text-foreground transition-all"
+        >
+          <ShieldCheck className="w-5 h-5" />
+          <span className="font-medium">Two-step sign-in</span>
         </NavLink>
         <button
           onClick={onLogout}
