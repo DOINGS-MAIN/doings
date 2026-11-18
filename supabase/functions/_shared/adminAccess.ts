@@ -9,11 +9,11 @@ export const ROLE_PERMISSIONS: Record<AdminRole, readonly string[]> = {
     "giveaways.view", "giveaways.stop",
   ],
   support: [
-    "dashboard", "users.view", "transactions.view", "payments", "queue",
+    "dashboard", "users.view", "users.pin_unlock", "transactions.view", "payments", "queue",
     "webhooks.view", "psp_events", "floor_avatars", "events.view", "events.end",
     "giveaways.view",
   ],
-  compliance: ["dashboard", "kyc", "users.view", "users.suspend"],
+  compliance: ["dashboard", "kyc", "users.view", "users.suspend", "users.pin_unlock"],
   moderation: [
     "dashboard", "events.view", "events.flag", "events.end", "ads", "floor_avatars", "users.view",
     "giveaways.view", "giveaways.stop", "events.floor",
@@ -41,6 +41,7 @@ export function permissionFor(resource: string, method: string, action?: string,
       if (get && !action) return "users.view";
       if (post && hasId && ["suspend", "unsuspend", "ban", "unban"].includes(action ?? "")) return "users.suspend";
       if (post && hasId && action === "kyc-reset") return "kyc";
+      if (post && hasId && action === "clear-pin-lock") return "users.pin_unlock";
       return null;
     case "transactions":
       if (get && !action) return "transactions.view";

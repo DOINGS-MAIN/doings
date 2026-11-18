@@ -11,7 +11,7 @@ const TYPES = new Set(["live", "scheduled"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function handleGiveaways(ctx: AdminRouteCtx): Promise<Response | null> {
-  const { req, supabase, authId, action, id } = ctx;
+  const { req, supabase, authId, audit, action, id } = ctx;
   const url = new URL(req.url);
 
   if (id && !UUID.test(id)) return withCors({ error: "Giveaway not found" }, { status: 404 });
@@ -123,11 +123,7 @@ export async function handleGiveaways(ctx: AdminRouteCtx): Promise<Response | nu
     const { data: g, error } = await supabase.from("giveaways").select("id, code, status").eq("id", id).maybeSingle();
     if (error) throw error;
     if (!g) return withCors({ error: "Giveaway not found" }, { status: 404 });
-    const { error: logErr } = await supabase.rpc("log_admin_action", {
-      p_admin_id: authId, p_action: "reveal_giveaway_code", p_target_type: "giveaway", p_target_id: id,
-      p_details: { status: g.status },
-    });
-    if (logErr) throw logErr;
+    await audit({ action: "reveal_giveaway_code", targetType: "giveaway", targetId: id, details: { status: g.status } });
     return withCors({ code: g.code });
   }
 

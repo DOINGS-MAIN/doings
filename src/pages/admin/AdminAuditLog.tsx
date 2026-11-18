@@ -16,6 +16,7 @@ type AuditRow = {
   target_type: string;
   target_id: string | null;
   details: Record<string, unknown> | null;
+  ip_address: string | null;
   created_at: string;
 };
 
@@ -32,6 +33,8 @@ const ACTIONS = [
   "refund_transaction", "set_wallet_funding_provider", "set_psp_env", "set_withdrawal_fee_settings",
   "set_fx_settings", "set_fx_market_rate_manual", "record_treasury_topup",
   "ad_created", "ad_updated", "floor_avatar_removed",
+  "view_user", "clear_pin_lock", "export_transactions", "export_webhooks", "export_psp_events",
+  "require_admin_two_step", "unrequire_admin_two_step", "reset_admin_two_step",
 ];
 
 export const AdminAuditLog = () => {
@@ -122,7 +125,10 @@ export const AdminAuditLog = () => {
               rows.map((r) => (
                 <TableRow key={r.id} className="border-border align-top">
                   <TableCell className="whitespace-nowrap text-sm">{format(new Date(r.created_at), "MMM d, yyyy HH:mm")}</TableCell>
-                  <TableCell className="text-sm">{r.admin_email || r.admin_user_id}</TableCell>
+                  <TableCell className="text-sm">
+                    {r.admin_email || r.admin_user_id}
+                    {r.ip_address && <span className="block text-xs text-muted-foreground font-mono">{r.ip_address}</span>}
+                  </TableCell>
                   <TableCell className="text-sm font-medium">{r.action.replace(/_/g, " ")}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {r.target_type}
