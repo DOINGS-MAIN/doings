@@ -12,11 +12,12 @@ import { mapByProvider } from "../_shared/psp/pspStatus.ts";
 import { sendUsdc } from "../_shared/blockradar.ts";
 import { refreshMarketRateIfStale } from "../_shared/bundles.ts";
 import {
+  bankNameAccepted,
   getKycLegalName,
   isDefiniteBlockradarRejection,
   isSolanaAddress,
   NAME_MISMATCH_MESSAGE,
-  nameMatchesKyc,
+  sellIdentityFromRow,
 } from "../_shared/sell.ts";
 
 /**
@@ -110,13 +111,32 @@ Deno.serve(async (req) => {
     const blocked = accountBlock(user.status);
     if (blocked) return withCors(blocked, { status: 403 });
   }
-  if (user.kyc_level < 2) {
-    return withCors({ error: "Complete identity verification (BVN + selfie) to sell bundles" }, { status: 403 });
-  }
+  if (user.kyc_level < 1) return withCors({ error: "Verify your email to sell bundles", code: "EMAIL_REQUIRED" }, { status: 403 });
 
   const url = new URL(req.url);
   const parts = url.pathname.split("/").filter(Boolean);
   const rest = parts.slice(parts.indexOf("sell") + 1);
+
+  // What selling needs follows the two admin switches (114); a failed read is the strict rule.
+  const { data: identityRow, error: identityErr } = await supabase.rpc("sell_identity_status", { p_user_id: user.id });
+  if (identityErr) console.error("sell: sell_identity_status failed", identityErr.code);
+  const identity = sellIdentityFromRow(identityErr ? null : identityRow, user.kyc_level);
+
+  // ── What this person still has to do before selling (the app's first-sale steps) ──
+  if (req.method === "GET" && rest[0] === "requirements") {
+    return withCors({ ok: true, ...identity });
+  }
+  // A quote moves nothing, and the first sale shows what the person will receive before asking who they are.
+  const quoteOnly = req.method === "GET" && rest[0] === "quote";
+  if (!identity.ok && !quoteOnly) {
+    // The wording is kept for apps from before 114, which match on it.
+    return withCors({
+      error: "Complete identity verification (BVN + selfie) to sell bundles",
+      code: "IDENTITY_REQUIRED",
+      needs_bvn: identity.needs_bvn && !identity.has_bvn,
+      needs_selfie: identity.needs_selfie && !identity.has_selfie,
+    }, { status: 403 });
+  }
 
   try {
     // ── Quote ──
@@ -147,10 +167,10 @@ Deno.serve(async (req) => {
           .eq("user_id", user.id)
           .order("is_default", { ascending: false })
           .order("created_at", { ascending: true });
-        const legal = await getKycLegalName(supabase, user.id);
+        const legal = identity.needs_bvn ? await getKycLegalName(supabase, user.id) : null;
         const accounts = (rows ?? []).map((a) => ({
           ...a,
-          name_matches: legal ? nameMatchesKyc(String(a.account_name ?? ""), legal) : false,
+          name_matches: bankNameAccepted(String(a.account_name ?? ""), legal, identity.needs_bvn),
         }));
         return withCors({ ok: true, accounts });
       }
@@ -171,8 +191,8 @@ Deno.serve(async (req) => {
           return withCors({ error: "We couldn't verify that account" }, { status: 422 });
         }
         if (!resolvedName) return withCors({ error: "We couldn't verify that account" }, { status: 422 });
-        const legal = await getKycLegalName(supabase, user.id);
-        if (!legal || !nameMatchesKyc(resolvedName, legal)) {
+        const legal = identity.needs_bvn ? await getKycLegalName(supabase, user.id) : null;
+        if (!bankNameAccepted(resolvedName, legal, identity.needs_bvn)) {
           return withCors({ error: NAME_MISMATCH_MESSAGE, account_name: resolvedName }, { status: 422 });
         }
         let bankName = bankCode;
@@ -289,8 +309,9 @@ Deno.serve(async (req) => {
         } catch {
           return withCors({ error: "We couldn't verify that account" }, { status: 422 });
         }
-        const legal = await getKycLegalName(supabase, user.id);
-        if (!resolvedName || !legal || !nameMatchesKyc(resolvedName, legal)) {
+        const legal = identity.needs_bvn ? await getKycLegalName(supabase, user.id) : null;
+        if (!resolvedName) return withCors({ error: "We couldn't verify that account" }, { status: 422 });
+        if (!bankNameAccepted(resolvedName, legal, identity.needs_bvn)) {
           return withCors({ error: NAME_MISMATCH_MESSAGE, account_name: resolvedName }, { status: 422 });
         }
         destination = {

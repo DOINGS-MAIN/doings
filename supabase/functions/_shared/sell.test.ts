@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { finalizeRpcNames, isDefiniteBlockradarRejection, isSolanaAddress, nameMatchesKyc } from "./sell.ts";
+import { bankNameAccepted, finalizeRpcNames, isDefiniteBlockradarRejection, isSolanaAddress, nameMatchesKyc, sellIdentityFromRow } from "./sell.ts";
 
 Deno.test("solana addresses", () => {
   assertEquals(isSolanaAddress("7EcDhSYGxXyscszYEp35KHN8vvw3svAuLKTzXwCFLtV"), true);
@@ -42,4 +42,30 @@ Deno.test("solana addresses decode to exactly 32 bytes (Tron / BTC base58 reject
 
 Deno.test("a Blockradar 408 is not a definite refusal", () => {
   assertEquals(isDefiniteBlockradarRejection(new Error("Blockradar request failed: 408 — timeout")), false);
+});
+
+Deno.test("with the BVN switch on, a payout account must be in the BVN name", () => {
+  const legal = { first: "John", last: "Adebayo" };
+  assertEquals(bankNameAccepted("ADEBAYO JOHN O", legal, true), true);
+  assertEquals(bankNameAccepted("ADEBAYO MARY", legal, true), false);
+  assertEquals(bankNameAccepted("ADEBAYO JOHN", null, true), false);
+  assertEquals(bankNameAccepted("", legal, true), false);
+});
+
+Deno.test("with the BVN switch off there is no name to match, so any account the bank confirms is accepted", () => {
+  assertEquals(bankNameAccepted("ADEBAYO MARY", null, false), true);
+  assertEquals(bankNameAccepted("SOMEONE ELSE", { first: "John", last: "Adebayo" }, false), true);
+  // the bank must still confirm the account exists
+  assertEquals(bankNameAccepted("", null, false), false);
+  assertEquals(bankNameAccepted("   ", null, false), false);
+});
+
+Deno.test("a status that cannot be read is the strict rule: BVN and selfie, judged by level", () => {
+  assertEquals(sellIdentityFromRow(null, 2), { needs_bvn: true, needs_selfie: true, has_bvn: true, has_selfie: true, ok: true });
+  assertEquals(sellIdentityFromRow(undefined, 1), { needs_bvn: true, needs_selfie: true, has_bvn: false, has_selfie: false, ok: false });
+  assertEquals(sellIdentityFromRow({ needs_bvn: "yes" }, 1).ok, false);
+  assertEquals(
+    sellIdentityFromRow({ needs_bvn: false, needs_selfie: false, has_bvn: false, has_selfie: false, ok: true }, 1),
+    { needs_bvn: false, needs_selfie: false, has_bvn: false, has_selfie: false, ok: true },
+  );
 });

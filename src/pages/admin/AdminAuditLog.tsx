@@ -34,7 +34,7 @@ const ACTIONS = [
   "set_fx_settings", "set_fx_market_rate_manual", "record_treasury_topup",
   "ad_created", "ad_updated", "floor_avatar_removed",
   "view_user", "clear_pin_lock", "export_transactions", "export_webhooks", "export_psp_events",
-  "require_admin_two_step", "unrequire_admin_two_step", "reset_admin_two_step",
+  "set_gifting_settings", "set_sell_identity_settings", "require_admin_two_step", "unrequire_admin_two_step", "reset_admin_two_step",
 ];
 
 export const AdminAuditLog = () => {
