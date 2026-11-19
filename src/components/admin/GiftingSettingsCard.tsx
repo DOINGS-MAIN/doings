@@ -61,6 +61,10 @@ export function limitsPayload(form: LimitsForm):
   if (values.some((v) => v === null)) return { error: "Enter each limit as a whole number" };
   const [minPurchase, minSell, sellDaily, sprayMax, sprayL1, sprayL2, giveTotal, giveEach] = values as number[];
   if (minPurchase < 1 || minSell < 1 || giveTotal < 1 || giveEach < 1) return { error: "A minimum must be at least 1" };
+  if (sellDaily < 1) return { error: "The daily sale limit must be more than 0" };
+  if ((sprayL1 > 0 && sprayL1 < 200) || (sprayL2 > 0 && sprayL2 < 200)) {
+    return { error: "A daily spray limit must be 0 (sprays off) or at least 200 bundles" };
+  }
   if (sprayL2 < sprayL1) return { error: "A verified limit cannot be lower than the email-only limit" };
   if (giveEach > giveTotal) return { error: "The smallest share per person cannot be more than the smallest giveaway" };
   if (sprayMax < 200) return { error: "The largest spray must be at least 200 bundles (one note)" };
@@ -92,6 +96,7 @@ export function GiftingSettingsCard() {
   const [amounts, setAmounts] = useState<LimitsForm>(EMPTY_LIMITS);
   // As loaded, to send the other limits only when one of them was changed.
   const [savedAmounts, setSavedAmounts] = useState<LimitsForm>(EMPTY_LIMITS);
+  const [amountsLoaded, setAmountsLoaded] = useState(false);
   const [limits, setLimits] = useState<Limits>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -109,9 +114,12 @@ export function GiftingSettingsCard() {
     setSellBvn(s.sell_requires_bvn !== false);
     setSellSelfie(s.sell_requires_selfie !== false);
     setSavedSell({ bvn: s.sell_requires_bvn !== false, selfie: s.sell_requires_selfie !== false });
+    setLoaded(true);
     const { data: limitData, error: limitError } = await supabase.rpc("get_platform_limits");
     if (limitError) {
-      toast.error(limitError.message || "Couldn't load the limits");
+      // The switches and sharing limits above can still be saved; the other limits are left alone.
+      setAmountsLoaded(false);
+      toast.error("Couldn't load the buying, selling and spray limits. They are left unchanged.");
       return;
     }
     const l = (limitData ?? {}) as Record<string, unknown>;
@@ -127,7 +135,7 @@ export function GiftingSettingsCard() {
     };
     setAmounts(loadedAmounts);
     setSavedAmounts(loadedAmounts);
-    setLoaded(true);
+    setAmountsLoaded(true);
     setLimits({
       shareL1: naira(s.share_l1_kobo),
       shareL2: naira(s.share_l2_kobo),
@@ -150,7 +158,7 @@ export function GiftingSettingsCard() {
       toast.error("The settings haven't loaded yet. Reload the page and try again.");
       return;
     }
-    const amountsChanged = (Object.keys(amounts) as (keyof LimitsForm)[]).some((k) => amounts[k] !== savedAmounts[k]);
+    const amountsChanged = amountsLoaded && (Object.keys(amounts) as (keyof LimitsForm)[]).some((k) => amounts[k] !== savedAmounts[k]);
     const amountsPayload = limitsPayload(amounts);
     if (amountsChanged && "error" in amountsPayload) {
       toast.error(amountsPayload.error);
@@ -177,7 +185,7 @@ export function GiftingSettingsCard() {
       : { error: null };
     if (sellError) {
       setSaving(false);
-      toast.error(`Sharing and giveaway settings were saved, but the selling checks were not: ${sellError.message || "please try again"}`);
+      toast.error(`Sharing and giveaway settings were saved, but the selling checks${amountsChanged ? " and the other limits" : ""} were not: ${sellError.message || "please try again"}`);
       void load();
       return;
     }
@@ -216,7 +224,7 @@ export function GiftingSettingsCard() {
         inputMode="numeric"
         value={amounts[id]}
         onChange={(e) => setAmounts((prev) => ({ ...prev, [id]: e.target.value }))}
-        disabled={busy}
+        disabled={busy || !amountsLoaded}
       />
     </div>
   );

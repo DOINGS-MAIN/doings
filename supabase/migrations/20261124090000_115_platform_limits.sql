@@ -48,17 +48,25 @@ BEGIN
     FROM public.users u CROSS JOIN public.platform_settings s
    WHERE u.id = p_sprayer_id AND s.id = 1;
 
-  -- Charged today: the sprayer's own debits (the receiver's side is type 'receive').
-  SELECT COALESCE(sum(abs(amount)), 0) INTO v_charged
-    FROM public.transactions
-   WHERE user_id = p_sprayer_id AND type = 'spray' AND currency = 'NGN'
-     AND status IN ('completed', 'pending', 'processing') AND created_at >= v_day;
+  -- A spray belongs to the day it joined the line. Charged today: the sprayer's own debits (the
+  -- receiver's side is type 'receive'), leaving out a spray that joined the line before today and
+  -- was only charged after midnight: it used yesterday's allowance while it waited.
+  SELECT COALESCE(sum(abs(t.amount)), 0) INTO v_charged
+    FROM public.transactions t
+   WHERE t.user_id = p_sprayer_id AND t.type = 'spray' AND t.currency = 'NGN'
+     AND t.status IN ('completed', 'pending', 'processing') AND t.created_at >= v_day
+     AND NOT EXISTS (
+       SELECT 1 FROM public.spray_holds h
+        WHERE h.sprayer_id = p_sprayer_id AND h.id::text = t.metadata->>'hold_id' AND h.created_at < v_day);
 
   -- Waiting or on the floor and not charged yet (a charged hold has its transfer, counted above).
+  -- A hold whose time has run out is not counted, even before it is tidied away: otherwise a spray
+  -- left at a quiet event would block the person everywhere else.
   SELECT COALESCE(sum(planned_amount_kobo), 0) INTO v_waiting
     FROM public.spray_holds
    WHERE sprayer_id = p_sprayer_id AND status IN ('pending', 'queued', 'on_floor')
-     AND transfer_id IS NULL AND created_at >= v_day;
+     AND transfer_id IS NULL AND created_at >= v_day
+     AND (status = 'on_floor' OR expires_at IS NULL OR expires_at > now());
 
   IF v_charged + v_waiting + p_amount_kobo > COALESCE(v_limit, 0) THEN
     -- The number is what is left today, in kobo; the spray function turns it into a sentence.
@@ -575,6 +583,14 @@ BEGIN
   -- A minimum of 0 would let through amounts the fee cannot be taken from; one bundle is 100 kobo.
   IF _bundle_min_purchase < 1 OR _bundle_sell_min < 1 OR _giveaway_min_total_kobo < 100 OR _giveaway_min_per_person_kobo < 100 THEN
     RAISE EXCEPTION 'A minimum must be at least 1';
+  END IF;
+  -- The column already refuses 0 (083); say so in words instead of a constraint error.
+  IF _sell_daily_limit_kobo < 1 THEN
+    RAISE EXCEPTION 'The daily sale limit must be more than 0';
+  END IF;
+  -- Below one note nobody could spray at all, and the app would say "try again tomorrow".
+  IF (_spray_daily_l1_kobo > 0 AND _spray_daily_l1_kobo < 20000) OR (_spray_daily_l2_kobo > 0 AND _spray_daily_l2_kobo < 20000) THEN
+    RAISE EXCEPTION 'A daily spray limit must be 0 (sprays off) or at least 200 bundles';
   END IF;
   IF _spray_daily_l2_kobo < _spray_daily_l1_kobo THEN
     RAISE EXCEPTION 'A verified limit cannot be lower than the email-only limit';

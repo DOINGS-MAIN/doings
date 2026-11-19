@@ -57,5 +57,9 @@ describe("limitsPayload", () => {
     expect(limitsPayload({ ...form, sprayDailyL2: "500" })).toEqual({ error: "A verified limit cannot be lower than the email-only limit" });
     expect(limitsPayload({ ...form, giveawayMinEach: "500" })).toEqual({ error: "The smallest share per person cannot be more than the smallest giveaway" });
     expect(limitsPayload({ ...form, sprayMax: "100" })).toEqual({ error: "The largest spray must be at least 200 bundles (one note)" });
+    expect(limitsPayload({ ...form, sellDaily: "0" })).toEqual({ error: "The daily sale limit must be more than 0" });
+    expect(limitsPayload({ ...form, sprayDailyL1: "50" })).toEqual({ error: "A daily spray limit must be 0 (sprays off) or at least 200 bundles" });
+    // 0 switches sprays off for that level
+    expect(limitsPayload({ ...form, sprayDailyL1: "0" })).toMatchObject({ _spray_daily_l1_kobo: 0 });
   });
 });

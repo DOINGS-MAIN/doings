@@ -90,6 +90,30 @@ BEGIN
   r := pg_temp.floor_spray(ev2, l2, 1);
   ASSERT r = 'SPRAY_DAILY_LIMIT 0', 'verified limit reached: ' || r;
 
+  -- a spray that waited across midnight belongs to the day it joined the line, not to both days
+  UPDATE public.platform_settings SET spray_daily_limit_l2_kobo = 1000000 WHERE id = 1;
+  INSERT INTO public.spray_holds (event_id, sprayer_id, wallet_id, planned_amount_kobo, denomination, note_count, status, expires_at, created_at)
+    VALUES (ev2, l2, (SELECT id FROM public.wallets WHERE user_id = l2 AND currency = 'NGN'), 600000, 200, 30, 'settled', now() + interval '1 hour', now() - interval '25 hours')
+    RETURNING id INTO waiting;
+  INSERT INTO public.transactions (user_id, wallet_id, type, amount, fee, net_amount, currency, status, description, metadata, idempotency_key)
+    SELECT l2, id, 'spray', -600000, 0, -600000, 'NGN', 'completed', 's115 charged after midnight', jsonb_build_object('hold_id', waiting), 's115-' || gen_random_uuid()::text
+      FROM public.wallets WHERE user_id = l2 AND currency = 'NGN';
+  BEGIN
+    PERFORM public.record_event_spray(ev, l2, 800000, 200, 40, '{}'::jsonb); r := 'OK';
+  EXCEPTION WHEN OTHERS THEN r := SQLERRM; END;
+  ASSERT r = 'OK', 'yesterday''s spray charged today does not use today''s allowance (N2,000 already used + N8,000 = N10,000): ' || r;
+  UPDATE public.platform_settings SET spray_daily_limit_l2_kobo = 200000 WHERE id = 1;
+  UPDATE public.transactions SET created_at = now() - interval '25 hours' WHERE user_id = l2 AND type = 'spray';
+
+  -- a spray whose time in the line has run out no longer holds allowance, even before it is tidied away
+  INSERT INTO public.spray_holds (event_id, sprayer_id, wallet_id, planned_amount_kobo, denomination, note_count, status, expires_at)
+    VALUES (ev2, l2, (SELECT id FROM public.wallets WHERE user_id = l2 AND currency = 'NGN'), 200000, 200, 10, 'pending', now() - interval '1 minute');
+  UPDATE public.spray_holds SET created_at = now() - interval '25 hours' WHERE sprayer_id = l2 AND status <> 'pending';
+  BEGIN
+    PERFORM public.record_event_spray(ev, l2, 20000, 200, 1, '{}'::jsonb); r := 'OK';
+  EXCEPTION WHEN OTHERS THEN r := SQLERRM; END;
+  ASSERT r = 'OK', 'an expired hold is not counted: ' || r;
+
   -- yesterday does not count
   UPDATE public.spray_holds SET created_at = now() - interval '25 hours' WHERE sprayer_id = l2;
   UPDATE public.transactions SET created_at = now() - interval '25 hours' WHERE user_id = l2 AND type = 'spray';
@@ -143,6 +167,10 @@ BEGIN
   ASSERT r = 'The smallest share per person cannot be more than the smallest giveaway', 'each above total: ' || r;
   r := pg_temp.as_user(boss, format(setq, 1000, 1000, 200000000, 10000, 100000000, 500000000, 10000, 1000));
   ASSERT r = 'The largest spray must be at least 200 bundles (one note)', 'spray max below one note: ' || r;
+  r := pg_temp.as_user(boss, format(setq, 1000, 1000, 0, 100000000, 100000000, 500000000, 10000, 1000));
+  ASSERT r = 'The daily sale limit must be more than 0', 'zero sale limit: ' || r;
+  r := pg_temp.as_user(boss, format(setq, 1000, 1000, 200000000, 100000000, 5000, 500000000, 10000, 1000));
+  ASSERT r = 'A daily spray limit must be 0 (sprays off) or at least 200 bundles', 'spray limit below one note: ' || r;
   r := pg_temp.as_user(boss, format(setq, 1000, 'NULL', 200000000, 100000000, 100000000, 500000000, 10000, 1000));
   ASSERT r = 'Every limit is required', 'missing: ' || r;
 
