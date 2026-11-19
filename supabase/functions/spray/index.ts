@@ -5,6 +5,7 @@ import { getAuthUserIdFromRequest, getAuthedClient, getServiceClient } from "../
 import { floorErrorResponse, floorRateLimit, parseFloorAction, STOP_REFUSED } from "../_shared/floor.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
+import { sprayLimitMessage } from "../_shared/giveawayLimit.ts";
 import {
   computeSprayTheatrePlan,
   parseSprayTheatreSettingsRow,
@@ -91,6 +92,8 @@ function buildTheatrePlan(
 }
 
 function mapSettleError(msg: string) {
+  const overLimit = sprayLimitMessage(msg);
+  if (overLimit) return withCors({ error: overLimit, code: "SPRAY_DAILY_LIMIT" }, { status: 400 });
   if (msg.includes("Insufficient balance")) {
     return withCors({ error: "Insufficient balance" }, { status: 400 });
   }
@@ -380,7 +383,9 @@ Deno.serve(async (req) => {
         theatre_plan: theatrePlan,
       });
     } catch (error) {
-      const msg = String(error);
+      const msg = String((error as { message?: string })?.message ?? error);
+      const overLimit = sprayLimitMessage(msg);
+      if (overLimit) return withCors({ error: overLimit, code: "SPRAY_DAILY_LIMIT" }, { status: 400 });
       if (msg.includes("Insufficient balance")) {
         return withCors({ error: "Insufficient balance" }, { status: 400 });
       }

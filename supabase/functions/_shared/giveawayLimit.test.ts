@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { giveawayLimitMessage } from "./giveawayLimit.ts";
+import { giveawayLimitMessage, sprayLimitMessage } from "./giveawayLimit.ts";
 
 Deno.test("the database's limit refusal becomes a sentence with what is left today", () => {
   assertEquals(
@@ -24,4 +24,16 @@ Deno.test("nothing left today says so", () => {
 Deno.test("other errors are not the limit", () => {
   assertEquals(giveawayLimitMessage("Insufficient balance"), null);
   assertEquals(giveawayLimitMessage(""), null);
+});
+
+Deno.test("the spray allowance refusal becomes a sentence in bundles", () => {
+  assertEquals(
+    sprayLimitMessage("SPRAY_DAILY_LIMIT 4000000"),
+    "You can spray up to 40,000 more bundles today. Lower the amount or try again tomorrow.",
+  );
+  // less than the smallest note (200 bundles) left is nothing left
+  assertEquals(sprayLimitMessage("SPRAY_DAILY_LIMIT 20000"), "You can spray up to 200 more bundles today. Lower the amount or try again tomorrow.");
+  assertEquals(sprayLimitMessage("SPRAY_DAILY_LIMIT 19999"), "You've reached today's spray limit. Try again tomorrow.");
+  assertEquals(sprayLimitMessage("SPRAY_DAILY_LIMIT 0"), "You've reached today's spray limit. Try again tomorrow.");
+  assertEquals(sprayLimitMessage("Insufficient balance"), null);
 });

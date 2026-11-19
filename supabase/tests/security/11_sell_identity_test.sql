@@ -83,6 +83,19 @@ BEGIN
   r := pg_temp.sell(unverified);
   ASSERT r = 'Verify your email to sell bundles', 'both off: unverified email refused: ' || r;
 
+  -- A BVN and a selfie done separately were never matched to each other: with both required, that
+  -- is not enough (the selfie could be one person and the BVN another).
+  PERFORM pg_temp.switches(true, true);
+  INSERT INTO public.kyc_verifications (user_id, level, status, provider, verification_method, liveness_score, verified_at)
+    VALUES (bvn_only, 1, 'verified', 'dojah', 'selfie', 95, now());
+  ASSERT NOT pg_temp.ok(bvn_only), 'both on: a separate BVN and selfie do not add up to a matched pair';
+  st := public.sell_identity_status(bvn_only);
+  ASSERT (st->>'has_bvn')::boolean AND NOT (st->>'has_selfie')::boolean, 'so the selfie is asked for again, with the BVN: ' || st::text;
+  PERFORM pg_temp.switches(false, true);
+  ASSERT pg_temp.ok(bvn_only), 'selfie only: that same selfie does count on its own';
+  PERFORM pg_temp.switches(true, false);
+  ASSERT pg_temp.ok(bvn_only), 'BVN only: and the BVN on its own';
+
   -- a superseded or unverified record does not count
   PERFORM pg_temp.switches(true, true);
   UPDATE public.kyc_verifications SET superseded_at = now() WHERE user_id = selfie_only;

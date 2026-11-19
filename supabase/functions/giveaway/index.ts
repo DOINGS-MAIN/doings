@@ -87,6 +87,9 @@ function rpcErrorMessage(err: unknown): string {
   const limit = giveawayLimitMessage(msg);
   if (limit) return limit;
   if (msg.includes("Insufficient")) return "Insufficient balance to fund giveaway";
+  // The minimums are settings since 115; the database's sentence carries the live number, in bundles.
+  const minimum = /Minimum (?:total|per person) is [\d,]+ bundles/.exec(msg);
+  if (minimum) return minimum[0];
   if (msg.includes("Minimum total")) return "Minimum total is ₦100";
   if (msg.includes("Minimum per person")) return "Minimum per person is ₦10";
   if (msg.includes("evenly divisible")) {

@@ -126,17 +126,18 @@ Deno.serve(async (req) => {
   if (req.method === "GET" && rest[0] === "requirements") {
     return withCors({ ok: true, ...identity });
   }
-  // A quote moves nothing, and the first sale shows what the person will receive before asking who they are.
-  const quoteOnly = req.method === "GET" && rest[0] === "quote";
-  if (!identity.ok && !quoteOnly) {
+  // Asked where identity matters: bank accounts and a new sale. Three things stay open to someone
+  // who may not sell right now: a quote (it moves nothing, and the first sale shows what the person
+  // will receive before asking who they are), the status of a sale already made, and the repeat of
+  // a sale already made. Otherwise switching a check on would strand payouts that are in flight.
+  const identityRefusal = () =>
     // The wording is kept for apps from before 114, which match on it.
-    return withCors({
+    withCors({
       error: "Complete identity verification (BVN + selfie) to sell bundles",
       code: "IDENTITY_REQUIRED",
       needs_bvn: identity.needs_bvn && !identity.has_bvn,
       needs_selfie: identity.needs_selfie && !identity.has_selfie,
     }, { status: 403 });
-  }
 
   try {
     // ── Quote ──
@@ -160,6 +161,7 @@ Deno.serve(async (req) => {
 
     // ── Bank accounts ──
     if (rest[0] === "accounts") {
+      if (!identity.ok) return identityRefusal();
       if (req.method === "GET" && !rest[1]) {
         const { data: rows } = await supabase
           .from("bank_accounts")
@@ -182,6 +184,10 @@ Deno.serve(async (req) => {
         if (!bankCode || !/^\d{10}$/.test(accountNumber)) {
           return withCors({ error: "Enter a 10-digit account number and choose a bank" }, { status: 400 });
         }
+        // Each add asks the bank for the account's name: without a cap, with the BVN check off, any
+        // signed-in person could look up names for account numbers all day.
+        const addLimit = await checkRateLimit(RATE_LIMITS.bankAccountAdd(user.id));
+        if (!addLimit.allowed) return withCors({ error: "Too many bank accounts tried. Try again later." }, { status: 429 });
         const platform = await getPlatformPaymentSettings(supabase);
         let resolvedName = "";
         try {
@@ -277,6 +283,8 @@ Deno.serve(async (req) => {
           usdc_micro: view.usdc_micro,
         });
       }
+
+      if (!identity.ok) return identityRefusal();
 
       const pinCheck = await requireTransactionPin(supabase, user.id, body.pin);
       if (pinCheck) return pinCheck;

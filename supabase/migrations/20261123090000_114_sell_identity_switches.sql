@@ -42,6 +42,7 @@ DECLARE
   v_needs_selfie boolean;
   v_has_bvn boolean;
   v_has_selfie boolean;
+  v_legacy boolean;
 BEGIN
   SELECT kyc_level INTO v_level FROM public.users WHERE id = p_user_id;
   -- A missing settings row fails closed: both checks required.
@@ -49,16 +50,27 @@ BEGIN
     INTO v_needs_bvn, v_needs_selfie FROM public.platform_settings WHERE id = 1;
 
   v_has_bvn := COALESCE(v_level, 0) >= 2;
-  v_has_selfie := EXISTS (
+
+  -- Level 2 reached before BVN-only records existed was BVN + selfie (or the older BVN + NIN);
+  -- those people sold before this migration and still do.
+  v_legacy := COALESCE(v_level, 0) >= 2 AND NOT EXISTS (
       SELECT 1 FROM public.kyc_verifications k
        WHERE k.user_id = p_user_id AND k.status = 'verified' AND k.superseded_at IS NULL
-         AND k.liveness_score IS NOT NULL)
-    -- Level 2 reached before BVN-only records existed was BVN + selfie (or the older BVN + NIN);
-    -- those people sold before this migration and still do.
-    OR (COALESCE(v_level, 0) >= 2 AND NOT EXISTS (
+         AND k.verification_method = 'bvn');
+
+  IF v_needs_bvn THEN
+    -- With BVN required, a selfie only counts if it was matched to the BVN photo in the same check.
+    -- A selfie taken on its own (while BVN was off) could be one person and the BVN another.
+    v_has_selfie := v_legacy OR EXISTS (
       SELECT 1 FROM public.kyc_verifications k
        WHERE k.user_id = p_user_id AND k.status = 'verified' AND k.superseded_at IS NULL
-         AND k.verification_method = 'bvn'));
+         AND k.bvn_hmac IS NOT NULL AND k.selfie_match_confidence IS NOT NULL);
+  ELSE
+    v_has_selfie := v_legacy OR EXISTS (
+      SELECT 1 FROM public.kyc_verifications k
+       WHERE k.user_id = p_user_id AND k.status = 'verified' AND k.superseded_at IS NULL
+         AND k.liveness_score IS NOT NULL);
+  END IF;
 
   RETURN jsonb_build_object(
     'needs_bvn', v_needs_bvn, 'needs_selfie', v_needs_selfie,

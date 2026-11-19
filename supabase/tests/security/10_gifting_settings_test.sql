@@ -52,7 +52,8 @@ BEGIN
   ASSERT r = 'GIVEAWAY_DAILY_LIMIT 0', 'level 0: ' || r;
 
   -- the old rules still answer first
-  ASSERT pg_temp.give(l1, 5000) = 'Minimum total is ₦100', 'minimum still enforced';
+  -- worded in naira by 113, in bundles once 115 makes the minimum a setting
+  ASSERT pg_temp.give(l1, 5000) LIKE 'Minimum total is %', 'minimum still enforced';
 END $$;
 
 -- Gifting settings are set from the admin, by super admins only, and each change is recorded.
