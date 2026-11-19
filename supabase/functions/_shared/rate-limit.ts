@@ -133,6 +133,12 @@ export const RATE_LIMITS = {
     windowMs: 60_000,
   }),
 
+  /** Adding a payout account: each try is a name lookup at the bank. */
+  bankAccountAdd: (userId: string): RateLimitConfig => ({
+    key: `bank-add:${userId}`,
+    maxRequests: 10,
+    windowMs: 3_600_000,
+  }),
   bankList: (userId: string): RateLimitConfig => ({
     key: `bank-list:${userId}`,
     maxRequests: 20,

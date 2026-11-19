@@ -4,6 +4,7 @@ import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
+import { giveawayLimitMessage } from "../_shared/giveawayLimit.ts";
 
 type CreateBody = {
   title: string;
@@ -22,6 +23,7 @@ const CLIENT_IDEMPOTENCY_RE = /^[A-Za-z0-9_-]{8,100}$/;
 
 /** RPC validation failures that are the caller's input, not a server fault (400, not 500). */
 const CLIENT_ERROR_PATTERNS = [
+  "GIVEAWAY_DAILY_LIMIT",
   "Insufficient",
   "Minimum total",
   "Minimum per person",
@@ -82,7 +84,12 @@ function rpcErrorMessage(err: unknown): string {
     err && typeof err === "object" && "message" in err && typeof (err as { message: unknown }).message === "string"
       ? (err as { message: string }).message
       : String(err);
+  const limit = giveawayLimitMessage(msg);
+  if (limit) return limit;
   if (msg.includes("Insufficient")) return "Insufficient balance to fund giveaway";
+  // The minimums are settings since 115; the database's sentence carries the live number, in bundles.
+  const minimum = /Minimum (?:total|per person) is [\d,]+ bundles/.exec(msg);
+  if (minimum) return minimum[0];
   if (msg.includes("Minimum total")) return "Minimum total is ₦100";
   if (msg.includes("Minimum per person")) return "Minimum per person is ₦10";
   if (msg.includes("evenly divisible")) {

@@ -39,6 +39,7 @@ import { usePaymentRails } from "@/hooks/usePaymentRails";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { ROLE_PERMISSIONS, type PspProvider } from "@/types/admin";
 import { toast } from "sonner";
+import { GiftingSettingsCard } from "@/components/admin/GiftingSettingsCard";
 
 const CAPABILITY_LABELS: Record<string, string> = {
   wallet_funding: "Wallet funding",
@@ -316,6 +317,8 @@ export const AdminPaymentRails = () => {
           </CardContent>
         </Card>
       </div>
+
+      {isSuperAdmin && <GiftingSettingsCard />}
 
       {isSuperAdmin && (
         <Card className="bg-card border-border">

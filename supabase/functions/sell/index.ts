@@ -12,11 +12,12 @@ import { mapByProvider } from "../_shared/psp/pspStatus.ts";
 import { sendUsdc } from "../_shared/blockradar.ts";
 import { refreshMarketRateIfStale } from "../_shared/bundles.ts";
 import {
+  bankNameAccepted,
   getKycLegalName,
   isDefiniteBlockradarRejection,
   isSolanaAddress,
   NAME_MISMATCH_MESSAGE,
-  nameMatchesKyc,
+  sellIdentityFromRow,
 } from "../_shared/sell.ts";
 
 /**
@@ -110,13 +111,33 @@ Deno.serve(async (req) => {
     const blocked = accountBlock(user.status);
     if (blocked) return withCors(blocked, { status: 403 });
   }
-  if (user.kyc_level < 2) {
-    return withCors({ error: "Complete identity verification (BVN + selfie) to sell bundles" }, { status: 403 });
-  }
+  if (user.kyc_level < 1) return withCors({ error: "Verify your email to sell bundles", code: "EMAIL_REQUIRED" }, { status: 403 });
 
   const url = new URL(req.url);
   const parts = url.pathname.split("/").filter(Boolean);
   const rest = parts.slice(parts.indexOf("sell") + 1);
+
+  // What selling needs follows the two admin switches (114); a failed read is the strict rule.
+  const { data: identityRow, error: identityErr } = await supabase.rpc("sell_identity_status", { p_user_id: user.id });
+  if (identityErr) console.error("sell: sell_identity_status failed", identityErr.code);
+  const identity = sellIdentityFromRow(identityErr ? null : identityRow, user.kyc_level);
+
+  // ── What this person still has to do before selling (the app's first-sale steps) ──
+  if (req.method === "GET" && rest[0] === "requirements") {
+    return withCors({ ok: true, ...identity });
+  }
+  // Asked where identity matters: bank accounts and a new sale. Three things stay open to someone
+  // who may not sell right now: a quote (it moves nothing, and the first sale shows what the person
+  // will receive before asking who they are), the status of a sale already made, and the repeat of
+  // a sale already made. Otherwise switching a check on would strand payouts that are in flight.
+  const identityRefusal = () =>
+    // The wording is kept for apps from before 114, which match on it.
+    withCors({
+      error: "Complete identity verification (BVN + selfie) to sell bundles",
+      code: "IDENTITY_REQUIRED",
+      needs_bvn: identity.needs_bvn && !identity.has_bvn,
+      needs_selfie: identity.needs_selfie && !identity.has_selfie,
+    }, { status: 403 });
 
   try {
     // ── Quote ──
@@ -140,6 +161,7 @@ Deno.serve(async (req) => {
 
     // ── Bank accounts ──
     if (rest[0] === "accounts") {
+      if (!identity.ok) return identityRefusal();
       if (req.method === "GET" && !rest[1]) {
         const { data: rows } = await supabase
           .from("bank_accounts")
@@ -147,10 +169,10 @@ Deno.serve(async (req) => {
           .eq("user_id", user.id)
           .order("is_default", { ascending: false })
           .order("created_at", { ascending: true });
-        const legal = await getKycLegalName(supabase, user.id);
+        const legal = identity.needs_bvn ? await getKycLegalName(supabase, user.id) : null;
         const accounts = (rows ?? []).map((a) => ({
           ...a,
-          name_matches: legal ? nameMatchesKyc(String(a.account_name ?? ""), legal) : false,
+          name_matches: bankNameAccepted(String(a.account_name ?? ""), legal, identity.needs_bvn),
         }));
         return withCors({ ok: true, accounts });
       }
@@ -162,6 +184,10 @@ Deno.serve(async (req) => {
         if (!bankCode || !/^\d{10}$/.test(accountNumber)) {
           return withCors({ error: "Enter a 10-digit account number and choose a bank" }, { status: 400 });
         }
+        // Each add asks the bank for the account's name: without a cap, with the BVN check off, any
+        // signed-in person could look up names for account numbers all day.
+        const addLimit = await checkRateLimit(RATE_LIMITS.bankAccountAdd(user.id));
+        if (!addLimit.allowed) return withCors({ error: "Too many bank accounts tried. Try again later." }, { status: 429 });
         const platform = await getPlatformPaymentSettings(supabase);
         let resolvedName = "";
         try {
@@ -171,8 +197,8 @@ Deno.serve(async (req) => {
           return withCors({ error: "We couldn't verify that account" }, { status: 422 });
         }
         if (!resolvedName) return withCors({ error: "We couldn't verify that account" }, { status: 422 });
-        const legal = await getKycLegalName(supabase, user.id);
-        if (!legal || !nameMatchesKyc(resolvedName, legal)) {
+        const legal = identity.needs_bvn ? await getKycLegalName(supabase, user.id) : null;
+        if (!bankNameAccepted(resolvedName, legal, identity.needs_bvn)) {
           return withCors({ error: NAME_MISMATCH_MESSAGE, account_name: resolvedName }, { status: 422 });
         }
         let bankName = bankCode;
@@ -258,6 +284,8 @@ Deno.serve(async (req) => {
         });
       }
 
+      if (!identity.ok) return identityRefusal();
+
       const pinCheck = await requireTransactionPin(supabase, user.id, body.pin);
       if (pinCheck) return pinCheck;
 
@@ -289,8 +317,9 @@ Deno.serve(async (req) => {
         } catch {
           return withCors({ error: "We couldn't verify that account" }, { status: 422 });
         }
-        const legal = await getKycLegalName(supabase, user.id);
-        if (!resolvedName || !legal || !nameMatchesKyc(resolvedName, legal)) {
+        const legal = identity.needs_bvn ? await getKycLegalName(supabase, user.id) : null;
+        if (!resolvedName) return withCors({ error: "We couldn't verify that account" }, { status: 422 });
+        if (!bankNameAccepted(resolvedName, legal, identity.needs_bvn)) {
           return withCors({ error: NAME_MISMATCH_MESSAGE, account_name: resolvedName }, { status: 422 });
         }
         destination = {

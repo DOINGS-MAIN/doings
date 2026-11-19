@@ -36,7 +36,7 @@ function tokens(name: string): string[] {
 
 /**
  * Strict match of a provider-resolved account name against the BVN legal name. Passes the AML
- * matcher (≥ 2 tokens, score ≥ 0.6), or carries every BVN name (BVN stores first + last only,
+ * matcher (name-match.ts), or carries every BVN name (BVN stores first + last only,
  * so extra middle names on the bank side must not count against the user).
  */
 export function nameMatchesKyc(resolvedName: string, kyc: { first: string; last: string }): boolean {
@@ -51,6 +51,38 @@ export function nameMatchesKyc(resolvedName: string, kyc: { first: string; last:
     pool.splice(i, 1);
   }
   return legal.length >= 2;
+}
+
+/**
+ * May a payout go to this bank account? With the BVN switch on (114) the account must be in the
+ * seller's BVN name. With it off there is no verified name to compare, so any account the bank
+ * confirms is accepted (owner decision, 2026-11-19).
+ */
+export function bankNameAccepted(
+  resolvedName: string,
+  legal: { first: string; last: string } | null,
+  matchRequired: boolean,
+): boolean {
+  if (!resolvedName.trim()) return false;
+  if (!matchRequired) return true;
+  return !!legal && nameMatchesKyc(resolvedName, legal);
+}
+
+/** public.sell_identity_status(): what selling needs now, what the person has done, and the verdict. */
+export type SellIdentityStatus = { needs_bvn: boolean; needs_selfie: boolean; has_bvn: boolean; has_selfie: boolean; ok: boolean };
+
+/**
+ * The status from the database, or, when it can't be read (or the database is older than 114),
+ * the rule from before the switches: BVN and selfie, judged by level 2.
+ */
+export function sellIdentityFromRow(row: unknown, kycLevel: number): SellIdentityStatus {
+  const r = (row && typeof row === "object" ? row : {}) as Record<string, unknown>;
+  const keys = ["needs_bvn", "needs_selfie", "has_bvn", "has_selfie", "ok"] as const;
+  if (keys.every((k) => typeof r[k] === "boolean")) {
+    return { needs_bvn: !!r.needs_bvn, needs_selfie: !!r.needs_selfie, has_bvn: !!r.has_bvn, has_selfie: !!r.has_selfie, ok: !!r.ok };
+  }
+  const verified = kycLevel >= 2;
+  return { needs_bvn: true, needs_selfie: true, has_bvn: verified, has_selfie: verified, ok: verified };
 }
 
 /** The legal name from the user's verified level-2 KYC record (never users.full_name). */

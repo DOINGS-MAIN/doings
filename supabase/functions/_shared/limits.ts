@@ -23,10 +23,12 @@ const WITHDRAWAL_LIMITS: Record<string, Record<number, number>> = {
   },
 };
 
+// NGN sharing limits live in platform_settings since 113 (shareRules.ts passes them in as the
+// override); these NGN figures are only the fallback when no override is given.
 const TRANSFER_LIMITS: Record<string, Record<number, number>> = {
   NGN: {
     0: 0,
-    1: 0, // email-only tier: receive only, no outbound transfers
+    1: 0,
     2: 500_000_000, // ₦5,000,000/day
   },
   USDC: {
@@ -91,21 +93,18 @@ export async function checkWithdrawalLimit(
   return { allowed: true, reason: "" };
 }
 
-/** The sender's daily send limit in smallest units (0 = sending not available at this level). */
-export function transferDailyLimit(currency: string, kycLevel: number): number {
-  return TRANSFER_LIMITS[currency]?.[kycLevel] ?? 0;
-}
-
+/** `dailyLimitOverride` is the limit from platform_settings (shareRules.ts); without it the fixed table applies. */
 export async function checkTransferLimit(
   userId: string,
   kycLevel: number,
   currency: string,
   amountSmallestUnit: number,
+  dailyLimitOverride?: number,
 ): Promise<LimitCheckResult> {
   const tierLimits = TRANSFER_LIMITS[currency];
   if (!tierLimits) return { allowed: false, reason: `Unsupported currency: ${currency}` };
 
-  const dailyLimit = tierLimits[kycLevel] ?? 0;
+  const dailyLimit = dailyLimitOverride ?? tierLimits[kycLevel] ?? 0;
   if (dailyLimit === 0) {
     return { allowed: false, reason: `Transfers not available at KYC level ${kycLevel}` };
   }

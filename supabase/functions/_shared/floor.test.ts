@@ -71,3 +71,12 @@ Deno.test("floorErrorResponse: recipient no longer called up", () => {
     status: 400, error: "That guest isn't called up any more", code: "CALLUP_RECIPIENT_INVALID",
   });
 });
+
+Deno.test("a spray over the daily allowance is the person's to fix, with what is left", () => {
+  assertEquals(floorErrorResponse("SPRAY_DAILY_LIMIT 4000000"), {
+    status: 400, error: "You can spray up to 40,000 more bundles today. Lower the amount or try again tomorrow.", code: "SPRAY_DAILY_LIMIT",
+  });
+  assertEquals(floorErrorResponse("SPRAY_DAILY_LIMIT 0"), {
+    status: 400, error: "You've reached today's spray limit. Try again tomorrow.", code: "SPRAY_DAILY_LIMIT",
+  });
+});

@@ -1,3 +1,4 @@
+import { sprayLimitMessage } from "./giveawayLimit.ts";
 /** Dance floor requests on the spray function (spec: DOINGSNEWFACE 2026-10-15-dance-floor-queue-design.md). */
 import { parseWholeAmount } from "./money.ts";
 export type FloorAction =
@@ -44,6 +45,8 @@ export function floorErrorResponse(message: string): { status: number; error: st
   if (message.includes("CALLUP_RECIPIENT_INVALID")) {
     return { status: 400, error: "That guest isn't called up any more", code: "CALLUP_RECIPIENT_INVALID" };
   }
+  const overLimit = sprayLimitMessage(message);
+  if (overLimit) return { status: 400, error: overLimit, code: "SPRAY_DAILY_LIMIT" };
   if (message.includes("Event is not live")) return { status: 400, error: "Event is not live", code: "EVENT_NOT_LIVE" };
   if (message.includes("Insufficient balance")) return { status: 400, error: "Insufficient balance" };
   if (message.includes("Host cannot spray")) return { status: 400, error: "Host cannot spray own event" };

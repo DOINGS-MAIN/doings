@@ -2,7 +2,8 @@ import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { parseMajorAmount } from "../_shared/money.ts";
 import { accountBlock } from "../_shared/account.ts";
 import { getAuthUserIdFromRequest, getServiceClient, resolveAppUserId } from "../_shared/db.ts";
-import { checkTransferLimit, transferDailyLimit } from "../_shared/limits.ts";
+import { checkTransferLimit } from "../_shared/limits.ts";
+import { shareAllowance, shareSettingsFromRead } from "../_shared/shareRules.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
 import { requireTransactionPin } from "../_shared/pin.ts";
 import { normalizeUsername, USERNAME_RE } from "../_shared/username.ts";
@@ -44,7 +45,22 @@ Deno.serve(async (req) => {
   if (senderErr || !sender) return withCors({ error: "User not found" }, { status: 404 });
   const blocked = accountBlock(sender.status);
   if (blocked) return withCors(blocked, { status: 403 });
-  if (sender.kyc_level < 2) return withCors({ error: "Complete identity verification (BVN + selfie) to send money" }, { status: 403 });
+  // A verified email is enough to share; BVN is needed only when the admin switch says so (113).
+  if (sender.kyc_level < 1) return withCors({ error: "Verify your email to share bundles", code: "EMAIL_REQUIRED" }, { status: 403 });
+  // Read before the PIN is asked for, so someone who may not share at all is told so first.
+  const { data: settingsRow, error: settingsErr } = await supabase
+    .from("platform_settings")
+    .select("share_requires_identity, share_daily_limit_l1_kobo, share_daily_limit_l2_kobo")
+    .eq("id", 1)
+    .maybeSingle();
+  const shareSettings = shareSettingsFromRead(settingsRow, settingsErr);
+  if (!shareSettings) {
+    console.error("transfer: share settings unavailable", settingsErr?.message);
+    return withCors({ error: "Sharing is busy right now. Please try again in a moment." }, { status: 503 });
+  }
+  if (sender.kyc_level < 2 && shareSettings.requiresIdentity) {
+    return withCors({ error: "Complete identity verification (BVN + selfie) to send money", code: "IDENTITY_REQUIRED" }, { status: 403 });
+  }
 
   const body = (await req.json()) as TransferBody;
   const pinCheck = await requireTransactionPin(supabase, sender.id, body.pin);
@@ -120,7 +136,10 @@ Deno.serve(async (req) => {
     }
   }
 
-  const { allowed, reason } = await checkTransferLimit(sender.id, sender.kyc_level, currency, smallestUnit);
+  const allowance = shareAllowance(currency, sender.kyc_level, shareSettings);
+  if ("error" in allowance) return withCors({ error: allowance.error, code: allowance.code }, { status: 403 });
+
+  const { allowed, reason } = await checkTransferLimit(sender.id, sender.kyc_level, currency, smallestUnit, allowance.dailyLimit);
   if (!allowed) return withCors({ error: reason }, { status: 403 });
 
   const { data: senderWallet } = await supabase
@@ -143,7 +162,7 @@ Deno.serve(async (req) => {
 
   const description = body.description?.trim()
     ? body.description.trim()
-    : `Transfer to @${recipientUsername}`;
+    : `Shared with @${recipientUsername}`;
 
   try {
     // The daily limit is checked again inside the database, under a per-sender lock (migration 107):
@@ -155,7 +174,7 @@ Deno.serve(async (req) => {
       p_receiver_user_id: recipient.id,
       p_amount: smallestUnit,
       p_description: description,
-      p_daily_limit: transferDailyLimit(currency, sender.kyc_level),
+      p_daily_limit: allowance.dailyLimit,
       // Only sent when the client gave one, so this function also runs against a database without 108.
       ...(idempotencyKey ? { p_idempotency_key: idempotencyKey } : {}),
     });

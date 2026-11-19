@@ -96,20 +96,35 @@ const OUR_FAULT_4XX = new Set([401, 402, 403, 408, 413, 429]);
  * 401/402/403/408/413/429, 5xx, timeouts, network errors and non-JSON bodies are "unavailable"
  * (the caller must not charge an attempt).
  */
-export async function dojahPostJson(
+export function dojahPostJson(
   path: string,
   body: unknown,
   headers: Record<string, string>,
   timeoutMs = 20_000,
 ): Promise<DojahCall> {
+  return dojahCall(`${dojahBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }, timeoutMs);
+}
+
+/** GET with query parameters, classified the same way as dojahPostJson (BVN lookup without a selfie). */
+export function dojahGetCall(
+  path: string,
+  params: Record<string, string>,
+  headers: Record<string, string>,
+  timeoutMs = 20_000,
+): Promise<DojahCall> {
+  const url = new URL(`${dojahBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`);
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+  return dojahCall(url.toString(), { method: "GET", headers }, timeoutMs);
+}
+
+async function dojahCall(url: string, init: RequestInit, timeoutMs: number): Promise<DojahCall> {
   let res: Response;
   try {
-    res = await fetch(`${dojahBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`, {
-      method: "POST",
-      headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    res = await fetch(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
   } catch {
     return { kind: "unavailable" };
   }
@@ -123,6 +138,6 @@ export async function dojahPostJson(
   if (res.status >= 400 && res.status < 500 && !OUR_FAULT_4XX.has(res.status)) {
     return { kind: "rejected", status: res.status, json };
   }
-  console.error("Dojah unavailable", { path, status: res.status });
+  console.error("Dojah unavailable", { path: new URL(url).pathname, status: res.status });
   return { kind: "unavailable" };
 }

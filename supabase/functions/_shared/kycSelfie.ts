@@ -49,7 +49,7 @@ export type VerifyOutcome =
   | { ok: true; fullName: string }
   | { ok: false; status: number; code: KycErrorCode; error: string; scores?: FailScores };
 
-function fail(code: KycErrorCode, scores?: FailScores): VerifyOutcome {
+export function fail(code: KycErrorCode, scores?: FailScores): VerifyOutcome {
   const [status, error] = KYC_ERRORS[code];
   return scores ? { ok: false, status, code, error, scores } : { ok: false, status, code, error };
 }
@@ -88,7 +88,7 @@ export function parseLiveness(json: unknown): number | null {
 }
 
 /** A 200 liveness reply that itself says no face / not live (with no score to compare). */
-function livenessSaysNo(json: unknown): boolean {
+export function livenessSaysNo(json: unknown): boolean {
   const entity = entityOf(json);
   const face = obj(entity.face);
   return obj(entity.liveness).liveness_check === false || face.detected === false || face.face_detected === false;
@@ -102,7 +102,7 @@ export function parseSelfieMatch(json: unknown): number | null {
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
 /** YYYY-MM-DD as is; Dojah's BVN "28-Jun-2000" converted; anything else null (never a failed insert). */
-function isoDateOrNull(s: string | null): string | null {
+export function isoDateOrNull(s: string | null): string | null {
   if (!s) return null;
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/.exec(s.trim());
