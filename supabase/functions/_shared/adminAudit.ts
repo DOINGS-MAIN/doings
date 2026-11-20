@@ -50,3 +50,46 @@ export function makeAudit(rpc: Rpc, adminId: string, ip: string | null): Audit {
     if (error) throw error;
   };
 }
+
+export type AuditedOptions<T> = {
+  // Why the action did nothing, or null when it went through. Default: an error response (status 400+).
+  notDone?: (value: T) => string | null;
+  // What the action found, recorded afterwards as "<action>_result".
+  result?: (value: T) => unknown;
+};
+
+function refusedResponse(value: unknown): string | null {
+  return value instanceof Response && value.status >= 400 ? `refused with status ${value.status}` : null;
+}
+
+// Runs an admin action with its audit record written FIRST. If the record cannot be written the
+// action never runs, so nothing an admin does can go unrecorded. The record is written before the
+// outcome is known, so an action that then throws or is refused gets a second record,
+// "<action>_failed", with the reason. That second record (and "<action>_result") is best effort:
+// losing it over-reports an action, which is the safe direction for an audit trail.
+export async function audited<T>(
+  audit: Audit,
+  entry: AuditEntry,
+  act: () => Promise<T>,
+  options: AuditedOptions<T> = {},
+): Promise<T> {
+  await audit(entry);
+  const followUp = async (suffix: string, details: unknown) => {
+    try {
+      await audit({ action: `${entry.action}_${suffix}`, targetType: entry.targetType, targetId: entry.targetId, details });
+    } catch (err) {
+      console.error(`audit follow-up ${entry.action}_${suffix} was not written`, err);
+    }
+  };
+  let value: T;
+  try {
+    value = await act();
+  } catch (err) {
+    await followUp("failed", { reason: err instanceof Error ? err.message : String((err as { message?: unknown })?.message ?? err) });
+    throw err;
+  }
+  const reason = (options.notDone ?? refusedResponse)(value);
+  if (reason) await followUp("failed", { reason });
+  else if (options.result) await followUp("result", options.result(value));
+  return value;
+}

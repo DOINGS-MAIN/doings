@@ -1,6 +1,9 @@
 -- 107: PIN change counts wrong guesses; the admin refund is off; stored webhook secrets and unverified
 -- payloads are gone; the send limit holds; an automatic FX rate that jumps is refused.
--- Run as: BEGIN; 04_…_before.sql; migration 107; tests/ads/_setup.sql; this file; ROLLBACK.
+-- Run as: BEGIN; tests/ads/_setup.sql; this file; ROLLBACK.
+-- 107 is long applied, so the checks on the three rows from 04_…_before.sql (which only exist when that
+-- file and migration 107 run in the same transaction) are skipped when those rows are absent. The
+-- transfer function gained an eighth argument in 108; the grants are checked on that signature.
 
 CREATE FUNCTION pg_temp.err(q text) RETURNS text LANGUAGE plpgsql AS $$
 BEGIN EXECUTE q; RETURN NULL; EXCEPTION WHEN OTHERS THEN RETURN SQLSTATE || ' ' || SQLERRM; END $$;
@@ -33,9 +36,9 @@ DO $$
 BEGIN
   ASSERT NOT has_function_privilege('anon', 'public.change_transaction_pin(text, text)', 'EXECUTE'), 'signed out cannot change a PIN';
   ASSERT has_function_privilege('authenticated', 'public.change_transaction_pin(text, text)', 'EXECUTE'), 'the app changes the PIN';
-  ASSERT NOT has_function_privilege('authenticated', 'public.internal_transfer_checked(uuid, uuid, uuid, uuid, bigint, text, bigint)', 'EXECUTE'), 'clients cannot call the transfer';
-  ASSERT NOT has_function_privilege('anon', 'public.internal_transfer_checked(uuid, uuid, uuid, uuid, bigint, text, bigint)', 'EXECUTE'), 'signed out cannot call the transfer';
-  ASSERT has_function_privilege('service_role', 'public.internal_transfer_checked(uuid, uuid, uuid, uuid, bigint, text, bigint)', 'EXECUTE'), 'the transfer function calls it';
+  ASSERT NOT has_function_privilege('authenticated', 'public.internal_transfer_checked(uuid, uuid, uuid, uuid, bigint, text, bigint, text)', 'EXECUTE'), 'clients cannot call the transfer';
+  ASSERT NOT has_function_privilege('anon', 'public.internal_transfer_checked(uuid, uuid, uuid, uuid, bigint, text, bigint, text)', 'EXECUTE'), 'signed out cannot call the transfer';
+  ASSERT has_function_privilege('service_role', 'public.internal_transfer_checked(uuid, uuid, uuid, uuid, bigint, text, bigint, text)', 'EXECUTE'), 'the transfer function calls it';
   ASSERT NOT has_function_privilege('authenticated', 'public.update_fx_market_rate(bigint, text, jsonb)', 'EXECUTE'), 'rate store stays server-only';
   ASSERT NOT has_function_privilege('authenticated', 'public.admin_refund_transaction(uuid, uuid, text)', 'EXECUTE'), 'refund stays server-only';
 END $$;
@@ -92,6 +95,7 @@ BEGIN
   ASSERT NOT EXISTS (SELECT 1 FROM public.webhook_logs WHERE headers::text LIKE '%t107-shared-secret%' OR payload::text LIKE '%t107-shared-secret%'), 'the secret value is gone';
 
   SELECT * INTO r FROM public.webhook_logs WHERE idempotency_key = 't107-real';
+  IF NOT FOUND THEN RETURN; END IF;  -- the seeded rows are only there when run together with migration 107
   ASSERT r.payload->'data'->>'tx_ref' = 't107-real', 'a verified payload is kept';
   ASSERT r.headers = '{"content-type":"application/json","user-agent":"FLW","x-forwarded-for":"1.2.3.4"}'::jsonb, 'three harmless headers kept';
 

@@ -6,7 +6,7 @@ import { getPlatformPaymentSettings } from "../_shared/psp/platformSettings.ts";
 import { fetchTransferStatus } from "../_shared/psp/registry.ts";
 import { applyWithdrawalStatus } from "../_shared/psp/withdrawalFinalize.ts";
 
-import type { Audit } from "../_shared/adminAudit.ts";
+import { type Audit, audited } from "../_shared/adminAudit.ts";
 
 export type AdminRouteCtx = {
   req: Request;
@@ -161,26 +161,28 @@ async function checkWithProvider(
   const at = new Date().toISOString();
   const paidAfterFailed = row.status === "failed" && outcome.normalized === "terminal_success";
 
-  const { error: mergeErr } = await supabase.rpc("merge_transaction_metadata", {
-    p_transaction_id: row.id,
-    p_patch: {
-      last_provider_check: { status: outcome.normalized, provider_status: providerStatus, at },
-      ...(paidAfterFailed ? { provider_paid_after_failed: { at, provider_status: providerStatus } } : {}),
-    },
-  });
-  if (mergeErr) throw mergeErr;
-
-  if (row.status === "pending" || row.status === "processing") {
-    await applyWithdrawalStatus(supabase, row, outcome, "reconcile");
-  }
-
-  const { data: after, error: afterErr } = await supabase.from("transactions").select("status").eq("id", row.id).maybeSingle();
-  if (afterErr) throw afterErr;
-  await audit({
+  // The provider's answer is known here, before anything is changed, so the audit record goes first.
+  return await audited(audit, {
     action: paidAfterFailed ? "provider_paid_after_failed" : "check_payout",
     targetType: "transaction",
     targetId: row.id,
     details: { normalized: outcome.normalized, provider_status: providerStatus, status_before: row.status },
-  });
-  return { normalized: outcome.normalized, provider_status: providerStatus, status: after?.status ?? row.status, paid_after_failed: paidAfterFailed };
+  }, async () => {
+    const { error: mergeErr } = await supabase.rpc("merge_transaction_metadata", {
+      p_transaction_id: row.id,
+      p_patch: {
+        last_provider_check: { status: outcome.normalized, provider_status: providerStatus, at },
+        ...(paidAfterFailed ? { provider_paid_after_failed: { at, provider_status: providerStatus } } : {}),
+      },
+    });
+    if (mergeErr) throw mergeErr;
+
+    if (row.status === "pending" || row.status === "processing") {
+      await applyWithdrawalStatus(supabase, row, outcome, "reconcile");
+    }
+
+    const { data: after, error: afterErr } = await supabase.from("transactions").select("status").eq("id", row.id).maybeSingle();
+    if (afterErr) throw afterErr;
+    return { normalized: outcome.normalized, provider_status: providerStatus, status: after?.status ?? row.status, paid_after_failed: paidAfterFailed };
+  }, { notDone: () => null });
 }

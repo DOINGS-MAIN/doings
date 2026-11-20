@@ -1,6 +1,7 @@
 import { withCors } from "../_shared/cors.ts";
 import { orIlike, parsePaging } from "../_shared/adminSearch.ts";
 import { settleNgnBundleOrder } from "../_shared/bundles.ts";
+import { audited } from "../_shared/adminAudit.ts";
 import type { AdminRouteCtx } from "./payouts.ts";
 
 const COLUMNS =
@@ -50,18 +51,20 @@ export async function handleBundleOrders(ctx: AdminRouteCtx): Promise<Response |
     if (order.currency !== "NGN" || !["awaiting_payment", "expired"].includes(order.status)) {
       return withCors({ error: "Only NGN orders awaiting payment or expired can be checked" }, { status: 409 });
     }
-    let result;
-    try {
-      result = await settleNgnBundleOrder(supabase, { txRef: order.tx_ref, transactionId: null });
-    } catch (err) {
-      // Database errors carry a code (e.g. "NGN wallet not found"); anything else is the provider call.
-      if (err && typeof err === "object" && "code" in err) {
-        return withCors({ error: String((err as { message?: string }).message ?? "Database error") }, { status: 500 });
+    // Checking can settle the order (credit the bundles), so the record is written before it runs.
+    let result: unknown;
+    return await audited(audit, { action: "check_bundle_order", targetType: "bundle_order", targetId: id }, async () => {
+      try {
+        result = await settleNgnBundleOrder(supabase, { txRef: order.tx_ref, transactionId: null });
+      } catch (err) {
+        // Database errors carry a code (e.g. "NGN wallet not found"); anything else is the provider call.
+        if (err && typeof err === "object" && "code" in err) {
+          return withCors({ error: String((err as { message?: string }).message ?? "Database error") }, { status: 500 });
+        }
+        return withCors({ error: "Couldn't reach the provider — try again or resolve manually" }, { status: 502 });
       }
-      return withCors({ error: "Couldn't reach the provider — try again or resolve manually" }, { status: 502 });
-    }
-    await audit({ action: "check_bundle_order", targetType: "bundle_order", targetId: id, details: result });
-    return withCors({ ok: true, result });
+      return withCors({ ok: true, result });
+    }, { result: () => result });
   }
 
   if (req.method === "POST" && id && action === "refund") {
