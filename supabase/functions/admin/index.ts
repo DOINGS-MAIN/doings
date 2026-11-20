@@ -15,7 +15,7 @@ import { handleLiveEvent } from "./liveEvent.ts";
 import { can, escapeLikePattern, eventHoldRoute, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
 import { tokenAal, twoStepRefusal } from "../_shared/adminTwoStep.ts";
 import { toCsv } from "../_shared/adminCsv.ts";
-import { clientIp, makeAudit } from "../_shared/adminAudit.ts";
+import { audited, clientIp, makeAudit } from "../_shared/adminAudit.ts";
 
 const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") ?? "15");
 
@@ -268,14 +268,15 @@ Deno.serve(async (req) => {
         await supabase.from("admin_roles").update({ last_login_at: new Date().toISOString() }).eq("id", activeRowId!);
         return withCors({ ok: true, two_step_required: required });
       }
-      const { error } = await supabase
-        .from("admin_roles")
-        .update({ status: "active", must_change_password: false, last_login_at: new Date().toISOString() })
-        .eq("id", invitedRowId)
-        .eq("status", "invited");
-      if (error) throw error;
-      await audit({ action: "accept_admin_invite", targetType: "admin", targetId: invitedRowId });
-      return withCors({ ok: true, two_step_required: required });
+      return await audited(audit, { action: "accept_admin_invite", targetType: "admin", targetId: invitedRowId }, async () => {
+        const { error } = await supabase
+          .from("admin_roles")
+          .update({ status: "active", must_change_password: false, last_login_at: new Date().toISOString() })
+          .eq("id", invitedRowId)
+          .eq("status", "invited");
+        if (error) throw error;
+        return withCors({ ok: true, two_step_required: required });
+      });
     }
     if (invitedRowId) return withCors({ error: "Accept your admin invite first" }, { status: 403 });
 
@@ -375,63 +376,67 @@ Deno.serve(async (req) => {
 
       if (req.method === "POST" && route.action === "suspend" && route.id) {
         const body = await req.json();
-        const { error } = await supabase
-          .from("users")
-          .update({ status: "suspended", suspended_reason: body.reason ?? "", suspended_at: new Date().toISOString(), suspended_by: authId })
-          .eq("id", route.id);
-        if (error) throw error;
-        await audit({ action: "suspend_user", targetType: "user", targetId: route.id, details: { reason: body.reason } });
-        return withCors({ ok: true });
+        return await audited(audit, { action: "suspend_user", targetType: "user", targetId: route.id, details: { reason: body.reason } }, async () => {
+          const { error } = await supabase
+            .from("users")
+            .update({ status: "suspended", suspended_reason: body.reason ?? "", suspended_at: new Date().toISOString(), suspended_by: authId })
+            .eq("id", route.id);
+          if (error) throw error;
+          return withCors({ ok: true });
+        });
       }
 
       if (req.method === "POST" && route.action === "unsuspend" && route.id) {
         // Only lifts a suspension; a ban is lifted with unban (which also clears the sign-in ban).
-        const { data, error } = await supabase
-          .from("users")
-          .update({ status: "active", suspended_reason: null, suspended_at: null, suspended_by: null })
-          .eq("id", route.id)
-          .eq("status", "suspended")
-          .select("id");
-        if (error) throw error;
-        if (!data?.length) return withCors({ error: "User is not suspended" }, { status: 409 });
-        await audit({ action: "unsuspend_user", targetType: "user", targetId: route.id });
-        return withCors({ ok: true });
+        return await audited(audit, { action: "unsuspend_user", targetType: "user", targetId: route.id }, async () => {
+          const { data, error } = await supabase
+            .from("users")
+            .update({ status: "active", suspended_reason: null, suspended_at: null, suspended_by: null })
+            .eq("id", route.id)
+            .eq("status", "suspended")
+            .select("id");
+          if (error) throw error;
+          if (!data?.length) return withCors({ error: "User is not suspended" }, { status: 409 });
+          return withCors({ ok: true });
+        });
       }
 
       if (req.method === "POST" && route.action === "ban" && route.id) {
         const body = await req.json().catch(() => ({})) as { reason?: string };
-        const { data, error } = await supabase
-          .from("users")
-          .update({ status: "banned", suspended_reason: body.reason ?? "Banned by admin", suspended_at: new Date().toISOString(), suspended_by: authId })
-          .eq("id", route.id)
-          .select("auth_id");
-        if (error) throw error;
-        if (!data?.length) return withCors({ error: "User not found" }, { status: 404 });
-        const banAuthId = data[0].auth_id as string | null;
-        if (banAuthId) {
-          const { error: banErr } = await supabase.auth.admin.updateUserById(banAuthId, { ban_duration: AUTH_BAN_DURATION });
-          if (banErr) throw banErr;
-        }
-        await audit({ action: "ban_user", targetType: "user", targetId: route.id, details: { reason: body.reason } });
-        return withCors({ ok: true });
+        return await audited(audit, { action: "ban_user", targetType: "user", targetId: route.id, details: { reason: body.reason } }, async () => {
+          const { data, error } = await supabase
+            .from("users")
+            .update({ status: "banned", suspended_reason: body.reason ?? "Banned by admin", suspended_at: new Date().toISOString(), suspended_by: authId })
+            .eq("id", route.id)
+            .select("auth_id");
+          if (error) throw error;
+          if (!data?.length) return withCors({ error: "User not found" }, { status: 404 });
+          const banAuthId = data[0].auth_id as string | null;
+          if (banAuthId) {
+            const { error: banErr } = await supabase.auth.admin.updateUserById(banAuthId, { ban_duration: AUTH_BAN_DURATION });
+            if (banErr) throw banErr;
+          }
+          return withCors({ ok: true });
+        });
       }
 
       if (req.method === "POST" && route.action === "unban" && route.id) {
-        const { data, error } = await supabase
-          .from("users")
-          .update({ status: "active", suspended_reason: null, suspended_at: null, suspended_by: null })
-          .eq("id", route.id)
-          .eq("status", "banned")
-          .select("auth_id");
-        if (error) throw error;
-        if (!data?.length) return withCors({ error: "User is not banned" }, { status: 409 });
-        const unbanAuthId = data[0].auth_id as string | null;
-        if (unbanAuthId) {
-          const { error: banErr } = await supabase.auth.admin.updateUserById(unbanAuthId, { ban_duration: "none" });
-          if (banErr) throw banErr;
-        }
-        await audit({ action: "unban_user", targetType: "user", targetId: route.id });
-        return withCors({ ok: true });
+        return await audited(audit, { action: "unban_user", targetType: "user", targetId: route.id }, async () => {
+          const { data, error } = await supabase
+            .from("users")
+            .update({ status: "active", suspended_reason: null, suspended_at: null, suspended_by: null })
+            .eq("id", route.id)
+            .eq("status", "banned")
+            .select("auth_id");
+          if (error) throw error;
+          if (!data?.length) return withCors({ error: "User is not banned" }, { status: 409 });
+          const unbanAuthId = data[0].auth_id as string | null;
+          if (unbanAuthId) {
+            const { error: banErr } = await supabase.auth.admin.updateUserById(unbanAuthId, { ban_duration: "none" });
+            if (banErr) throw banErr;
+          }
+          return withCors({ ok: true });
+        });
       }
     }
 
@@ -589,35 +594,35 @@ Deno.serve(async (req) => {
 
       if (req.method === "POST" && route.action === "flag" && route.id) {
         const body = await req.json();
-        const { error } = await supabase
-          .from("transactions")
-          .update({
-            flagged: true,
-            flag_reason: body.reason ?? "Flagged by admin",
-            flagged_by: authId,
-            flagged_at: new Date().toISOString(),
-          })
-          .eq("id", route.id);
-        if (error) throw error;
-
-        await audit({ action: "flag_transaction", targetType: "transaction", targetId: route.id, details: { reason: body.reason } });
-        return withCors({ ok: true });
+        return await audited(audit, { action: "flag_transaction", targetType: "transaction", targetId: route.id, details: { reason: body.reason } }, async () => {
+          const { error } = await supabase
+            .from("transactions")
+            .update({
+              flagged: true,
+              flag_reason: body.reason ?? "Flagged by admin",
+              flagged_by: authId,
+              flagged_at: new Date().toISOString(),
+            })
+            .eq("id", route.id);
+          if (error) throw error;
+          return withCors({ ok: true });
+        });
       }
 
       if (req.method === "POST" && route.action === "unflag" && route.id) {
-        const { error } = await supabase
-          .from("transactions")
-          .update({
-            flagged: false,
-            flag_reason: null,
-            flagged_by: null,
-            flagged_at: null,
-          })
-          .eq("id", route.id);
-        if (error) throw error;
-
-        await audit({ action: "unflag_transaction", targetType: "transaction", targetId: route.id });
-        return withCors({ ok: true });
+        return await audited(audit, { action: "unflag_transaction", targetType: "transaction", targetId: route.id }, async () => {
+          const { error } = await supabase
+            .from("transactions")
+            .update({
+              flagged: false,
+              flag_reason: null,
+              flagged_by: null,
+              flagged_at: null,
+            })
+            .eq("id", route.id);
+          if (error) throw error;
+          return withCors({ ok: true });
+        });
       }
 
       // Disabled (2026-11): this "refund" credited the same wallet again instead of reversing anything, so it
@@ -683,37 +688,40 @@ Deno.serve(async (req) => {
 
       if (req.method === "POST" && route.action === "flag" && route.id) {
         const body = await req.json().catch(() => ({})) as { reason?: string };
-        const { data, error } = await supabase
-          .from("events")
-          .update({ flagged: true, flag_reason: body.reason ?? "Flagged by admin", flagged_by: authId, flagged_at: new Date().toISOString() })
-          .eq("id", route.id)
-          .select("id");
-        if (error) throw error;
-        if (!data?.length) return withCors({ error: "Event not found" }, { status: 404 });
-        await audit({ action: "flag_event", targetType: "event", targetId: route.id, details: { reason: body.reason } });
-        return withCors({ ok: true });
+        return await audited(audit, { action: "flag_event", targetType: "event", targetId: route.id, details: { reason: body.reason } }, async () => {
+          const { data, error } = await supabase
+            .from("events")
+            .update({ flagged: true, flag_reason: body.reason ?? "Flagged by admin", flagged_by: authId, flagged_at: new Date().toISOString() })
+            .eq("id", route.id)
+            .select("id");
+          if (error) throw error;
+          if (!data?.length) return withCors({ error: "Event not found" }, { status: 404 });
+          return withCors({ ok: true });
+        });
       }
 
       if (req.method === "POST" && route.action === "unflag" && route.id) {
-        const { data, error } = await supabase
-          .from("events")
-          .update({ flagged: false, flag_reason: null, flagged_by: null, flagged_at: null })
-          .eq("id", route.id)
-          .select("id");
-        if (error) throw error;
-        if (!data?.length) return withCors({ error: "Event not found" }, { status: 404 });
-        await audit({ action: "unflag_event", targetType: "event", targetId: route.id });
-        return withCors({ ok: true });
+        return await audited(audit, { action: "unflag_event", targetType: "event", targetId: route.id }, async () => {
+          const { data, error } = await supabase
+            .from("events")
+            .update({ flagged: false, flag_reason: null, flagged_by: null, flagged_at: null })
+            .eq("id", route.id)
+            .select("id");
+          if (error) throw error;
+          if (!data?.length) return withCors({ error: "Event not found" }, { status: 404 });
+          return withCors({ ok: true });
+        });
       }
 
       if (req.method === "POST" && route.action === "end" && route.id) {
-        const { error } = await supabase
-          .from("events")
-          .update({ status: "ended", ended_at: new Date().toISOString() })
-          .eq("id", route.id);
-        if (error) throw error;
-        await audit({ action: "end_event", targetType: "event", targetId: route.id });
-        return withCors({ ok: true });
+        return await audited(audit, { action: "end_event", targetType: "event", targetId: route.id }, async () => {
+          const { error } = await supabase
+            .from("events")
+            .update({ status: "ended", ended_at: new Date().toISOString() })
+            .eq("id", route.id);
+          if (error) throw error;
+          return withCors({ ok: true });
+        });
       }
     }
 
@@ -753,10 +761,11 @@ Deno.serve(async (req) => {
             return withCors({ error: "Two super admins must set up two-step sign-in before it can be required" }, { status: 409 });
           }
         }
-        const { error } = await supabase.from("platform_settings").update({ admin_two_step_required: body.required }).eq("id", 1);
-        if (error) throw error;
-        await audit({ action: body.required ? "require_admin_two_step" : "unrequire_admin_two_step", targetType: "platform_settings" });
-        return withCors({ ok: true, two_step_required: body.required });
+        return await audited(audit, { action: body.required ? "require_admin_two_step" : "unrequire_admin_two_step", targetType: "platform_settings" }, async () => {
+          const { error } = await supabase.from("platform_settings").update({ admin_two_step_required: body.required }).eq("id", 1);
+          if (error) throw error;
+          return withCors({ ok: true, two_step_required: body.required });
+        });
       }
 
       // A lost authenticator: another super admin removes it, and the person sets it up again at sign-in.
@@ -770,12 +779,13 @@ Deno.serve(async (req) => {
         }
         const { data: listed, error: listErr } = await supabase.auth.admin.mfa.listFactors({ userId: target.user_id as string });
         if (listErr) throw listErr;
-        for (const factor of listed?.factors ?? []) {
-          const { error: delErr } = await supabase.auth.admin.mfa.deleteFactor({ id: factor.id, userId: target.user_id as string });
-          if (delErr) throw delErr;
-        }
-        await audit({ action: "reset_admin_two_step", targetType: "admin", targetId: route.id, details: { factors: (listed?.factors ?? []).length } });
-        return withCors({ ok: true });
+        return await audited(audit, { action: "reset_admin_two_step", targetType: "admin", targetId: route.id, details: { factors: (listed?.factors ?? []).length } }, async () => {
+          for (const factor of listed?.factors ?? []) {
+            const { error: delErr } = await supabase.auth.admin.mfa.deleteFactor({ id: factor.id, userId: target.user_id as string });
+            if (delErr) throw delErr;
+          }
+          return withCors({ ok: true });
+        });
       }
 
       if (req.method === "POST" && route.action === "invite") {
@@ -784,36 +794,36 @@ Deno.serve(async (req) => {
         if (!email || !body.role) return withCors({ error: "email and role are required" }, { status: 400 });
         if (!isAdminRole(body.role)) return withCors({ error: "Unknown role" }, { status: 400 });
 
-        let inviteeId = await findAuthUserIdByEmail(supabase, email);
-        // Someone who already has an account gets no email: they sign in with it and the invite activates.
-        const existingAccount = Boolean(inviteeId);
-        if (inviteeId) {
-          const { data: existing } = await supabase.from("admin_roles").select("id").eq("user_id", inviteeId).limit(1);
-          if (existing?.length) return withCors({ error: "This person is already on the team" }, { status: 409 });
-        } else {
-          const origin = req.headers.get("origin");
-          const { data: invited, error: inviteErr } = await supabase.auth.admin.inviteUserByEmail(email, {
-            redirectTo: origin ? `${origin}/admin/change-password` : undefined,
-            data: { admin_invite: true },
-          });
-          if (inviteErr || !invited?.user) {
-            return withCors({ error: "Couldn't send the invite", detail: inviteErr?.message }, { status: 502 });
+        return await audited(audit, { action: "invite_admin", targetType: "admin", details: { email, role: body.role } }, async () => {
+          let inviteeId = await findAuthUserIdByEmail(supabase, email);
+          // Someone who already has an account gets no email: they sign in with it and the invite activates.
+          const existingAccount = Boolean(inviteeId);
+          if (inviteeId) {
+            const { data: existing } = await supabase.from("admin_roles").select("id").eq("user_id", inviteeId).limit(1);
+            if (existing?.length) return withCors({ error: "This person is already on the team" }, { status: 409 });
+          } else {
+            const origin = req.headers.get("origin");
+            const { data: invited, error: inviteErr } = await supabase.auth.admin.inviteUserByEmail(email, {
+              redirectTo: origin ? `${origin}/admin/change-password` : undefined,
+              data: { admin_invite: true },
+            });
+            if (inviteErr || !invited?.user) {
+              return withCors({ error: "Couldn't send the invite", detail: inviteErr?.message }, { status: 502 });
+            }
+            inviteeId = invited.user.id;
           }
-          inviteeId = invited.user.id;
-        }
 
-        const { data: row, error } = await supabase.from("admin_roles").insert({
-          user_id: inviteeId,
-          role: body.role,
-          invited_by: authId,
-          invited_email: email,
-          status: "invited",
-          must_change_password: true,
-        }).select("id").single();
-        if (error) throw error;
-
-        await audit({ action: "invite_admin", targetType: "admin", targetId: row.id, details: { email, role: body.role } });
-        return withCors({ ok: true, existing_account: existingAccount }, { status: 201 });
+          const { error } = await supabase.from("admin_roles").insert({
+            user_id: inviteeId,
+            role: body.role,
+            invited_by: authId,
+            invited_email: email,
+            status: "invited",
+            must_change_password: true,
+          }).select("id").single();
+          if (error) throw error;
+          return withCors({ ok: true, existing_account: existingAccount }, { status: 201 });
+        });
       }
 
       if (req.method === "POST" && route.id && ["disable", "enable", "role"].includes(route.action ?? "")) {
@@ -826,10 +836,11 @@ Deno.serve(async (req) => {
         if (!target) return withCors({ error: "Team member not found" }, { status: 404 });
 
         if (route.action === "enable") {
-          const { error } = await supabase.from("admin_roles").update({ status: "active" }).eq("id", route.id);
-          if (error) throw error;
-          await audit({ action: "enable_admin", targetType: "admin", targetId: route.id });
-          return withCors({ ok: true });
+          return await audited(audit, { action: "enable_admin", targetType: "admin", targetId: route.id }, async () => {
+            const { error } = await supabase.from("admin_roles").update({ status: "active" }).eq("id", route.id);
+            if (error) throw error;
+            return withCors({ ok: true });
+          });
         }
 
         const body = route.action === "role"
@@ -849,17 +860,19 @@ Deno.serve(async (req) => {
         if (reason) return withCors({ error: reason }, { status: 409 });
 
         if (route.action === "disable") {
-          const { error } = await supabase.from("admin_roles").update({ status: "disabled" }).eq("id", route.id);
-          if (error) throw error;
-          await audit({ action: "disable_admin", targetType: "admin", targetId: route.id });
-          return withCors({ ok: true });
+          return await audited(audit, { action: "disable_admin", targetType: "admin", targetId: route.id }, async () => {
+            const { error } = await supabase.from("admin_roles").update({ status: "disabled" }).eq("id", route.id);
+            if (error) throw error;
+            return withCors({ ok: true });
+          });
         }
 
-        const { error } = await supabase.from("admin_roles").update({ role: body.role }).eq("id", route.id);
-        if (error?.code === "23505") return withCors({ error: "This person already has that role" }, { status: 409 });
-        if (error) throw error;
-        await audit({ action: "change_admin_role", targetType: "admin", targetId: route.id, details: { from: target.role, to: body.role } });
-        return withCors({ ok: true });
+        return await audited(audit, { action: "change_admin_role", targetType: "admin", targetId: route.id, details: { from: target.role, to: body.role } }, async () => {
+          const { error } = await supabase.from("admin_roles").update({ role: body.role }).eq("id", route.id);
+          if (error?.code === "23505") return withCors({ error: "This person already has that role" }, { status: 409 });
+          if (error) throw error;
+          return withCors({ ok: true });
+        });
       }
     }
 
@@ -1171,25 +1184,20 @@ Deno.serve(async (req) => {
           return withCors({ error: "Only payout status webhooks can be reprocessed. Deposits are settled by checking the provider." }, { status: 409 });
         }
 
-        await supabase
-          .from("webhook_logs")
-          .update({ processed: false, processing_error: null, processed_at: null })
-          .eq("id", route.id);
+        const result = await audited(audit, { action: "reprocess_webhook", targetType: "webhook", targetId: route.id }, async () => {
+          await supabase
+            .from("webhook_logs")
+            .update({ processed: false, processing_error: null, processed_at: null })
+            .eq("id", route.id);
 
-        const result = await reprocessWebhookLog(supabase, {
-          id: webhook.id as string,
-          provider: webhook.provider as string,
-          event_type: webhook.event_type as string | null,
-          payload: webhook.payload as Record<string, unknown>,
-          signature_valid: webhook.signature_valid as boolean | null,
-        });
-
-        await audit({
-          action: "reprocess_webhook",
-          targetType: "webhook",
-          targetId: route.id,
-          details: result,
-        });
+          return await reprocessWebhookLog(supabase, {
+            id: webhook.id as string,
+            provider: webhook.provider as string,
+            event_type: webhook.event_type as string | null,
+            payload: webhook.payload as Record<string, unknown>,
+            signature_valid: webhook.signature_valid as boolean | null,
+          });
+        }, { notDone: () => null, result: (r) => r });
 
         return withCors({ ok: result.ok, message: result.message });
       }

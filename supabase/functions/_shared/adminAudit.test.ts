@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { clientIp, makeAudit } from "./adminAudit.ts";
+import { type AuditEntry, audited, clientIp, makeAudit } from "./adminAudit.ts";
 
 const h = (init: Record<string, string>) => new Headers(init);
 
@@ -38,4 +38,77 @@ Deno.test("a record that could not be written stops the request", async () => {
   let thrown: unknown = null;
   try { await audit({ action: "ban_user", targetType: "user", targetId: "u-1" }); } catch (e) { thrown = e; }
   assertEquals((thrown as { message?: string } | null)?.message, "disk full");
+});
+
+// ── audited: the record is written before the action ────────────────────────────────────────────
+const ban: AuditEntry = { action: "ban_user", targetType: "user", targetId: "u-1", details: { reason: "fraud" } };
+function recorder(failOn?: string) {
+  const log: string[] = [];
+  const entries: AuditEntry[] = [];
+  const audit = (entry: AuditEntry) => {
+    if (entry.action === failOn) return Promise.reject(new Error("log down"));
+    log.push("record:" + entry.action);
+    entries.push(entry);
+    return Promise.resolve();
+  };
+  return { log, entries, audit };
+}
+
+Deno.test("the record is written before the action runs", async () => {
+  const r = recorder();
+  const value = await audited(r.audit, ban, () => { r.log.push("action"); return Promise.resolve("done"); });
+  assertEquals(value, "done");
+  assertEquals(r.log, ["record:ban_user", "action"]);
+});
+
+Deno.test("when the record cannot be written the action never runs", async () => {
+  const r = recorder("ban_user");
+  let thrown: unknown = null;
+  try { await audited(r.audit, ban, () => { r.log.push("action"); return Promise.resolve("done"); }); } catch (e) { thrown = e; }
+  assertEquals((thrown as Error).message, "log down");
+  assertEquals(r.log, []);
+});
+
+Deno.test("an action that throws leaves a second record saying it failed, and the error still surfaces", async () => {
+  const r = recorder();
+  let thrown: unknown = null;
+  try { await audited(r.audit, ban, () => Promise.reject(new Error("db timeout"))); } catch (e) { thrown = e; }
+  assertEquals((thrown as Error).message, "db timeout");
+  assertEquals(r.entries[1], { action: "ban_user_failed", targetType: "user", targetId: "u-1", details: { reason: "db timeout" } });
+});
+
+Deno.test("a refusal (an error response) is recorded as not done", async () => {
+  const r = recorder();
+  const res = await audited(r.audit, ban, () => Promise.resolve(new Response("{}", { status: 404 })));
+  assertEquals(res.status, 404);
+  assertEquals(r.entries[1], { action: "ban_user_failed", targetType: "user", targetId: "u-1", details: { reason: "refused with status 404" } });
+});
+
+Deno.test("a successful response leaves only the first record", async () => {
+  const r = recorder();
+  await audited(r.audit, ban, () => Promise.resolve(new Response("{}", { status: 200 })));
+  assertEquals(r.log, ["record:ban_user"]);
+});
+
+Deno.test("what the action found is recorded afterwards when asked for", async () => {
+  const r = recorder();
+  await audited(r.audit, { action: "check_payout", targetType: "transaction", targetId: "t-1" },
+    () => Promise.resolve({ status: "completed" }), { result: (v) => v });
+  assertEquals(r.entries[1], { action: "check_payout_result", targetType: "transaction", targetId: "t-1", details: { status: "completed" } });
+});
+
+Deno.test("a caller can say what counts as not done", async () => {
+  const r = recorder();
+  await audited(r.audit, { action: "check_payout", targetType: "transaction", targetId: "t-1" },
+    () => Promise.resolve({ error: "provider down", status: 502 }),
+    { notDone: (v) => ("error" in v ? v.error : null), result: (v) => v });
+  assertEquals(r.entries.map((e) => e.action), ["check_payout", "check_payout_failed"]);
+  assertEquals(r.entries[1].details, { reason: "provider down" });
+});
+
+Deno.test("a follow-up record that cannot be written does not undo or hide the action's outcome", async () => {
+  const r = recorder("check_payout_result");
+  const value = await audited(r.audit, { action: "check_payout", targetType: "transaction", targetId: "t-1" },
+    () => Promise.resolve({ status: "completed" }), { result: (v) => v });
+  assertEquals(value, { status: "completed" });
 });
