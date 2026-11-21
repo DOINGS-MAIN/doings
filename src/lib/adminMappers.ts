@@ -63,7 +63,9 @@ export function mapUser(u: Record<string, unknown>): PlatformUser {
       return p && String(p).trim() ? String(p) : null;
     })(),
     email: (u.email as string) ?? "",
-    walletBalance: (u.wallet_balance as number) ?? 0,
+    username: (u.username as string | null | undefined) ?? null,
+    // The list sends the NGN wallet in kobo; one bundle is 100 kobo.
+    walletBalance: toDisplay(Number(u.wallet_balance_kobo ?? 0), "NGN"),
     totalSprayed: (u.total_sprayed as number) ?? 0,
     totalReceived: (u.total_received as number) ?? 0,
     eventsHosted: (u.events_hosted as number) ?? 0,

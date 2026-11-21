@@ -5,7 +5,7 @@ import { getPlatformPaymentSettings } from "../_shared/psp/platformSettings.ts";
 import { probeProviderHealth } from "../_shared/psp/registry.ts";
 import { reprocessWebhookLog } from "../_shared/reprocessWebhook.ts";
 import { payoutEvent } from "../_shared/payoutEvent.ts";
-import { cleanSearch, orIlike, parsePaging, quoteValue } from "../_shared/adminSearch.ts";
+import { cleanSearch, orIlike, parsePaging, quoteValue, USER_SEARCH_COLUMNS } from "../_shared/adminSearch.ts";
 import { chunk, collectAll } from "../_shared/adminExport.ts";
 import { handlePayouts } from "./payouts.ts";
 import { handleBundleOrders } from "./bundleOrders.ts";
@@ -357,11 +357,11 @@ Deno.serve(async (req) => {
         const url = new URL(req.url);
         const { page, limit, from, to } = parsePaging(url.searchParams);
         const status = url.searchParams.get("status");
-        const search = orIlike(["phone", "full_name", "email"], url.searchParams.get("search"));
+        const search = orIlike(USER_SEARCH_COLUMNS, url.searchParams.get("search"));
 
         let query = supabase
           .from("users")
-          .select("id, phone, email, full_name, kyc_level, status, suspended_reason, last_active_at, created_at", { count: "exact" })
+          .select("id, phone, email, full_name, username, kyc_level, status, suspended_reason, last_active_at, created_at", { count: "exact" })
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
           .range(from, to);
@@ -371,7 +371,17 @@ Deno.serve(async (req) => {
 
         const { data, count, error } = await query;
         if (error) throw error;
-        return withCors({ users: data, total: count, page, limit });
+        // Bundles held by each listed person (their NGN wallet, in kobo). The list still loads if this fails.
+        const ids = (data ?? []).map((u) => u.id);
+        const held = new Map<string, number>();
+        if (ids.length > 0) {
+          const { data: wallets, error: walletErr } = await supabase
+            .from("wallets").select("user_id, balance").eq("currency", "NGN").in("user_id", ids);
+          if (walletErr) console.error("admin users: wallets unavailable", walletErr.message);
+          for (const w of wallets ?? []) held.set(w.user_id, Number(w.balance ?? 0));
+        }
+        const users = (data ?? []).map((u) => ({ ...u, wallet_balance_kobo: held.get(u.id) ?? 0 }));
+        return withCors({ users, total: count, page, limit });
       }
 
       if (req.method === "POST" && route.action === "suspend" && route.id) {

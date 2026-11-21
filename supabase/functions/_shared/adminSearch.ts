@@ -39,3 +39,6 @@ export function parsePaging(
 export function quoteValue(value: string): string {
   return `"${value.replace(/[\\"]/g, (c) => `\\${c}`)}"`;
 }
+
+/** What the admin's user search looks in. A username is what people know each other by in the app. */
+export const USER_SEARCH_COLUMNS = ["phone", "full_name", "email", "username"];

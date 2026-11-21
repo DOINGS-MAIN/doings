@@ -13,6 +13,7 @@ import { useAdminLiveEvent, useAdminMutations } from "@/hooks/admin/useAdminQuer
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { floorChargedSoFar } from "@/lib/adminMappers";
 import { can } from "@/types/admin";
+import { confirmDialog } from "@/lib/confirmDialog";
 
 const SLOTS = 8;
 
@@ -140,7 +141,7 @@ export const AdminLiveEvent = () => {
   };
 
   const end = async () => {
-    if (!window.confirm("End this event now? The floor and queue are settled and nobody can spray any more.")) return;
+    if (!(await confirmDialog("End this event now? The floor and queue are settled and nobody can spray any more.", { title: "End event", confirmLabel: "End event", destructive: true }))) return;
     setBusy(true);
     try {
       await endEvent(event.id);

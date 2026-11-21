@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.8";
 import { withCors } from "./cors.ts";
-import { pinLockedMessage } from "./pinLock.ts";
+import { pinLockedMessage, pinWrongMessage } from "./pinLock.ts";
 
 export function isValidPin(pin: unknown): pin is string {
   return typeof pin === "string" && /^[0-9]{4}$/.test(pin);
@@ -51,8 +51,15 @@ export async function requireTransactionPin(
         code: "PIN_LOCKED",
       }, { status: 429 });
     }
-    case "INVALID_PIN":
-      return withCors({ error: "Incorrect transaction PIN", code: "INVALID_PIN" }, { status: 403 });
+    case "INVALID_PIN": {
+      // The count was just written by check_transaction_pin; if it cannot be read the plain message stands.
+      const { data: tries } = await supabase
+        .from("users")
+        .select("transaction_pin_failed_attempts")
+        .eq("id", userId)
+        .maybeSingle();
+      return withCors({ error: pinWrongMessage(tries?.transaction_pin_failed_attempts), code: "INVALID_PIN" }, { status: 403 });
+    }
     default:
       return withCors(
         { error: "PIN verification failed", code: "PIN_ERROR", detail: String(data ?? "") },

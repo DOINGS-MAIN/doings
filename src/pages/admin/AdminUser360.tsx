@@ -14,6 +14,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useAdminMutations, useAdminUser360 } from "@/hooks/admin/useAdminQueries";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { can } from "@/types/admin";
+import { confirmDialog } from "@/lib/confirmDialog";
+import { bagLabel, holdingText, transactionAmountText, transactionLabel } from "@/lib/adminMoneyLabels";
 import type { AdminUser360 as User360 } from "@/types/admin";
 
 const formatAmount = (amount: number, currency: string) =>
@@ -123,7 +125,7 @@ function KycCard({ data }: { data: User360 }) {
   const who = data.user.name.trim() || data.user.email || "";
 
   const reset = async () => {
-    if (!window.confirm("Let this person try verifying again now?")) return;
+    if (!(await confirmDialog("Let this person try verifying again now?", { title: "Reset verification attempts", confirmLabel: "Reset attempts" }))) return;
     setResetting(true);
     await runToast(() => resetKycAttempts(data.user.id), "Attempts reset");
     setResetting(false);
@@ -232,9 +234,9 @@ function MoneyCard({ money }: { money: NonNullable<User360["money"]> }) {
         <div className="flex flex-wrap gap-6">
           {money.wallets.map((w) => (
             <div key={w.currency}>
-              <p className="text-muted-foreground">{w.currency} Bag</p>
-              <p className="text-xl font-bold">{formatAmount(w.balance - w.held, w.currency)}</p>
-              {w.held > 0 && <p className="text-xs text-muted-foreground">{formatAmount(w.held, w.currency)} held</p>}
+              <p className="text-muted-foreground">{bagLabel(w.currency)}</p>
+              <p className="text-xl font-bold">{holdingText(w.balance - w.held, w.currency)}</p>
+              {w.held > 0 && <p className="text-xs text-muted-foreground">{holdingText(w.held, w.currency)} held</p>}
             </div>
           ))}
         </div>
@@ -258,7 +260,7 @@ function MoneyCard({ money }: { money: NonNullable<User360["money"]> }) {
           ) : (
             money.transactions.map((t) => (
               <Link key={t.id} to={`/admin/transactions/${t.id}`} className="flex justify-between py-1 border-b border-border last:border-0 hover:underline">
-                <span className="capitalize">{label(t.type)} · {formatAmount(t.amount, t.currency)} · {label(t.status)}</span>
+                <span className="capitalize">{transactionLabel(t.type)} · {transactionAmountText(t.amount, t.currency, t.type)} · {label(t.status)}</span>
                 <span className="text-xs text-muted-foreground">{format(t.createdAt, "MMM d, HH:mm")}</span>
               </Link>
             ))
@@ -303,7 +305,7 @@ function SecurityCard({ data, canUnlock }: { data: User360; canUnlock: boolean }
   const who = data.user.name.trim() || data.user.email || "this person";
 
   const clear = async () => {
-    if (!window.confirm(`Unlock the transaction PIN for ${who}? Only do this once you are sure you are talking to the account owner. They will be notified.`)) return;
+    if (!(await confirmDialog(`Unlock the transaction PIN for ${who}? Only do this once you are sure you are talking to the account owner. They will be notified.`, { title: "Unlock PIN", confirmLabel: "Unlock PIN" }))) return;
     setClearing(true);
     await runToast(() => clearPinLock(data.user.id), "PIN unlocked");
     setClearing(false);
