@@ -15,6 +15,7 @@ export interface AdminUser {
 export interface PlatformUser {
   id: string;
   name: string;
+  username?: string | null;
   phone: string | null;
   email?: string;
   avatar?: string;

@@ -75,14 +75,6 @@ export const AdminUsers = () => {
   const navigate = useNavigate();
   const [actionReason, setActionReason] = useState("");
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("en-NG", {
-      style: "currency",
-      currency: "NGN",
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
-
   const getStatusBadge = (status: PlatformUser["status"]) => {
     switch (status) {
       case "active":
@@ -153,7 +145,7 @@ export const AdminUsers = () => {
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
-            placeholder="Search by name, phone, or email..."
+            placeholder="Search by name, username, phone, or email..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-10"
@@ -180,7 +172,7 @@ export const AdminUsers = () => {
               <TableHead className="text-muted-foreground">User</TableHead>
               <TableHead className="text-muted-foreground">Status</TableHead>
               <TableHead className="text-muted-foreground">KYC</TableHead>
-              <TableHead className="text-muted-foreground">Balance</TableHead>
+              <TableHead className="text-muted-foreground">Bundles</TableHead>
               <TableHead className="text-muted-foreground">Activity</TableHead>
               <TableHead className="text-muted-foreground">Last Active</TableHead>
               <TableHead className="text-muted-foreground w-[50px]"></TableHead>
@@ -192,13 +184,15 @@ export const AdminUsers = () => {
                 <TableCell>
                   <div>
                     <p className="font-medium text-foreground">{user.name}</p>
-                    <p className="text-sm text-muted-foreground">{user.phone || user.email || "—"}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {[user.username ? `@${user.username}` : null, user.phone || user.email].filter(Boolean).join(" · ") || "—"}
+                    </p>
                   </div>
                 </TableCell>
                 <TableCell>{getStatusBadge(user.status)}</TableCell>
                 <TableCell>{getKYCBadge(user.kycStatus)}</TableCell>
                 <TableCell className="font-medium">
-                  {formatCurrency(user.walletBalance)}
+                  {new Intl.NumberFormat("en-NG", { maximumFractionDigits: 2 }).format(user.walletBalance)}
                 </TableCell>
                 <TableCell>
                   <div className="text-sm">

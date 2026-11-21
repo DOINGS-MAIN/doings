@@ -4,6 +4,7 @@ import { useAdminStats } from "@/hooks/admin/useAdminQueries";
 import { useAdminRealtime } from "@/hooks/admin/useAdminRealtime";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { twoStepPutOff } from "@/pages/admin/AdminTwoStep";
+import { ConfirmHost } from "@/components/admin/ConfirmHost";
 
 export const AdminLayout = () => {
   const { isAuthenticated, currentAccount, session, logout, loading } = useAdminAuth();
@@ -41,6 +42,7 @@ export const AdminLayout = () => {
       <main className="flex-1 overflow-auto">
         <Outlet />
       </main>
+      <ConfirmHost />
     </div>
   );
 };

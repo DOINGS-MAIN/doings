@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { supabase } from "@/lib/supabase";
+import { confirmDialog } from "@/lib/confirmDialog";
 
 const KOBO = 100;
 
@@ -171,7 +172,7 @@ export function GiftingSettingsCard() {
         : !sellSelfie
           ? "With the selfie check off, anyone who knows a BVN can verify as its owner."
           : "This changes what people must do before selling.";
-      if (!window.confirm(`${warning} Save the selling checks?`)) return;
+      if (!(await confirmDialog(`${warning} Save the selling checks?`, { title: "Change the selling checks", confirmLabel: "Save" }))) return;
     }
     setSaving(true);
     const { error } = await supabase.rpc("set_gifting_settings", payload);

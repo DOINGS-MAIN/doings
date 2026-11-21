@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { pinLockedMessage } from "./pinLock.ts";
+import { pinLockedMessage, pinWrongMessage } from "./pinLock.ts";
 
 const now = new Date("2026-11-14T12:00:00Z");
 const inMs = (ms: number) => new Date(now.getTime() + ms).toISOString();
@@ -24,4 +24,18 @@ Deno.test("pinLockedMessage: without a usable time it does not name one", () => 
   assertEquals(pinLockedMessage(null, now), lead + "Try again later.");
   assertEquals(pinLockedMessage("not a date", now), lead + "Try again later.");
   assertEquals(pinLockedMessage(inMs(-5 * MIN), now), lead + "Try again later.");
+});
+
+Deno.test("pinWrongMessage: says how many tries are left before the lock", () => {
+  assertEquals(pinWrongMessage(1), "Incorrect transaction PIN. 4 tries left before it locks.");
+  assertEquals(pinWrongMessage(3), "Incorrect transaction PIN. 2 tries left before it locks.");
+  assertEquals(pinWrongMessage(4), "Incorrect transaction PIN. 1 try left before it locks.");
+});
+
+Deno.test("pinWrongMessage: no count when it is not known", () => {
+  assertEquals(pinWrongMessage(null), "Incorrect transaction PIN");
+  assertEquals(pinWrongMessage(undefined), "Incorrect transaction PIN");
+  assertEquals(pinWrongMessage(0), "Incorrect transaction PIN");
+  assertEquals(pinWrongMessage(5), "Incorrect transaction PIN");
+  assertEquals(pinWrongMessage(Number.NaN), "Incorrect transaction PIN");
 });

@@ -11,3 +11,15 @@ export function pinLockedMessage(lockedUntil: string | null | undefined, now: Da
   const hours = Math.ceil(minutes / 60);
   return lead + `Try again in ${hours} hour${hours === 1 ? "" : "s"}.`;
 }
+
+/** Wrong guesses allowed before the PIN locks (check_transaction_pin, migration 108). */
+export const PIN_MAX_ATTEMPTS = 5;
+
+/** The message for a wrong PIN, with the tries left before the lock when the count is known. */
+export function pinWrongMessage(failedAttempts: number | null | undefined): string {
+  const base = "Incorrect transaction PIN";
+  const failed = Number(failedAttempts);
+  if (failedAttempts == null || !Number.isInteger(failed) || failed < 1 || failed >= PIN_MAX_ATTEMPTS) return base;
+  const left = PIN_MAX_ATTEMPTS - failed;
+  return `${base}. ${left} ${left === 1 ? "try" : "tries"} left before it locks.`;
+}

@@ -24,6 +24,9 @@ describe("admin mappers", () => {
     expect(mapUser({ id: "u", kyc_level: 1 }).kycStatus).toBe("email");
     expect(mapUser({ id: "u", kyc_level: 2 }).kycStatus).toBe("verified");
     expect(mapUser({ id: "u", suspended_reason: "Chargebacks" }).suspendedReason).toBe("Chargebacks");
+    // bundles held come from the NGN wallet in kobo; the username is shown so a search hit is recognisable
+    expect(mapUser({ id: "u", wallet_balance_kobo: 180000, username: "mama_k" })).toMatchObject({ walletBalance: 1800, username: "mama_k" });
+    expect(mapUser({ id: "u" }).walletBalance).toBe(0);
   });
   it("maps a stuck NGN bundle sale payout", () => {
     const p = mapPayout({
