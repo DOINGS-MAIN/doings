@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
-  Percent,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,6 +39,7 @@ import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { ROLE_PERMISSIONS, type PspProvider } from "@/types/admin";
 import { toast } from "sonner";
 import { GiftingSettingsCard } from "@/components/admin/GiftingSettingsCard";
+import { BundleFeesCard } from "@/components/admin/BundleFeesCard";
 
 const CAPABILITY_LABELS: Record<string, string> = {
   wallet_funding: "Wallet funding",
@@ -78,28 +78,12 @@ export const AdminPaymentRails = () => {
     setPspEnv,
     probeHealth,
     probeAll,
-    withdrawalFees,
-    withdrawalFeesLoading,
-    fetchWithdrawalFees,
-    setWithdrawalFees,
   } = usePaymentRails();
 
   const [pendingEnv, setPendingEnv] = useState<"sandbox" | "production" | null>(null);
-  const [platformFeeInput, setPlatformFeeInput] = useState("0");
-  const [transactionFeeInput, setTransactionFeeInput] = useState("50");
 
   const isSuperAdmin = currentAccount?.role === "super_admin";
 
-  useEffect(() => {
-    if (isSuperAdmin) {
-      void fetchWithdrawalFees();
-    }
-  }, [isSuperAdmin, fetchWithdrawalFees]);
-
-  useEffect(() => {
-    setPlatformFeeInput(String(withdrawalFees.platformFeePercent));
-    setTransactionFeeInput(String(withdrawalFees.transactionFeeNaira));
-  }, [withdrawalFees]);
 
   const fundingProviders = useMemo(
     () => providers.filter((p) => p.status !== "disabled" && p.capabilities.includes("wallet_funding")),
@@ -153,27 +137,6 @@ export const AdminPaymentRails = () => {
       toast.success("Health checks completed");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Health check failed");
-    }
-  };
-
-  const handleSaveWithdrawalFees = async () => {
-    const platformFeePercent = Number(platformFeeInput);
-    const transactionFeeNaira = Number(transactionFeeInput);
-
-    if (!Number.isFinite(platformFeePercent) || platformFeePercent < 0 || platformFeePercent > 100) {
-      toast.error("Platform fee must be between 0 and 100%");
-      return;
-    }
-    if (!Number.isFinite(transactionFeeNaira) || transactionFeeNaira < 0) {
-      toast.error("Transaction fee cannot be negative");
-      return;
-    }
-
-    try {
-      await setWithdrawalFees(platformFeePercent, transactionFeeNaira);
-      toast.success("Withdrawal fees updated");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to update withdrawal fees");
     }
   };
 
@@ -320,55 +283,7 @@ export const AdminPaymentRails = () => {
 
       {isSuperAdmin && <GiftingSettingsCard />}
 
-      {isSuperAdmin && (
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Percent className="w-5 h-5 text-muted-foreground" />
-              NGN Withdrawal Fees
-            </CardTitle>
-            <CardDescription>
-              Applies to bank withdrawals only — not in-app Send Money between users.
-              Platform fee is a percentage of the withdrawal amount; transaction fee is a flat charge in naira.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="platform-fee-percent">Platform fee (%)</Label>
-                <Input
-                  id="platform-fee-percent"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step={0.01}
-                  value={platformFeeInput}
-                  onChange={(e) => setPlatformFeeInput(e.target.value)}
-                  disabled={withdrawalFeesLoading || saving}
-                />
-                <p className="text-xs text-muted-foreground">Example: 5 means 5% of the withdrawal amount.</p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="transaction-fee-naira">Transaction fee (₦)</Label>
-                <Input
-                  id="transaction-fee-naira"
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={transactionFeeInput}
-                  onChange={(e) => setTransactionFeeInput(e.target.value)}
-                  disabled={withdrawalFeesLoading || saving}
-                />
-                <p className="text-xs text-muted-foreground">Flat fee added on every NGN withdrawal.</p>
-              </div>
-            </div>
-            <Button onClick={handleSaveWithdrawalFees} disabled={withdrawalFeesLoading || saving}>
-              {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-              Save withdrawal fees
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+      {isSuperAdmin && <BundleFeesCard />}
 
       <Card className="bg-card border-border">
         <CardHeader>
