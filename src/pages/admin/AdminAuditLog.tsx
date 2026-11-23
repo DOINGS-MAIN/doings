@@ -30,7 +30,7 @@ const ACTIONS = [
   "flag_transaction", "unflag_transaction", "reprocess_webhook", "probe_all_providers",
   "flag_event", "unflag_event", "end_event",
   "invite_admin", "accept_admin_invite", "enable_admin", "disable_admin", "change_admin_role",
-  "refund_transaction", "set_wallet_funding_provider", "set_psp_env", "set_withdrawal_fee_settings",
+  "refund_transaction", "set_wallet_funding_provider", "set_psp_env", "set_withdrawal_fee_settings", "set_bundle_fee_settings",
   "set_fx_settings", "set_fx_market_rate_manual", "record_treasury_topup",
   "ad_created", "ad_updated", "floor_avatar_removed",
   "view_user", "clear_pin_lock", "export_transactions", "export_webhooks", "export_psp_events",
