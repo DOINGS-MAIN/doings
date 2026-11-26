@@ -260,7 +260,7 @@ function MoneyCard({ money }: { money: NonNullable<User360["money"]> }) {
           ) : (
             money.transactions.map((t) => (
               <Link key={t.id} to={`/admin/transactions/${t.id}`} className="flex justify-between py-1 border-b border-border last:border-0 hover:underline">
-                <span className="capitalize">{transactionLabel(t.type)} · {transactionAmountText(t.amount, t.currency, t.type)} · {label(t.status)}</span>
+                <span className="capitalize">{transactionLabel(t.type, t.description)} · {transactionAmountText(t.amount, t.currency, t.type)} · {label(t.status)}</span>
                 <span className="text-xs text-muted-foreground">{format(t.createdAt, "MMM d, HH:mm")}</span>
               </Link>
             ))

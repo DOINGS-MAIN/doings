@@ -392,6 +392,7 @@ export function mapUser360(res: Record<string, unknown>): AdminUser360 {
       transactions: rows("transactions").map((t) => ({
         id: t.id as string,
         type: (t.type as string) ?? "",
+        description: (t.description as string) ?? "",
         currency: (t.currency as string) ?? "NGN",
         amount: Math.abs(toDisplay(Number(t.amount ?? 0), (t.currency as string) ?? "NGN")),
         status: (t.status as string) ?? "",

@@ -27,6 +27,7 @@ describe("admin mappers", () => {
     // bundles held come from the NGN wallet in kobo; the username is shown so a search hit is recognisable
     expect(mapUser({ id: "u", wallet_balance_kobo: 180000, username: "mama_k" })).toMatchObject({ walletBalance: 1800, username: "mama_k" });
     expect(mapUser({ id: "u" }).walletBalance).toBe(0);
+    expect(mapUser({ id: "u", events_hosted: 2, events_joined: 5 })).toMatchObject({ eventsHosted: 2, eventsJoined: 5 });
   });
   it("maps a stuck NGN bundle sale payout", () => {
     const p = mapPayout({

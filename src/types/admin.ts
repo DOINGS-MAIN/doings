@@ -265,7 +265,7 @@ export interface AdminUser360 {
   };
   money?: {
     wallets: { currency: string; balance: number; held: number }[];
-    transactions: { id: string; type: string; currency: string; amount: number; status: string; reference: string; createdAt: Date }[];
+    transactions: { id: string; type: string; description: string; currency: string; amount: number; status: string; reference: string; createdAt: Date }[];
     openPayouts: { id: string; currency: string; amount: number; status: string; reference: string; needsReview: boolean; createdAt: Date }[];
     bundleOrders: { id: string; currency: string; bundles: number; amount: number; status: string; refunded: boolean; createdAt: Date }[];
     bankAccounts: { id: string; bankName: string; accountName: string; accountNumber: string; isDefault: boolean }[];
