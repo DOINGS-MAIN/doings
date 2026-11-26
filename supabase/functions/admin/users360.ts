@@ -63,7 +63,7 @@ export async function handleUser360(ctx: Ctx): Promise<Response | null> {
       tasks.push((async () => {
         const [wallets, txns, payouts, orders, banks] = await Promise.all([
           supabase.from("wallets").select("currency, balance, locked_balance").eq("user_id", userId),
-          supabase.from("transactions").select("id, type, currency, amount, status, idempotency_key, created_at")
+          supabase.from("transactions").select("id, type, description, currency, amount, status, idempotency_key, created_at")
             .eq("user_id", userId).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(20),
           supabase.from("transactions").select("id, currency, amount, status, idempotency_key, metadata, created_at")
             .eq("user_id", userId).eq("type", "withdrawal").in("status", ["pending", "processing"]).order("created_at", { ascending: false }),

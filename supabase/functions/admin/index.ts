@@ -6,6 +6,7 @@ import { probeProviderHealth } from "../_shared/psp/registry.ts";
 import { reprocessWebhookLog } from "../_shared/reprocessWebhook.ts";
 import { payoutEvent } from "../_shared/payoutEvent.ts";
 import { cleanSearch, orIlike, parsePaging, quoteValue, USER_SEARCH_COLUMNS } from "../_shared/adminSearch.ts";
+import { countByUser } from "../_shared/adminUserCounts.ts";
 import { chunk, collectAll } from "../_shared/adminExport.ts";
 import { handlePayouts } from "./payouts.ts";
 import { handleBundleOrders } from "./bundleOrders.ts";
@@ -380,7 +381,24 @@ Deno.serve(async (req) => {
           if (walletErr) console.error("admin users: wallets unavailable", walletErr.message);
           for (const w of wallets ?? []) held.set(w.user_id, Number(w.balance ?? 0));
         }
-        const users = (data ?? []).map((u) => ({ ...u, wallet_balance_kobo: held.get(u.id) ?? 0 }));
+        // Events each listed person hosts and has joined. Like the bundles, the list still loads without them.
+        let hostedBy = new Map<string, number>();
+        let joinedBy = new Map<string, number>();
+        if (ids.length > 0) {
+          const [hosted, joined] = await Promise.all([
+            supabase.from("events").select("host_id").in("host_id", ids),
+            supabase.from("event_participants").select("user_id").in("user_id", ids),
+          ]);
+          if (hosted.error || joined.error) console.error("admin users: event counts unavailable", hosted.error?.message ?? joined.error?.message);
+          hostedBy = countByUser(hosted.data, "host_id");
+          joinedBy = countByUser(joined.data, "user_id");
+        }
+        const users = (data ?? []).map((u) => ({
+          ...u,
+          wallet_balance_kobo: held.get(u.id) ?? 0,
+          events_hosted: hostedBy.get(u.id) ?? 0,
+          events_joined: joinedBy.get(u.id) ?? 0,
+        }));
         return withCors({ users, total: count, page, limit });
       }
 

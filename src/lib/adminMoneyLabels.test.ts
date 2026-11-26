@@ -14,9 +14,14 @@ describe("admin wording: bundles, not naira", () => {
     expect(holdingText(30.05, "USDC")).toBe("$30.05");
   });
 
-  it("a share is called a share", () => {
-    expect(transactionLabel("send")).toBe("share sent");
-    expect(transactionLabel("receive")).toBe("share received");
+  it("a share is called a share, and a spray a spray: both arrive as 'send' and 'receive'", () => {
+    expect(transactionLabel("send", "Shared with @chukkydi (sent)")).toBe("share sent");
+    expect(transactionLabel("receive", "Shared with @chukkydi (received)")).toBe("share received");
+    expect(transactionLabel("receive", "Spray at event 11111111-1111 (received)")).toBe("spray received");
+    expect(transactionLabel("send", "Spray at event 11111111-1111 (sent)")).toBe("spray sent");
+    // an older row, or one with no description, is not guessed at
+    expect(transactionLabel("receive")).toBe("bundles received");
+    expect(transactionLabel("send", "")).toBe("bundles sent");
     expect(transactionLabel("giveaway_refund")).toBe("giveaway refund");
     expect(transactionLabel("purchase")).toBe("purchase");
   });

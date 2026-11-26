@@ -5,7 +5,6 @@
  * USDC keep their currency.
  */
 const BUNDLE_TYPES = new Set(["send", "receive", "spray", "giveaway", "giveaway_refund", "purchase"]);
-const TYPE_LABELS: Record<string, string> = { send: "share sent", receive: "share received" };
 
 const naira = (n: number) => new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", minimumFractionDigits: 0 }).format(n);
 const dollars = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(n);
@@ -16,7 +15,18 @@ export const bagLabel = (currency: string): string => (currency === "USDC" ? "US
 /** What a person holds in a wallet. */
 export const holdingText = (amount: number, currency: string): string => (currency === "USDC" ? dollars(amount) : bundles(amount));
 
-export const transactionLabel = (type: string): string => TYPE_LABELS[type] ?? type.replace(/_/g, " ");
+/**
+ * What a transaction is called. A share and a spray are both stored as "send" on one side and
+ * "receive" on the other; the description says which it was ("Shared with @x", "Spray at event …").
+ * When it says neither, the row is not guessed at.
+ */
+export function transactionLabel(type: string, description = ""): string {
+  if (type !== "send" && type !== "receive") return type.replace(/_/g, " ");
+  const way = type === "send" ? "sent" : "received";
+  if (/^spray\b/i.test(description)) return `spray ${way}`;
+  if (/^shared with\b/i.test(description)) return `share ${way}`;
+  return `bundles ${way}`;
+}
 
 export function transactionAmountText(amount: number, currency: string, type: string): string {
   if (currency === "USDC") return dollars(amount);
