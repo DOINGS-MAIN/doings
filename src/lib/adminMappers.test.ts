@@ -180,4 +180,38 @@ describe("admin mappers", () => {
     expect(floorChargedSoFar(10, 200, 60, undefined, at(30))).toBe(0);
     expect(floorChargedSoFar(10, 200, 60, start, at(-5))).toBe(0);
   });
+
+  it("a payout needs review only while it is still open, as the review queue counts it", () => {
+    const row = (status: string) => mapPayout({ id: "t", currency: "NGN", amount: -100, status, metadata: { needs_review: true } });
+    expect(row("pending").needsReview).toBe(true);
+    expect(row("processing").needsReview).toBe(true);
+    // failed: the bundles are already back with the person, so there is nothing left to decide
+    expect(row("failed").needsReview).toBe(false);
+    expect(row("completed").needsReview).toBe(false);
+    expect(mapPayout({ id: "t", currency: "NGN", amount: -100, status: "pending", metadata: {} }).needsReview).toBe(false);
+  });
+  it("a giveaway knows what went back to its creator", () => {
+    expect(mapGiveaway({ id: "g", status: "stopped", remaining_amount: 0, returned_amount: 30000 }).returned).toBe(300);
+    expect(mapGiveaway({ id: "g", status: "stopped", remaining_amount: 0 }).returned).toBeUndefined();
+    const d = mapGiveawayDetail({ giveaway: { id: "g", status: "stopped", remaining_amount: 0 }, refund_transaction: { id: "t9", amount: 20000 }, redemptions: [] });
+    expect(d.giveaway.returned).toBe(200);
+  });
+  it("a person's sale shows the bundles sold beside the money paid out", () => {
+    const m = mapUser360({
+      user: { id: "u1" }, can: { money: true },
+      sections: { money: { transactions: [
+        { id: "t1", type: "withdrawal", currency: "NGN", amount: -190000, status: "completed", bundles_sold: 2000 },
+        { id: "t2", type: "withdrawal", currency: "NGN", amount: -200000, status: "completed", bundles_sold: 2000, usdc_micro: 1_250_000 },
+        { id: "t3", type: "giveaway", currency: "NGN", amount: -40000, status: "completed" },
+      ] } },
+    });
+    expect(m.money?.transactions[0]).toMatchObject({ amount: 1900, bundlesSold: 2000, credit: false });
+    expect(m.money?.transactions[1]).toMatchObject({ bundlesSold: 2000, usdcPaid: 1.25 });
+    expect(m.money?.transactions[2].bundlesSold).toBeUndefined();
+  });
+  it("a KYC result says when a newer check replaced it", () => {
+    expect(mapKyc({ id: "k1", status: "verified", superseded_at: "2026-11-01T00:00:00Z", verification_method: "bvn_selfie" }))
+      .toMatchObject({ superseded: true, method: "bvn_selfie" });
+    expect(mapKyc({ id: "k2", status: "verified" }).superseded).toBe(false);
+  });
 });

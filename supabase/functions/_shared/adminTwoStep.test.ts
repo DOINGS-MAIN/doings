@@ -47,3 +47,8 @@ Deno.test("twoStepRefusal: recording the sign-in is allowed before the code (it 
   assertEquals(twoStepRefusal({ ...base, resource: "team", action: "accept" }), null);
   assertEquals(twoStepRefusal({ ...base, resource: "users", action: "accept" }), "Enter your two-step code to continue");
 });
+
+Deno.test("twoStepRefusal: signing out is recorded even before the code is entered", () => {
+  assertEquals(twoStepRefusal({ ...base, resource: "team", action: "sign-out" }), null);
+  assertEquals(twoStepRefusal({ ...base, resource: "users", action: "sign-out" }), "Enter your two-step code to continue");
+});

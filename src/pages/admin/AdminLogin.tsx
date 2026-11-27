@@ -162,12 +162,6 @@ export const AdminLogin = () => {
             </form>
           )}
 
-          <div className="mt-6 p-3 rounded-xl bg-muted/50 border border-border">
-            <p className="text-xs text-muted-foreground text-center">
-            Use an account with an active row in <code className="text-foreground">admin_roles</code>.
-            There is no default seeded admin — create one in Supabase first.
-          </p>
-          </div>
         </CardContent>
       </Card>
     </div>

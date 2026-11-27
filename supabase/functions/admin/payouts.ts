@@ -40,7 +40,10 @@ export async function handlePayouts(ctx: AdminRouteCtx): Promise<Response | null
     const kind = url.searchParams.get("kind");
     if (kind === "sale") q = q.like("metadata->>kind", "bundle_sale%");
     if (kind === "withdrawal") q = q.or("metadata->>kind.is.null,metadata->>kind.not.like.bundle_sale*");
-    if (url.searchParams.get("needs_review") === "true") q = q.eq("metadata->>needs_review", "true");
+    // Same rule as the review queue: marked for review and still open (a failed payout's bundles are already back).
+    if (url.searchParams.get("needs_review") === "true") {
+      q = q.eq("metadata->>needs_review", "true").in("status", ["pending", "processing"]);
+    }
     const search = orIlike(["idempotency_key", "provider_ref", "description"], url.searchParams.get("search"));
     if (search) q = q.or(search);
     const { data, count, error } = await q

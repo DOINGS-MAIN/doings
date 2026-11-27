@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { type AuditEntry, audited, clientIp, makeAudit } from "./adminAudit.ts";
+import { type AuditEntry, audited, clientIp, makeAudit, reasonDetails } from "./adminAudit.ts";
 
 const h = (init: Record<string, string>) => new Headers(init);
 
@@ -111,4 +111,13 @@ Deno.test("a follow-up record that cannot be written does not undo or hide the a
   const value = await audited(r.audit, { action: "check_payout", targetType: "transaction", targetId: "t-1" },
     () => Promise.resolve({ status: "completed" }), { result: (v) => v });
   assertEquals(value, { status: "completed" });
+});
+
+Deno.test("an optional reason goes into the audit details only when one was given", () => {
+  assertEquals(reasonDetails({ reason: "  checked with the host " }), { reason: "checked with the host" });
+  assertEquals(reasonDetails({ reason: "   " }), undefined);
+  assertEquals(reasonDetails({}), undefined);
+  assertEquals(reasonDetails(null), undefined);
+  assertEquals(reasonDetails({ reason: 42 }), undefined);
+  assertEquals(reasonDetails({ reason: "x".repeat(600) })?.reason.length, 500);
 });

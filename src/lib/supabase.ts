@@ -1,6 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import type { SprayTheatrePlan } from "@/lib/sprayTheatrePlan";
 import { getValidSession } from "@/lib/authSession";
+import { exportFileName } from "@/lib/adminRun";
 
 const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL ?? "").trim();
 const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? "").trim();
@@ -117,7 +118,7 @@ async function downloadAdminCsv(path: string, params?: Record<string, string>): 
   }
   const truncated = res.headers.get("X-Export-Truncated") === "true";
   const blob = await res.blob();
-  const filename = path.replace(/\//g, "-") + ".csv";
+  const filename = exportFileName(path);
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = objectUrl;
@@ -382,6 +383,9 @@ export const notifications = {
 };
 
 // ── Admin ──
+// The optional reason sent with an admin action; nothing is sent when it is empty.
+const reasonBody = (reason?: string) => (reason?.trim() ? { reason: reason.trim() } : undefined);
+
 export const admin = {
   stats: () => invoke("admin", { method: "GET", path: "stats" }),
   users: {
@@ -389,9 +393,9 @@ export const admin = {
       invoke("admin", { method: "GET", path: "users", params: params as Record<string, string> }),
     get: (id: string) => invoke("admin", { method: "GET", path: `users/${id}` }),
     suspend: (id: string, reason: string) => invoke("admin", { method: "POST", path: `users/${id}/suspend`, body: { reason } }),
-    unsuspend: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/unsuspend` }),
+    unsuspend: (id: string, reason?: string) => invoke("admin", { method: "POST", path: `users/${id}/unsuspend`, body: reasonBody(reason) }),
     ban: (id: string, reason: string) => invoke("admin", { method: "POST", path: `users/${id}/ban`, body: { reason } }),
-    unban: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/unban` }),
+    unban: (id: string, reason?: string) => invoke("admin", { method: "POST", path: `users/${id}/unban`, body: reasonBody(reason) }),
     resetKycAttempts: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/kyc-reset` }),
     clearPinLock: (id: string) => invoke("admin", { method: "POST", path: `users/${id}/clear-pin-lock` }),
   },
@@ -411,7 +415,7 @@ export const admin = {
     }) => invoke("admin", { method: "GET", path: "transactions", params: params as Record<string, string> }),
     get: (id: string) => invoke("admin", { method: "GET", path: `transactions/${id}` }),
     flag: (id: string, reason: string) => invoke("admin", { method: "POST", path: `transactions/${id}/flag`, body: { reason } }),
-    unflag: (id: string) => invoke("admin", { method: "POST", path: `transactions/${id}/unflag` }),
+    unflag: (id: string, reason?: string) => invoke("admin", { method: "POST", path: `transactions/${id}/unflag`, body: reasonBody(reason) }),
     refund: (id: string, reason?: string) => invoke("admin", { method: "POST", path: `transactions/${id}/refund`, body: { reason } }),
     exportCsv: (params?: Record<string, string>) =>
       downloadAdminCsv("transactions", params),
@@ -477,7 +481,7 @@ export const admin = {
     removeHold: (id: string, holdId: string, reason: string) =>
       invoke("admin", { method: "POST", path: `events/${id}/holds/${holdId}/remove`, body: { reason } }),
     flag: (id: string, reason: string) => invoke("admin", { method: "POST", path: `events/${id}/flag`, body: { reason } }),
-    unflag: (id: string) => invoke("admin", { method: "POST", path: `events/${id}/unflag` }),
+    unflag: (id: string, reason?: string) => invoke("admin", { method: "POST", path: `events/${id}/unflag`, body: reasonBody(reason) }),
   },
   team: {
     list: () => invoke("admin", { method: "GET", path: "team" }),
@@ -485,7 +489,10 @@ export const admin = {
     disable: (id: string) => invoke("admin", { method: "POST", path: `team/${id}/disable` }),
     enable: (id: string) => invoke("admin", { method: "POST", path: `team/${id}/enable` }),
     setRole: (id: string, role: string) => invoke("admin", { method: "POST", path: `team/${id}/role`, body: { role } }),
-    accept: () => invoke("admin", { method: "POST", path: "team/accept" }),
+    /** `step` says which sign-in step was just passed, so the server writes it to the audit log. */
+    accept: (step?: "password" | "two_step") => invoke("admin", { method: "POST", path: "team/accept", body: step ? { step } : undefined }),
+    /** Records the sign-out in the audit log; call it before signing out and never wait long for it. */
+    signOut: () => invoke("admin", { method: "POST", path: "team/sign-out" }),
     resetTwoStep: (id: string) => invoke("admin", { method: "POST", path: `team/${id}/reset-two-step` }),
     setTwoStepRequired: (required: boolean) => invoke("admin", { method: "POST", path: "team/two-step", body: { required } }),
   },

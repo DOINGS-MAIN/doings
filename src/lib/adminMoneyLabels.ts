@@ -18,9 +18,17 @@ export const holdingText = (amount: number, currency: string): string => (curren
 /**
  * What a transaction is called. A share and a spray are both stored as "send" on one side and
  * "receive" on the other; the description says which it was ("Shared with @x", "Spray at event …").
- * When it says neither, the row is not guessed at.
+ * A giveaway row is the creator funding it ("Giveaway funding: …", bundles out) or someone claiming
+ * it ("Giveaway redemption: …", bundles in); with no description the sign of the amount says which.
+ * When nothing says, the row is not guessed at.
  */
-export function transactionLabel(type: string, description = ""): string {
+export function transactionLabel(type: string, description = "", amount?: number): string {
+  if (type === "giveaway") {
+    if (/^giveaway funding\b/i.test(description)) return "giveaway given";
+    if (/^giveaway redemption\b/i.test(description)) return "giveaway received";
+    if (amount != null && amount !== 0) return amount < 0 ? "giveaway given" : "giveaway received";
+    return "giveaway";
+  }
   if (type !== "send" && type !== "receive") return type.replace(/_/g, " ");
   const way = type === "send" ? "sent" : "received";
   if (/^spray\b/i.test(description)) return `spray ${way}`;
@@ -28,7 +36,22 @@ export function transactionLabel(type: string, description = ""): string {
   return `bundles ${way}`;
 }
 
+/** The label with one leading capital ("Giveaway refund"), for badges and lists. */
+export function transactionTitle(type: string, description = "", amount?: number): string {
+  const label = transactionLabel(type, description, amount);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 export function transactionAmountText(amount: number, currency: string, type: string): string {
   if (currency === "USDC") return dollars(amount);
   return BUNDLE_TYPES.has(type) ? bundles(amount) : naira(amount);
+}
+
+/**
+ * A payout: the real money that left (naira, or dollars for a USDC payout) and, when the row is a
+ * bundle sale, the bundles the person sold for it.
+ */
+export function payoutText(p: { amount: number; currency: string; bundlesSold?: number; usdcPaid?: number }): string {
+  const paid = p.usdcPaid != null ? dollars(p.usdcPaid) : p.currency === "USDC" ? dollars(p.amount) : naira(p.amount);
+  return `${paid} paid out${p.bundlesSold != null ? ` · ${bundles(p.bundlesSold)} sold` : ""}`;
 }

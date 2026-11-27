@@ -63,7 +63,7 @@ export async function handleUser360(ctx: Ctx): Promise<Response | null> {
       tasks.push((async () => {
         const [wallets, txns, payouts, orders, banks] = await Promise.all([
           supabase.from("wallets").select("currency, balance, locked_balance").eq("user_id", userId),
-          supabase.from("transactions").select("id, type, description, currency, amount, status, idempotency_key, created_at")
+          supabase.from("transactions").select("id, type, description, currency, amount, status, idempotency_key, metadata, created_at")
             .eq("user_id", userId).order("created_at", { ascending: false }).order("id", { ascending: false }).limit(20),
           supabase.from("transactions").select("id, currency, amount, status, idempotency_key, metadata, created_at")
             .eq("user_id", userId).eq("type", "withdrawal").in("status", ["pending", "processing"]).order("created_at", { ascending: false }),
@@ -74,7 +74,17 @@ export async function handleUser360(ctx: Ctx): Promise<Response | null> {
         ]);
         sections.money = {
           wallets: must(wallets) ?? [],
-          transactions: must(txns) ?? [],
+          // A bundle sale keeps the bundles sold (and the USDC paid, for a USDC sale) in its metadata;
+          // only those two numbers are sent on.
+          transactions: ((must(txns) ?? []) as Record<string, unknown>[]).map(({ metadata, ...t }) => {
+            const m = (metadata ?? {}) as Record<string, unknown>;
+            const sale = t.type === "withdrawal" && String(m.kind ?? "").startsWith("bundle_sale");
+            return {
+              ...t,
+              ...(sale && m.bundles != null ? { bundles_sold: Number(m.bundles) } : {}),
+              ...(sale && m.kind === "bundle_sale_usdc" && m.usdc_micro != null ? { usdc_micro: Number(m.usdc_micro) } : {}),
+            };
+          }),
           open_payouts: ((must(payouts) ?? []) as Record<string, unknown>[]).map(({ metadata, ...p }) => ({
             ...p,
             needs_review: (metadata as Record<string, unknown> | null)?.needs_review === true,

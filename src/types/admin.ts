@@ -170,6 +170,9 @@ export interface KYCSubmission {
   rejectionReason?: string;
   submittedAt: Date;
   verifiedAt?: Date;
+  method?: string;
+  /** A newer verified check replaced this one. */
+  superseded?: boolean;
 }
 
 export interface AdminEvent {
@@ -265,7 +268,13 @@ export interface AdminUser360 {
   };
   money?: {
     wallets: { currency: string; balance: number; held: number }[];
-    transactions: { id: string; type: string; description: string; currency: string; amount: number; status: string; reference: string; createdAt: Date }[];
+    transactions: {
+      id: string; type: string; description: string; currency: string; amount: number; status: string; reference: string; createdAt: Date;
+      /** The row added to the person's balance (amount itself is shown without its sign). */
+      credit: boolean;
+      /** A bundle sale: the bundles sold for the payout, and the USDC paid when it paid out in USDC. */
+      bundlesSold?: number; usdcPaid?: number;
+    }[];
     openPayouts: { id: string; currency: string; amount: number; status: string; reference: string; needsReview: boolean; createdAt: Date }[];
     bundleOrders: { id: string; currency: string; bundles: number; amount: number; status: string; refunded: boolean; createdAt: Date }[];
     bankAccounts: { id: string; bankName: string; accountName: string; accountNumber: string; isDefault: boolean }[];
@@ -283,10 +292,12 @@ export interface AdminGiveaway {
   codeMasked: boolean;
   status: "active" | "stopped" | "exhausted";
   type: "live" | "scheduled";
-  /** Naira. */
+  /** Bundles (one bundle is 100 kobo). */
   total: number;
   perPerson: number;
   remaining: number;
+  /** Bundles returned to the creator when it was stopped; undefined when the server sent no refund. */
+  returned?: number;
   maxRecipients: number;
   /** Recipients so far: the maximum less what the remainder can still pay. */
   redeemedCount: number;

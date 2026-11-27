@@ -19,3 +19,13 @@ export function toCsv(rows: Record<string, unknown>[], columns: string[]): strin
   const lines = rows.map((row) => columns.map((col) => csvCell(row[col])).join(","));
   return [header, ...lines].join("\n");
 }
+
+// The download name of an export: the list and the UTC day it was made (times in the file are UTC).
+export function csvFileName(base: string, at: Date = new Date()): string {
+  return `${base}-${at.toISOString().slice(0, 10)}.csv`;
+}
+
+// Headers say their units: amounts are in the smallest unit as stored (kobo), times are UTC.
+export const TRANSACTION_CSV_COLUMNS = [
+  "id", "reference", "user_name", "type", "amount_kobo", "fee_kobo", "currency", "status", "provider", "flagged", "created_at_utc",
+];
