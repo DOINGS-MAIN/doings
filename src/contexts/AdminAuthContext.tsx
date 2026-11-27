@@ -9,6 +9,7 @@ import {
 } from "react";
 import { supabase, auth, admin as adminApi, passwordCheckClient } from "@/lib/supabase";
 import { AdminRole } from "@/types/admin";
+import { withinTime } from "@/lib/adminRun";
 
 export interface AdminAccount {
   id: string;
@@ -139,7 +140,8 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
       if (error) return { success: false, error: error.message };
 
       // An invited admin who already had an account activates their invite on first sign-in.
-      await adminApi.team.accept().catch(() => undefined);
+      // It also writes the sign-in to the audit log.
+      await adminApi.team.accept("password").catch(() => undefined);
       const isAdmin = await checkAdminRole();
       if (!isAdmin) {
         await auth.signOut();
@@ -152,6 +154,9 @@ export const AdminAuthProvider = ({ children }: { children: ReactNode }) => {
   );
 
   const logout = useCallback(async () => {
+    // The sign-out goes into the audit log while the session can still say who it is. It is best
+    // effort: signing out never waits more than a moment for it and never fails because of it.
+    await withinTime(adminApi.team.signOut(), 2500);
     await auth.signOut();
     setSession(null);
   }, []);

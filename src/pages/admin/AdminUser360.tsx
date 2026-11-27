@@ -14,8 +14,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useAdminMutations, useAdminUser360 } from "@/hooks/admin/useAdminQueries";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { can } from "@/types/admin";
-import { confirmDialog } from "@/lib/confirmDialog";
-import { bagLabel, holdingText, transactionAmountText, transactionLabel } from "@/lib/adminMoneyLabels";
+import { confirmDialog, confirmWithReason } from "@/lib/confirmDialog";
+import { bagLabel, holdingText, payoutText, transactionAmountText, transactionTitle } from "@/lib/adminMoneyLabels";
 import type { AdminUser360 as User360 } from "@/types/admin";
 
 const formatAmount = (amount: number, currency: string) =>
@@ -260,7 +260,10 @@ function MoneyCard({ money }: { money: NonNullable<User360["money"]> }) {
           ) : (
             money.transactions.map((t) => (
               <Link key={t.id} to={`/admin/transactions/${t.id}`} className="flex justify-between py-1 border-b border-border last:border-0 hover:underline">
-                <span className="capitalize">{transactionLabel(t.type, t.description)} · {transactionAmountText(t.amount, t.currency, t.type)} · {label(t.status)}</span>
+                <span>
+                  {transactionTitle(t.type, t.description, t.credit ? t.amount : -t.amount)} ·{" "}
+                  {t.type === "withdrawal" ? payoutText(t) : transactionAmountText(t.amount, t.currency, t.type)} · {label(t.status)}
+                </span>
                 <span className="text-xs text-muted-foreground">{format(t.createdAt, "MMM d, HH:mm")}</span>
               </Link>
             ))
@@ -345,6 +348,21 @@ export const AdminUser360 = () => {
   const { suspendUser, unsuspendUser, banUser, unbanUser } = useAdminMutations();
   const [dialog, setDialog] = useState<"suspend" | "ban" | null>(null);
 
+  // Lifting a suspension or a ban is asked first; the reason is optional and goes into the audit log.
+  const lift = async (kind: "suspension" | "ban", userId: string, who: string) => {
+    const reason = await confirmWithReason(
+      kind === "ban"
+        ? `Unban ${who}? They can sign in, move money and host again.`
+        : `Unsuspend ${who}? They can move money and host again.`,
+      { title: kind === "ban" ? "Unban user" : "Unsuspend user", confirmLabel: kind === "ban" ? "Unban" : "Unsuspend" },
+    );
+    if (reason === null) return;
+    await runToast(
+      () => (kind === "ban" ? unbanUser(userId, reason) : unsuspendUser(userId, reason)),
+      kind === "ban" ? "Unbanned" : "Unsuspended",
+    );
+  };
+
   // The query never runs for a role without users.view (e.g. finance), so say so instead of spinning.
   if (!can(session?.role, "users.view")) {
     return <div className="p-8 text-muted-foreground">Your admin role can't view user profiles.</div>;
@@ -403,10 +421,10 @@ export const AdminUser360 = () => {
               </>
             )}
             {u.status === "suspended" && (
-              <Button onClick={() => void runToast(() => unsuspendUser(u.id), "Unsuspended")}><UserCheck className="w-4 h-4 mr-2" />Unsuspend</Button>
+              <Button onClick={() => void lift("suspension", u.id, display)}><UserCheck className="w-4 h-4 mr-2" />Unsuspend</Button>
             )}
             {u.status === "banned" && (
-              <Button onClick={() => void runToast(() => unbanUser(u.id), "Unbanned")}><UserCheck className="w-4 h-4 mr-2" />Unban</Button>
+              <Button onClick={() => void lift("ban", u.id, display)}><UserCheck className="w-4 h-4 mr-2" />Unban</Button>
             )}
           </div>
         )}

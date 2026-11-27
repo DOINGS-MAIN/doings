@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { csvCell, toCsv } from "./adminCsv.ts";
+import { csvCell, csvFileName, toCsv, TRANSACTION_CSV_COLUMNS } from "./adminCsv.ts";
 
 Deno.test("a cell that a spreadsheet would run as a formula is made plain text", () => {
   assertEquals(csvCell("=HYPERLINK(\"http://x\")"), "\"'=HYPERLINK(\"\"http://x\"\")\"");
@@ -36,4 +36,15 @@ Deno.test("toCsv writes the header and one line per row in column order", () => 
     toCsv([{ name: "=evil", amount: -5 }, { name: "Ada", amount: 7 }], ["name", "amount"]),
     "name,amount\n'=evil,-5\nAda,7",
   );
+});
+
+Deno.test("an export's file name carries the UTC day it was made", () => {
+  assertEquals(csvFileName("transactions", new Date("2026-11-28T23:59:59Z")), "transactions-2026-11-28.csv");
+  assertEquals(csvFileName("psp-events", new Date("2026-01-02T00:00:00Z")), "psp-events-2026-01-02.csv");
+});
+
+Deno.test("the transactions export says its units in the header: kobo amounts, UTC times", () => {
+  assertEquals(TRANSACTION_CSV_COLUMNS, [
+    "id", "reference", "user_name", "type", "amount_kobo", "fee_kobo", "currency", "status", "provider", "flagged", "created_at_utc",
+  ]);
 });

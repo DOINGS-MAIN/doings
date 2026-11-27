@@ -20,7 +20,8 @@ export function tokenAal(authHeader: string | null | undefined): Aal {
 
 /**
  * Why a request is refused for want of the two-step code, or null. Only super admins are held to it,
- * and only once the rule is switched on. `team/accept` records a sign-in and runs before the code.
+ * and only once the rule is switched on. `team/accept` records a sign-in and runs before the code;
+ * `team/sign-out` records a sign-out, which must work from the code screen too.
  */
 export function twoStepRefusal(input: {
   role: string;
@@ -30,6 +31,6 @@ export function twoStepRefusal(input: {
   action?: string;
 }): string | null {
   if (!input.required || input.role !== "super_admin" || input.aal === "aal2") return null;
-  if (input.resource === "team" && input.action === "accept") return null;
+  if (input.resource === "team" && (input.action === "accept" || input.action === "sign-out")) return null;
   return "Enter your two-step code to continue";
 }

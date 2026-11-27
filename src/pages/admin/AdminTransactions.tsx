@@ -55,6 +55,8 @@ import { admin as adminApi } from "@/lib/supabase";
 import { AdminTransaction } from "@/types/admin";
 import { format, formatDistanceToNow } from "date-fns";
 import { toast } from "sonner";
+import { confirmWithReason } from "@/lib/confirmDialog";
+import { transactionAmountText, transactionTitle } from "@/lib/adminMoneyLabels";
 
 export const AdminTransactions = () => {
   const navigate = useNavigate();
@@ -65,7 +67,6 @@ export const AdminTransactions = () => {
   const stats = {
     totalVolume: statsData?.totalVolume ?? 0,
     todayVolume: statsData?.todayVolume ?? 0,
-    totalTransactions: statsData?.totalTransactions ?? 0,
     flaggedTransactions: statsData?.flaggedTransactions ?? 0,
   };
   const [searchQuery, setSearchQuery] = useState("");
@@ -134,7 +135,11 @@ export const AdminTransactions = () => {
     }
   };
 
-  const getTypeBadge = (type: AdminTransaction["type"]) => {
+  // Bundle movements are counted in bundles; real money in or out keeps its currency.
+  const amountText = (txn: Pick<AdminTransaction, "amount" | "currency" | "type">) =>
+    transactionAmountText(Math.abs(txn.amount), txn.currency, txn.type);
+
+  const getTypeBadge = ({ type, description, amount }: AdminTransaction) => {
     const colors: Record<string, string> = {
       deposit: "bg-success/20 text-success",
       withdrawal: "bg-accent/20 text-accent",
@@ -143,8 +148,8 @@ export const AdminTransactions = () => {
       refund: "bg-muted text-muted-foreground",
     };
     return (
-      <Badge className={`${colors[type]} border-0 capitalize`}>
-        {type}
+      <Badge className={`${colors[type] ?? "bg-muted text-muted-foreground"} border-0`}>
+        {transactionTitle(type, description, amount)}
       </Badge>
     );
   };
@@ -164,8 +169,13 @@ export const AdminTransactions = () => {
   };
 
   const handleUnflag = async (txn: AdminTransaction) => {
+    const reason = await confirmWithReason(
+      `Remove the flag from ${txn.reference}? It leaves the flagged queue.`,
+      { title: "Remove flag", confirmLabel: "Remove flag" },
+    );
+    if (reason === null) return;
     try {
-      await unflagTransaction(txn.id);
+      await unflagTransaction(txn.id, reason);
       toast.success("Transaction unflagged");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to unflag");
@@ -209,8 +219,9 @@ export const AdminTransactions = () => {
         </Card>
         <Card className="bg-card border-border">
           <CardContent className="p-4">
+            {/* The list's own count, so it follows the filters and agrees with the export. */}
             <p className="text-sm text-muted-foreground">Total Transactions</p>
-            <p className="text-2xl font-bold">{stats.totalTransactions}</p>
+            <p className="text-2xl font-bold">{txData ? transactionTotal.toLocaleString() : "—"}</p>
           </CardContent>
         </Card>
         <Card className="bg-card border-border">
@@ -388,10 +399,10 @@ export const AdminTransactions = () => {
                 <TableCell>
                   <p className="font-medium text-foreground">{txn.userName}</p>
                 </TableCell>
-                <TableCell>{getTypeBadge(txn.type)}</TableCell>
+                <TableCell>{getTypeBadge(txn)}</TableCell>
                 <TableCell>
                   <span className={`font-semibold ${txn.amount >= 0 ? "text-success" : "text-foreground"}`}>
-                    {txn.amount >= 0 ? "+" : "-"}{formatCurrency(txn.amount, txn.currency)}
+                    {txn.amount >= 0 ? "+" : "-"}{amountText(txn)}
                   </span>
                 </TableCell>
                 <TableCell>
@@ -502,7 +513,7 @@ export const AdminTransactions = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Amount</span>
-                <span className="font-semibold">{formatCurrency(selectedTxn?.amount || 0, selectedTxn?.currency)}</span>
+                <span className="font-semibold">{selectedTxn ? amountText(selectedTxn) : ""}</span>
               </div>
             </div>
             <div className="space-y-2">

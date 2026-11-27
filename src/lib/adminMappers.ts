@@ -112,6 +112,8 @@ export function mapKyc(k: Record<string, unknown>): KYCSubmission {
     rejectionReason: (k.rejection_reason as string) ?? undefined,
     submittedAt: new Date((k.submitted_at as string) ?? (k.created_at as string) ?? Date.now()),
     verifiedAt: k.verified_at ? new Date(k.verified_at as string) : undefined,
+    method: (k.verification_method as string) ?? undefined,
+    superseded: !!k.superseded_at,
   };
 }
 
@@ -139,6 +141,15 @@ const toDisplay = (amount: number, currency: string) =>
 
 const dateOr = (v: unknown): Date | undefined => (v ? new Date(v as string) : undefined);
 
+/**
+ * The review queue's rule ("Payouts needing review"): marked for review AND still open. Once a payout
+ * has failed its bundles are back with the person, and once it is paid there is nothing left to decide.
+ */
+export function payoutNeedsReview(status: unknown, metadata: Record<string, unknown> | null | undefined): boolean {
+  const marked = metadata?.needs_review === true || metadata?.needs_review === "true";
+  return marked && (status === "pending" || status === "processing");
+}
+
 export function mapPayout(t: Record<string, unknown>): AdminPayout {
   const m = (t.metadata ?? {}) as Record<string, unknown>;
   // A USDC bundle sale is an NGN row (the Bag is debited in NGN) that pays out USDC.
@@ -165,7 +176,7 @@ export function mapPayout(t: Record<string, unknown>): AdminPayout {
     providerRef: (t.provider_ref as string) ?? undefined,
     kind: String(m.kind ?? "").startsWith("bundle_sale") ? "sale" : "withdrawal",
     bundles: m.bundles != null ? Number(m.bundles) : undefined,
-    needsReview: m.needs_review === true || m.needs_review === "true",
+    needsReview: payoutNeedsReview(t.status, m),
     lastCheck: check
       ? { status: String(check.status ?? ""), providerStatus: (check.provider_status as string) ?? undefined, at: new Date((check.at as string) ?? Date.now()) }
       : undefined,
@@ -395,6 +406,9 @@ export function mapUser360(res: Record<string, unknown>): AdminUser360 {
         description: (t.description as string) ?? "",
         currency: (t.currency as string) ?? "NGN",
         amount: Math.abs(toDisplay(Number(t.amount ?? 0), (t.currency as string) ?? "NGN")),
+        credit: Number(t.amount ?? 0) > 0,
+        bundlesSold: num(t.bundles_sold),
+        usdcPaid: t.usdc_micro != null ? Number(t.usdc_micro) / 1_000_000 : undefined,
         status: (t.status as string) ?? "",
         reference: (t.idempotency_key as string) ?? (t.id as string),
         createdAt: new Date((t.created_at as string) ?? Date.now()),
@@ -463,6 +477,7 @@ export function mapGiveaway(g: Record<string, unknown>): AdminGiveaway {
     total: Number(g.total_amount ?? 0) / 100,
     perPerson: perKobo / 100,
     remaining: remainingKobo / 100,
+    returned: g.returned_amount != null ? Math.abs(Number(g.returned_amount)) / 100 : undefined,
     maxRecipients: max,
     redeemedCount: counted != null
       ? Number(counted)
@@ -481,8 +496,10 @@ export function mapGiveawayDetail(res: Record<string, unknown>): AdminGiveawayDe
   const g = (res.giveaway ?? {}) as Record<string, unknown>;
   const c = res.creator as Record<string, unknown> | null;
   const e = res.event as Record<string, unknown> | null;
+  const refund = res.refund_transaction as Record<string, unknown> | null | undefined;
   const giveaway = mapGiveaway({
     ...g,
+    returned_amount: refund?.amount ?? g.returned_amount,
     user_name: (c?.full_name as string) ?? g.user_name,
     redemption_count: res.redemption_count ?? g.redemption_count,
     events: e ?? g.events,

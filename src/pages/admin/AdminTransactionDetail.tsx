@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   Flag,
+  FlagOff,
   Loader2,
   ExternalLink,
   User,
@@ -21,6 +22,11 @@ import {
 } from "@/components/ui/table";
 import { PspTimeline } from "@/components/admin/PspTimeline";
 import { useAdminMonitoring } from "@/hooks/useAdminMonitoring";
+import { useAdminMutations } from "@/hooks/admin/useAdminQueries";
+import { useAdminAuth } from "@/hooks/useAdminAuth";
+import { canWritePayments } from "@/lib/adminPermissions";
+import { confirmWithReason } from "@/lib/confirmDialog";
+import { holdingText, transactionAmountText, transactionTitle } from "@/lib/adminMoneyLabels";
 import type { AdminTransactionDetail } from "@/types/admin";
 import { getCryptoTrackId, solanaExplorerTxUrl } from "@/lib/cryptoTx";
 import { toast } from "sonner";
@@ -37,8 +43,12 @@ export const AdminTransactionDetail = () => {
   const { txnId } = useParams<{ txnId: string }>();
   const navigate = useNavigate();
   const { fetchTransactionDetail } = useAdminMonitoring();
+  const { flagTransaction, unflagTransaction } = useAdminMutations();
+  const { currentAccount } = useAdminAuth();
+  const canWrite = currentAccount ? canWritePayments(currentAccount.role) : false;
   const [detail, setDetail] = useState<AdminTransactionDetail | null>(null);
   const [loading, setLoading] = useState(true);
+  const [flagging, setFlagging] = useState(false);
 
   useEffect(() => {
     if (!txnId) return;
@@ -70,6 +80,29 @@ export const AdminTransactionDetail = () => {
   }
 
   const { transaction: txn, ledgerEntries, pspEvents, relatedWebhooks } = detail;
+  // Bundle movements are counted in bundles; real money in or out keeps its currency.
+  const amountText = (amount: number) => transactionAmountText(Math.abs(amount), txn.currency, txn.type);
+
+  // The same questions as the list's "…" menu: a reason is needed to flag, and optional to remove one.
+  const toggleFlag = async () => {
+    const reason = txn.flagged
+      ? await confirmWithReason(`Remove the flag from ${txn.reference}? It leaves the flagged queue.`, { title: "Remove flag", confirmLabel: "Remove flag" })
+      : await confirmWithReason("Flag this transaction for review. It will appear in the flagged queue.", {
+        title: "Flag transaction", confirmLabel: "Flag transaction", destructive: true, reasonLabel: "Reason for flagging", reasonRequired: true,
+      });
+    if (reason === null) return;
+    setFlagging(true);
+    try {
+      if (txn.flagged) await unflagTransaction(txn.id, reason);
+      else await flagTransaction(txn.id, reason);
+      toast.success(txn.flagged ? "Transaction unflagged" : "Transaction flagged for review");
+      setDetail(await fetchTransactionDetail(txn.id));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "That didn't work");
+    } finally {
+      setFlagging(false);
+    }
+  };
   const feeBreakdown = txn.metadata?.fee_breakdown as {
     platform_fee_percent?: number;
     platform_fee_kobo?: number;
@@ -95,7 +128,7 @@ export const AdminTransactionDetail = () => {
           <p className="text-muted-foreground mt-1">{txn.description}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Badge className="capitalize">{txn.type}</Badge>
+          <Badge>{transactionTitle(txn.type, txn.description, txn.amount)}</Badge>
           <Badge variant="outline" className="capitalize">{txn.status}</Badge>
           {txn.provider && <Badge variant="secondary" className="capitalize">{txn.provider}</Badge>}
           {txn.flagged && (
@@ -103,6 +136,12 @@ export const AdminTransactionDetail = () => {
               <Flag className="w-3 h-3" />
               Flagged
             </Badge>
+          )}
+          {canWrite && (
+            <Button variant={txn.flagged ? "outline" : "destructive"} size="sm" disabled={flagging} onClick={() => void toggleFlag()}>
+              {txn.flagged ? <FlagOff className="w-4 h-4 mr-2" /> : <Flag className="w-4 h-4 mr-2" />}
+              {txn.flagged ? "Remove flag" : "Flag"}
+            </Button>
           )}
         </div>
       </div>
@@ -115,12 +154,13 @@ export const AdminTransactionDetail = () => {
           <CardContent className="grid sm:grid-cols-2 gap-4 text-sm">
             <div>
               <p className="text-muted-foreground">Amount</p>
-              <p className="font-semibold text-lg">{formatMoney(txn.amount, txn.currency)}</p>
+              <p className="font-semibold text-lg">{amountText(txn.amount)}</p>
+              {txn.flagged && txn.flagReason && <p className="text-xs text-destructive mt-1">Flagged: {txn.flagReason}</p>}
             </div>
             <div>
               <p className="text-muted-foreground">Fee / Net</p>
               <p className="font-medium">
-                {formatMoney(txn.fee ?? 0, txn.currency)} / {formatMoney(txn.netAmount ?? txn.amount, txn.currency)}
+                {formatMoney(txn.fee ?? 0, txn.currency)} / {amountText(txn.netAmount ?? txn.amount)}
               </p>
               {feeBreakdown && (
                 <div className="mt-2 space-y-1 text-xs text-muted-foreground">
@@ -274,9 +314,10 @@ export const AdminTransactionDetail = () => {
                 {ledgerEntries.map((entry) => (
                   <TableRow key={entry.id}>
                     <TableCell className="capitalize">{entry.entryType}</TableCell>
-                    <TableCell>{formatMoney(entry.amount, txn.currency)}</TableCell>
-                    <TableCell>{formatMoney(entry.balanceBefore, txn.currency)}</TableCell>
-                    <TableCell>{formatMoney(entry.balanceAfter, txn.currency)}</TableCell>
+                    {/* The ledger is the person's wallet, and an NGN wallet holds bundles. */}
+                    <TableCell>{holdingText(Math.abs(entry.amount), txn.currency)}</TableCell>
+                    <TableCell>{holdingText(entry.balanceBefore, txn.currency)}</TableCell>
+                    <TableCell>{holdingText(entry.balanceAfter, txn.currency)}</TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {format(entry.createdAt, "MMM d HH:mm:ss")}
                     </TableCell>

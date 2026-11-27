@@ -15,8 +15,8 @@ import { handleGiveaways } from "./giveaways.ts";
 import { handleLiveEvent } from "./liveEvent.ts";
 import { can, escapeLikePattern, eventHoldRoute, isAdminRole, permissionFor, teamChangeAllowed } from "../_shared/adminAccess.ts";
 import { tokenAal, twoStepRefusal } from "../_shared/adminTwoStep.ts";
-import { toCsv } from "../_shared/adminCsv.ts";
-import { audited, clientIp, makeAudit } from "../_shared/adminAudit.ts";
+import { csvFileName, toCsv, TRANSACTION_CSV_COLUMNS } from "../_shared/adminCsv.ts";
+import { audited, clientIp, makeAudit, reasonDetails } from "../_shared/adminAudit.ts";
 
 const STUCK_AFTER_MINUTES = Number(Deno.env.get("WITHDRAWAL_RECONCILE_MINUTES") ?? "15");
 
@@ -24,7 +24,7 @@ const RESERVED_ACTIONS = new Set([
   "suspend", "unsuspend", "ban", "unban", "flag", "unflag", "approve", "reject", "end",
   "invite", "accept", "disable", "enable", "role", "refund", "reprocess", "export", "probe-all", "health",
   "check", "resolve", "revoke", "kyc-reset", "stop", "reveal-code", "advance-floor",
-  "two-step", "reset-two-step", "clear-pin-lock",
+  "two-step", "reset-two-step", "clear-pin-lock", "sign-out",
 ]);
 
 // The platform treasury's wallets belong to this user (see migration 083).
@@ -54,7 +54,7 @@ function csvResponse(filename: string, body: string, truncated = false): Respons
       ...corsHeaders,
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="${filename}"`,
-      "Access-Control-Expose-Headers": "X-Export-Truncated",
+      "Access-Control-Expose-Headers": "X-Export-Truncated, Content-Disposition",
       ...(truncated ? { "X-Export-Truncated": "true" } : {}),
     },
   });
@@ -263,10 +263,25 @@ Deno.serve(async (req) => {
     const refusal = twoStepRefusal({ role, required, aal, resource: route.resource, action: routeAction });
     if (refusal) return withCors({ error: refusal, code: "TWO_STEP_REQUIRED" }, { status: 403 });
 
+    // ── SIGN OUT ── any admin; the app calls this just before it signs out, and never waits long for it.
+    if (route.resource === "team" && req.method === "POST" && routeAction === "sign-out") {
+      await audit({ action: "admin_sign_out", targetType: "admin", targetId: activeRowId ?? invitedRowId, details: { role: role || null } });
+      return withCors({ ok: true });
+    }
+
     // ── ACCEPT INVITE ── called on every admin sign-in: activates a pending invite, else records the login.
+    // The app also calls it to ask whether two-step is required, so a sign-in is only written to the
+    // audit log when the app says which step was just passed: the password, or the two-step code
+    // (believed only when the verified token is at that level).
     if (route.resource === "team" && req.method === "POST" && routeAction === "accept") {
       if (!invitedRowId) {
         await supabase.from("admin_roles").update({ last_login_at: new Date().toISOString() }).eq("id", activeRowId!);
+        const { step } = await req.json().catch(() => ({})) as { step?: unknown };
+        if (step === "password") {
+          await audit({ action: "admin_sign_in", targetType: "admin", targetId: activeRowId, details: { role } });
+        } else if (step === "two_step" && aal === "aal2") {
+          await audit({ action: "admin_two_step_passed", targetType: "admin", targetId: activeRowId, details: { role } });
+        }
         return withCors({ ok: true, two_step_required: required });
       }
       return await audited(audit, { action: "accept_admin_invite", targetType: "admin", targetId: invitedRowId }, async () => {
@@ -416,7 +431,8 @@ Deno.serve(async (req) => {
 
       if (req.method === "POST" && route.action === "unsuspend" && route.id) {
         // Only lifts a suspension; a ban is lifted with unban (which also clears the sign-in ban).
-        return await audited(audit, { action: "unsuspend_user", targetType: "user", targetId: route.id }, async () => {
+        const details = reasonDetails(await req.json().catch(() => null));
+        return await audited(audit, { action: "unsuspend_user", targetType: "user", targetId: route.id, details }, async () => {
           const { data, error } = await supabase
             .from("users")
             .update({ status: "active", suspended_reason: null, suspended_at: null, suspended_by: null })
@@ -432,24 +448,29 @@ Deno.serve(async (req) => {
       if (req.method === "POST" && route.action === "ban" && route.id) {
         const body = await req.json().catch(() => ({})) as { reason?: string };
         return await audited(audit, { action: "ban_user", targetType: "user", targetId: route.id, details: { reason: body.reason } }, async () => {
-          const { data, error } = await supabase
-            .from("users")
-            .update({ status: "banned", suspended_reason: body.reason ?? "Banned by admin", suspended_at: new Date().toISOString(), suspended_by: authId })
-            .eq("id", route.id)
-            .select("auth_id");
-          if (error) throw error;
-          if (!data?.length) return withCors({ error: "User not found" }, { status: 404 });
-          const banAuthId = data[0].auth_id as string | null;
+          const { data: person, error: findErr } = await supabase.from("users").select("auth_id").eq("id", route.id).maybeSingle();
+          if (findErr) throw findErr;
+          if (!person) return withCors({ error: "User not found" }, { status: 404 });
+          // Sign-in is blocked first, and the person is marked banned only once that worked. The other
+          // way round, a failed sign-in block answered with an error while the person already read as
+          // banned: the dialog stayed open over a page still saying Active, and Ban could not be retried.
+          const banAuthId = person.auth_id as string | null;
           if (banAuthId) {
             const { error: banErr } = await supabase.auth.admin.updateUserById(banAuthId, { ban_duration: AUTH_BAN_DURATION });
             if (banErr) throw banErr;
           }
+          const { error } = await supabase
+            .from("users")
+            .update({ status: "banned", suspended_reason: body.reason ?? "Banned by admin", suspended_at: new Date().toISOString(), suspended_by: authId })
+            .eq("id", route.id);
+          if (error) throw error;
           return withCors({ ok: true });
         });
       }
 
       if (req.method === "POST" && route.action === "unban" && route.id) {
-        return await audited(audit, { action: "unban_user", targetType: "user", targetId: route.id }, async () => {
+        const details = reasonDetails(await req.json().catch(() => null));
+        return await audited(audit, { action: "unban_user", targetType: "user", targetId: route.id, details }, async () => {
           const { data, error } = await supabase
             .from("users")
             .update({ status: "active", suspended_reason: null, suspended_at: null, suspended_by: null })
@@ -526,20 +547,16 @@ Deno.serve(async (req) => {
             reference: row.idempotency_key,
             user_name: names.get(row.user_id as string)?.full_name ?? "",
             type: row.type,
-            amount: row.amount,
-            fee: row.fee,
+            amount_kobo: row.amount,
+            fee_kobo: row.fee,
             currency: row.currency,
             status: row.status,
             provider: row.provider,
             flagged: row.flagged,
-            created_at: row.created_at,
+            created_at_utc: row.created_at,
           }));
           await audit({ action: "export_transactions", targetType: "transaction", details: { rows: csvRows.length, truncated, filters: Object.fromEntries(url.searchParams) } });
-          return csvResponse(
-            "transactions.csv",
-            toCsv(csvRows, ["id", "reference", "user_name", "type", "amount", "fee", "currency", "status", "provider", "flagged", "created_at"]),
-            truncated,
-          );
+          return csvResponse(csvFileName("transactions"), toCsv(csvRows, TRANSACTION_CSV_COLUMNS), truncated);
         }
 
         const { data, count, error } = await buildQuery(true).order("id", { ascending: false }).range(from, to);
@@ -638,7 +655,8 @@ Deno.serve(async (req) => {
       }
 
       if (req.method === "POST" && route.action === "unflag" && route.id) {
-        return await audited(audit, { action: "unflag_transaction", targetType: "transaction", targetId: route.id }, async () => {
+        const details = reasonDetails(await req.json().catch(() => null));
+        return await audited(audit, { action: "unflag_transaction", targetType: "transaction", targetId: route.id, details }, async () => {
           const { error } = await supabase
             .from("transactions")
             .update({
@@ -669,7 +687,7 @@ Deno.serve(async (req) => {
 
         let query = supabase
           .from("kyc_verifications")
-          .select("id, user_id, level, status, provider, bvn_last_four, nin_last_four, selfie_match_confidence, submitted_at, verified_at, reviewed_by, rejection_reason, created_at", { count: "exact" })
+          .select("id, user_id, level, status, provider, verification_method, bvn_last_four, nin_last_four, selfie_match_confidence, submitted_at, verified_at, reviewed_by, rejection_reason, superseded_at, created_at", { count: "exact" })
           .order("created_at", { ascending: false })
           .order("id", { ascending: false })
           .range(from, to);
@@ -729,7 +747,8 @@ Deno.serve(async (req) => {
       }
 
       if (req.method === "POST" && route.action === "unflag" && route.id) {
-        return await audited(audit, { action: "unflag_event", targetType: "event", targetId: route.id }, async () => {
+        const details = reasonDetails(await req.json().catch(() => null));
+        return await audited(audit, { action: "unflag_event", targetType: "event", targetId: route.id, details }, async () => {
           const { data, error } = await supabase
             .from("events")
             .update({ flagged: false, flag_reason: null, flagged_by: null, flagged_at: null })
@@ -1179,12 +1198,12 @@ Deno.serve(async (req) => {
             processed: row.processed,
             processing_error: row.processing_error,
             idempotency_key: row.idempotency_key,
-            created_at: row.created_at,
+            created_at_utc: row.created_at,
           }));
           await audit({ action: "export_webhooks", targetType: "webhook", details: { rows: csvRows.length, truncated, filters: Object.fromEntries(url.searchParams) } });
           return csvResponse(
-            "webhooks.csv",
-            toCsv(csvRows, ["id", "provider", "event_type", "processed", "processing_error", "idempotency_key", "created_at"]),
+            csvFileName("webhooks"),
+            toCsv(csvRows, ["id", "provider", "event_type", "processed", "processing_error", "idempotency_key", "created_at_utc"]),
             truncated,
           );
         }
@@ -1328,12 +1347,12 @@ Deno.serve(async (req) => {
           event_type: row.event_type,
           status: row.status,
           reference: row.reference,
-          created_at: row.created_at,
+          created_at_utc: row.created_at,
         }));
         await audit({ action: "export_psp_events", targetType: "psp_event", details: { rows: csvRows.length, truncated, filters: Object.fromEntries(url.searchParams) } });
         return csvResponse(
-          "psp-events.csv",
-          toCsv(csvRows, ["id", "provider_id", "direction", "event_type", "status", "reference", "created_at"]),
+          csvFileName("psp-events"),
+          toCsv(csvRows, ["id", "provider_id", "direction", "event_type", "status", "reference", "created_at_utc"]),
           truncated,
         );
       }

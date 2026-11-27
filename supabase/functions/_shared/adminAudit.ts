@@ -51,6 +51,14 @@ export function makeAudit(rpc: Rpc, adminId: string, ip: string | null): Audit {
   };
 }
 
+// The optional reason an admin typed for an action (lifting a ban, removing a flag), as audit details.
+// Nothing is recorded when none was given; a long one is cut to 500 characters.
+export function reasonDetails(body: unknown): { reason: string } | undefined {
+  const raw = (body as { reason?: unknown } | null)?.reason;
+  const reason = typeof raw === "string" ? raw.trim().slice(0, 500) : "";
+  return reason ? { reason } : undefined;
+}
+
 export type AuditedOptions<T> = {
   // Why the action did nothing, or null when it went through. Default: an error response (status 400+).
   notDone?: (value: T) => string | null;

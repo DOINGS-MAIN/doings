@@ -64,7 +64,12 @@ export const AdminKYC = () => {
                   <p className="text-xs text-muted-foreground">{k.userEmail}</p>
                 </TableCell>
                 <TableCell>{k.level}</TableCell>
-                <TableCell>{statusBadge(k.status)}</TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1">
+                    {statusBadge(k.status)}
+                    {k.superseded && <Badge variant="outline" className="text-muted-foreground">replaced by a newer check</Badge>}
+                  </div>
+                </TableCell>
                 <TableCell className="text-sm text-muted-foreground max-w-xs">{k.rejectionReason ?? "—"}</TableCell>
                 <TableCell className="text-sm whitespace-nowrap">{format(k.verifiedAt ?? k.submittedAt, "MMM d, yyyy HH:mm")}</TableCell>
               </TableRow>

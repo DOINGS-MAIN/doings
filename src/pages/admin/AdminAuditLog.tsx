@@ -26,6 +26,7 @@ const PAGE_SIZE = 50;
 
 // Actions the admin API and admin database functions record (All shows every entry).
 const ACTIONS = [
+  "admin_sign_in", "admin_two_step_passed", "admin_sign_out",
   "suspend_user", "unsuspend_user", "ban_user", "unban_user",
   "flag_transaction", "unflag_transaction", "reprocess_webhook", "probe_all_providers",
   "flag_event", "unflag_event", "end_event",

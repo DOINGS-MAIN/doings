@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { ArrowLeft, Copy, ExternalLink, FastForward, Loader2, StopCircle, UserMinus } from "lucide-react";
+import { ArrowLeft, Copy, ExternalLink, FastForward, Flag, FlagOff, Loader2, StopCircle, UserMinus } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { useAdminLiveEvent, useAdminMutations } from "@/hooks/admin/useAdminQuer
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { floorChargedSoFar } from "@/lib/adminMappers";
 import { can } from "@/types/admin";
-import { confirmDialog } from "@/lib/confirmDialog";
+import { confirmDialog, confirmWithReason } from "@/lib/confirmDialog";
 
 const SLOTS = 8;
 
@@ -89,7 +89,7 @@ export const AdminLiveEvent = () => {
   const { session } = useAdminAuth();
   const role = session?.role;
   const { data, isLoading, isError, refetch } = useAdminLiveEvent(id ?? null);
-  const { advanceFloor, endEvent } = useAdminMutations();
+  const { advanceFloor, endEvent, flagEvent, unflagEvent } = useAdminMutations();
   const [removing, setRemoving] = useState<{ holdId: string; name: string; onFloor: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -124,6 +124,7 @@ export const AdminLiveEvent = () => {
   const live = event.status === "live";
   const canEnd = can(role, "events.end");
   const canRemove = can(role, "events.floor");
+  const canFlag = can(role, "events.flag");
   const appUrl = String(import.meta.env.VITE_NEW_APP_URL ?? "").trim().replace(/\/$/, "");
   const projector = appUrl ? `${appUrl}/screen/${event.code}` : "";
   const bySlot = new Map(floor.map((f) => [f.slot, f]));
@@ -133,6 +134,26 @@ export const AdminLiveEvent = () => {
     try {
       const res = (await advanceFloor(event.id)) as { on_floor?: number; queued?: number } | undefined;
       toast.success(`Floor advanced — ${res?.on_floor ?? 0} dancing, ${res?.queued ?? 0} waiting`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "That didn't work");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // The same questions as the events list: a reason is needed to flag, and optional to remove one.
+  const toggleFlag = async () => {
+    const reason = event.flagged
+      ? await confirmWithReason(`Remove the flag from "${event.title}"?`, { title: "Remove flag", confirmLabel: "Remove flag" })
+      : await confirmWithReason("Flag this event for review. It will be marked for investigation.", {
+        title: "Flag event", confirmLabel: "Flag event", destructive: true, reasonLabel: "Reason for flagging", reasonRequired: true,
+      });
+    if (reason === null) return;
+    setBusy(true);
+    try {
+      if (event.flagged) await unflagEvent(event.id, reason);
+      else await flagEvent(event.id, reason);
+      toast.success(event.flagged ? "Event unflagged" : "Event flagged for review");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "That didn't work");
     } finally {
@@ -172,6 +193,7 @@ export const AdminLiveEvent = () => {
             )}
             {event.flagged && <Badge variant="destructive">Flagged</Badge>}
           </div>
+          {event.flagged && event.flagReason && <p className="text-sm text-destructive mt-1">Flagged: {event.flagReason}</p>}
           <p className="text-muted-foreground mt-1">
             <span className="font-mono">{event.code}</span>
             {host && <> · Host <Link to={`/admin/users/${host.id}`} className="hover:underline">{host.name || host.email || host.id}</Link></>}
@@ -203,16 +225,24 @@ export const AdminLiveEvent = () => {
             )}
           </div>
         </div>
-        {live && canEnd && (
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={advance} disabled={busy}>
-              <FastForward className="w-4 h-4 mr-2" />Advance floor now
+        <div className="flex flex-wrap gap-2">
+          {canFlag && (
+            <Button variant="outline" onClick={() => void toggleFlag()} disabled={busy}>
+              {event.flagged ? <FlagOff className="w-4 h-4 mr-2" /> : <Flag className="w-4 h-4 mr-2" />}
+              {event.flagged ? "Remove flag" : "Flag"}
             </Button>
-            <Button variant="destructive" onClick={end} disabled={busy}>
-              <StopCircle className="w-4 h-4 mr-2" />End event
-            </Button>
-          </div>
-        )}
+          )}
+          {live && canEnd && (
+            <>
+              <Button variant="outline" onClick={advance} disabled={busy}>
+                <FastForward className="w-4 h-4 mr-2" />Advance floor now
+              </Button>
+              <Button variant="destructive" onClick={end} disabled={busy}>
+                <StopCircle className="w-4 h-4 mr-2" />End event
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <Card className="bg-card border-border">

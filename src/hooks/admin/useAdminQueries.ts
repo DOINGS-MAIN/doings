@@ -2,6 +2,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { admin as adminApi } from "@/lib/supabase";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { can } from "@/types/admin";
+import { runThenRefresh } from "@/lib/adminRun";
 import {
   mapBundleOrder, mapEvent, mapGiveaway, mapGiveawayDetail, mapKyc, mapLiveEvent, mapPaymentsOverview, mapPayout, mapQueue, mapStats, mapTransaction,
   mapUser, mapUser360,
@@ -248,22 +249,20 @@ export function useAdminMutations() {
   const refresh = (...keys: (keyof typeof adminKeys)[]) =>
     Promise.all(keys.map((k) => qc.invalidateQueries({ queryKey: ["admin", k] })));
   const m = useMutation({ mutationFn: (fn: () => Promise<unknown>) => fn() });
-  // Runs the call, refreshes the affected lists, and returns the server's answer.
-  const run = async (fn: () => Promise<unknown>, ...keys: (keyof typeof adminKeys)[]): Promise<unknown> => {
-    const out = await m.mutateAsync(fn);
-    await refresh(...keys);
-    return out;
-  };
+  // Runs the call, refreshes the affected lists, and returns the server's answer. The lists are
+  // refreshed after a failure too: the server may have done part of the action before it failed.
+  const run = (fn: () => Promise<unknown>, ...keys: (keyof typeof adminKeys)[]): Promise<unknown> =>
+    runThenRefresh(() => m.mutateAsync(fn), () => refresh(...keys));
   return {
     suspendUser: (id: string, reason: string) => run(() => adminApi.users.suspend(id, reason), "users", "stats"),
-    unsuspendUser: (id: string) => run(() => adminApi.users.unsuspend(id), "users", "stats"),
+    unsuspendUser: (id: string, reason?: string) => run(() => adminApi.users.unsuspend(id, reason), "users", "stats"),
     banUser: (id: string, reason: string) => run(() => adminApi.users.ban(id, reason), "users", "stats"),
-    unbanUser: (id: string) => run(() => adminApi.users.unban(id), "users", "stats"),
+    unbanUser: (id: string, reason?: string) => run(() => adminApi.users.unban(id, reason), "users", "stats"),
     flagEvent: (id: string, reason: string) => run(() => adminApi.events.flag(id, reason), "events", "stats"),
-    unflagEvent: (id: string) => run(() => adminApi.events.unflag(id), "events", "stats"),
+    unflagEvent: (id: string, reason?: string) => run(() => adminApi.events.unflag(id, reason), "events", "stats"),
     endEvent: (id: string) => run(() => adminApi.events.end(id), "events", "stats"),
-    flagTransaction: (id: string, reason: string) => run(() => adminApi.transactions.flag(id, reason), "transactions", "stats"),
-    unflagTransaction: (id: string) => run(() => adminApi.transactions.unflag(id), "transactions", "stats"),
+    flagTransaction: (id: string, reason: string) => run(() => adminApi.transactions.flag(id, reason), "transactions", "stats", "queue"),
+    unflagTransaction: (id: string, reason?: string) => run(() => adminApi.transactions.unflag(id, reason), "transactions", "stats", "queue"),
     refundTransaction: (id: string, reason?: string) => run(() => adminApi.transactions.refund(id, reason), "transactions", "stats"),
     checkPayout: (id: string) => run(() => adminApi.payouts.check(id), "payouts", "transactions", "stats", "queue", "payments"),
     resolvePayout: (id: string, outcome: "paid" | "failed", reason: string, confirm: string) =>

@@ -49,6 +49,7 @@ import { useAdminEvents, useAdminMutations, type EventTab } from "@/hooks/admin/
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { AdminEvent, can } from "@/types/admin";
 import { toast } from "sonner";
+import { confirmWithReason } from "@/lib/confirmDialog";
 
 export const AdminEvents = () => {
   const { flagEvent, unflagEvent, endEvent } = useAdminMutations();
@@ -141,7 +142,11 @@ export const AdminEvents = () => {
     await runAction(() => flagEvent(event.id, flagReason.trim()), "Event flagged for review");
   };
 
-  const handleUnflag = (event: AdminEvent) => runAction(() => unflagEvent(event.id), "Event unflagged");
+  const handleUnflag = async (event: AdminEvent) => {
+    const reason = await confirmWithReason(`Remove the flag from "${event.name}"?`, { title: "Remove flag", confirmLabel: "Remove flag" });
+    if (reason === null) return;
+    await runAction(() => unflagEvent(event.id, reason), "Event unflagged");
+  };
 
   const handleEndEvent = async () => {
     if (!selectedEvent) return;

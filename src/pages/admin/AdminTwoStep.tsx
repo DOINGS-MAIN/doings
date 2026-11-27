@@ -111,6 +111,8 @@ export const AdminTwoStep = () => {
     try {
       const { error: verifyErr } = await supabase.auth.mfa.challengeAndVerify({ factorId: useFactor, code });
       if (verifyErr) throw new Error("That code is not right. Check the app and try the newest code.");
+      // Written to the audit log; sign-in goes on whether or not that worked.
+      void adminApi.team.accept("two_step").catch(() => undefined);
       if (enrolment) {
         setEnrolment(null);
         setDone(true);

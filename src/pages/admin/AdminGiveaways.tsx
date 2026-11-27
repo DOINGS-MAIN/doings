@@ -16,11 +16,24 @@ import { useAdminGiveaway, useAdminGiveaways, useAdminMutations } from "@/hooks/
 import { admin as adminApi } from "@/lib/supabase";
 import { useAdminAuth } from "@/hooks/useAdminAuth";
 import { can, type AdminGiveaway } from "@/types/admin";
+import { holdingText } from "@/lib/adminMoneyLabels";
 
 const USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const naira = (n: number) =>
-  new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", minimumFractionDigits: 0 }).format(n);
+// A giveaway holds and hands out bundles, so its amounts are counted in bundles (never ₦).
+const bundles = (n: number) => holdingText(n, "NGN");
+
+// A giveaway's type ("live" or "scheduled") is the kind chosen when it was made, not whether it is
+// running. Nearly all are "live", and "· Live" under a stopped giveaway read as its state, so only the
+// unusual kind is named; the status badge alone says whether it is running.
+const kindLabel = (type: AdminGiveaway["type"]) => (type === "scheduled" ? "Scheduled giveaway" : null);
+
+/** What is left to claim; once it has ended, what went back to the creator instead. */
+const remainingText = (g: AdminGiveaway) => {
+  if (g.status === "active") return bundles(g.remaining);
+  if (g.returned != null && g.returned > 0) return `${bundles(g.returned)} returned`;
+  return g.status === "stopped" ? "0 bundles (none returned)" : bundles(g.remaining);
+};
 
 const statusBadge = (status: AdminGiveaway["status"]) => {
   if (status === "active") return <Badge className="bg-success/20 text-success border-0">Active</Badge>;
@@ -49,7 +62,7 @@ function StopDialog({ giveaway, onClose }: { giveaway: AdminGiveaway; onClose: (
     try {
       const res = (await stopGiveaway(giveaway.id, reason.trim(), confirm.trim())) as { refunded?: number } | undefined;
       const refunded = Number(res?.refunded ?? 0) / 100;
-      toast.success(refunded > 0 ? `Giveaway stopped — ${naira(refunded)} returned to the creator` : "Giveaway stopped");
+      toast.success(refunded > 0 ? `Giveaway stopped — ${bundles(refunded)} returned to the creator` : "Giveaway stopped");
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "That didn't work");
@@ -64,7 +77,7 @@ function StopDialog({ giveaway, onClose }: { giveaway: AdminGiveaway; onClose: (
         <DialogHeader>
           <DialogTitle>Stop giveaway</DialogTitle>
           <DialogDescription>
-            Nobody else can claim it. What's left ({naira(giveaway.remaining)}) goes back to the creator's Bag, and they're told why.
+            Nobody else can claim it. What's left ({bundles(giveaway.remaining)}) goes back to the creator's Bag, and they're told why.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
@@ -116,14 +129,14 @@ function GiveawaySheet({ id, onClose }: { id: string | null; onClose: () => void
               </div>
               <div className="flex flex-col items-end gap-1">
                 {statusBadge(g.status)}
-                <Badge variant="outline" className="capitalize">{g.type}</Badge>
+                {kindLabel(g.type) && <Badge variant="outline">{kindLabel(g.type)}</Badge>}
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div><p className="text-muted-foreground">Total</p><p className="font-medium">{naira(g.total)}</p></div>
-              <div><p className="text-muted-foreground">Per person</p><p className="font-medium">{naira(g.perPerson)}</p></div>
-              <div><p className="text-muted-foreground">Remaining</p><p className="font-medium">{naira(g.remaining)}</p></div>
+              <div><p className="text-muted-foreground">Total</p><p className="font-medium">{bundles(g.total)}</p></div>
+              <div><p className="text-muted-foreground">Per person</p><p className="font-medium">{bundles(g.perPerson)}</p></div>
+              <div><p className="text-muted-foreground">Remaining</p><p className="font-medium">{remainingText(g)}</p></div>
               <div><p className="text-muted-foreground">Recipients</p><p className="font-medium">{g.redeemedCount} of {g.maxRecipients}</p></div>
             </div>
 
@@ -171,7 +184,7 @@ function GiveawaySheet({ id, onClose }: { id: string | null; onClose: () => void
                 data.redemptions.map((r) => (
                   <div key={r.id} className="flex justify-between py-1 border-b border-border last:border-0">
                     <Link to={`/admin/users/${r.userId}`} className="hover:underline">{r.userName || r.userId}</Link>
-                    <span>{naira(r.amount)} · <span className="text-xs text-muted-foreground">{format(r.redeemedAt, "MMM d, HH:mm")}</span></span>
+                    <span>{bundles(r.amount)} · <span className="text-xs text-muted-foreground">{format(r.redeemedAt, "MMM d, HH:mm")}</span></span>
                   </div>
                 ))
               )}
@@ -280,12 +293,12 @@ export const AdminGiveaways = () => {
                   <TableCell className="whitespace-nowrap text-sm">{format(g.createdAt, "MMM d, HH:mm")}</TableCell>
                   <TableCell>
                     <p className="font-medium">{g.title}</p>
-                    <p className="font-mono text-xs text-muted-foreground">{g.code} · <span className="capitalize">{g.type}</span></p>
+                    <p className="font-mono text-xs text-muted-foreground">{g.code}{kindLabel(g.type) && <span className="font-sans"> · {kindLabel(g.type)}</span>}</p>
                   </TableCell>
                   <TableCell>{g.creatorName || g.creatorId}</TableCell>
-                  <TableCell>{naira(g.total)}</TableCell>
-                  <TableCell>{naira(g.perPerson)}</TableCell>
-                  <TableCell>{naira(g.remaining)}</TableCell>
+                  <TableCell>{bundles(g.total)}</TableCell>
+                  <TableCell>{bundles(g.perPerson)}</TableCell>
+                  <TableCell>{remainingText(g)}</TableCell>
                   <TableCell>{g.redeemedCount}/{g.maxRecipients}</TableCell>
                   <TableCell className="text-sm">
                     {g.eventTitle ? <>{g.eventTitle} <span className="font-mono text-xs text-muted-foreground">{g.eventCode}</span></> : "—"}

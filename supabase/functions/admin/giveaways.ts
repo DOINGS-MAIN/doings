@@ -41,8 +41,20 @@ export async function handleGiveaways(ctx: AdminRouteCtx): Promise<Response | nu
       .range(from, to);
     if (error) throw error;
     const rows = (data ?? []) as Record<string, unknown>[];
+    // What went back to the creator (a stop zeroes the remainder): the refund transaction's amount.
+    const refundIds = rows.map((g) => g.refund_transaction_id as string | null).filter(Boolean) as string[];
+    const returned = new Map<string, number>();
+    if (refundIds.length > 0) {
+      const { data: refunds, error: refundErr } = await supabase.from("transactions").select("id, amount").in("id", refundIds);
+      if (refundErr) throw refundErr;
+      for (const t of refunds ?? []) returned.set(t.id as string, Math.abs(Number(t.amount ?? 0)));
+    }
     // creator names (attachUserFields keys on user_id)
-    const named = await ctx.attachUserFields(rows.map((g) => ({ ...g, user_id: g.creator_id })));
+    const named = await ctx.attachUserFields(rows.map((g) => ({
+      ...g,
+      user_id: g.creator_id,
+      returned_amount: g.refund_transaction_id ? returned.get(g.refund_transaction_id as string) ?? null : null,
+    })));
     // Never send an active giveaway's code: it's effectively cash.
     const giveaways = named.map((g) => ({
       ...g,
