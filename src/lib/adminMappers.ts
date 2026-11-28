@@ -97,6 +97,7 @@ export function mapEvent(e: Record<string, unknown>): AdminEvent {
     isPrivate: (e.is_private as boolean) ?? false,
     flagged: (e.flagged as boolean) ?? false,
     flagReason: e.flag_reason as string | undefined,
+    deletedByHost: Boolean(e.deleted_at),
   };
 }
 
