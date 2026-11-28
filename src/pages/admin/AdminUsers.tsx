@@ -53,8 +53,9 @@ export const AdminUsers = () => {
   const { suspendUser, unsuspendUser, banUser, unbanUser } = useAdminMutations();
   const { session } = useAdminAuth();
   const canSuspend = can(session?.role, "users.suspend");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  // A link to this page can carry the search (/admin/users?search=name): start from it.
+  const [searchQuery, setSearchQuery] = useState(() => new URLSearchParams(window.location.search).get("search")?.trim() ?? "");
+  const [debouncedSearch, setDebouncedSearch] = useState(searchQuery);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [page, setPage] = useState(1);
 
