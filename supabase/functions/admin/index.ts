@@ -715,7 +715,7 @@ Deno.serve(async (req) => {
         let query = supabase
           .from("events")
           .select(
-            "id, host_id, title, event_code, type, status, is_private, max_participants, participant_count, total_sprayed, flagged, flag_reason, created_at, started_at, ended_at, scheduled_at",
+            "id, host_id, title, event_code, type, status, is_private, max_participants, participant_count, total_sprayed, flagged, flag_reason, created_at, started_at, ended_at, scheduled_at, deleted_at",
             { count: "exact" },
           )
           .order("created_at", { ascending: false })

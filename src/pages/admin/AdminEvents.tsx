@@ -190,6 +190,7 @@ export const AdminEvents = () => {
                     <div>
                       <p className="font-medium text-foreground">{event.name}</p>
                       <p className="text-xs text-muted-foreground font-mono">{event.code}</p>
+                      {event.deletedByHost && <p className="text-xs text-muted-foreground mt-0.5">Deleted by host</p>}
                       {event.flagged && event.flagReason && (
                         <p className="text-xs text-destructive mt-0.5">{event.flagReason}</p>
                       )}

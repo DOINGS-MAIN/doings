@@ -1,5 +1,6 @@
 import { corsHeaders, withCors } from "../_shared/cors.ts";
 import { accountBlock } from "../_shared/account.ts";
+import { deletePlan } from "../_shared/eventDelete.ts";
 import { getAuthUserIdFromRequest, getServiceClient } from "../_shared/db.ts";
 import { formatDbError, isUniqueViolation } from "../_shared/errors.ts";
 import { checkRateLimit, RATE_LIMITS } from "../_shared/rate-limit.ts";
@@ -140,8 +141,8 @@ Deno.serve(async (req) => {
 
   // POST /:id/join
   if (method === "POST" && action === "join") {
-    const { data: event } = await supabase.from("events").select("id, status, max_participants, participant_count").eq("id", eventId).single();
-    if (!event) return withCors({ error: "Event not found" }, { status: 404 });
+    const { data: event } = await supabase.from("events").select("id, status, max_participants, participant_count, deleted_at").eq("id", eventId).single();
+    if (!event || event.deleted_at) return withCors({ error: "Event not found" }, { status: 404 });
     if (event.status === "ended") return withCors({ error: "Event has ended" }, { status: 400 });
     if (event.max_participants && event.participant_count >= event.max_participants) {
       return withCors({ error: "Event is full" }, { status: 400 });
@@ -163,10 +164,10 @@ Deno.serve(async (req) => {
   // Fetch event for host-only actions
   const { data: hostEvent } = await supabase
     .from("events")
-    .select("id, host_id, status, participant_count")
+    .select("id, host_id, status, participant_count, deleted_at")
     .eq("id", eventId)
     .single();
-  if (!hostEvent) return withCors({ error: "Event not found" }, { status: 404 });
+  if (!hostEvent || hostEvent.deleted_at) return withCors({ error: "Event not found" }, { status: 404 });
   if (hostEvent.host_id !== user.id) return withCors({ error: "Only the host can perform this action" }, { status: 403 });
 
   const applyMaxParticipantsPatch = (raw: unknown): number | null => {
@@ -268,12 +269,21 @@ Deno.serve(async (req) => {
 
   // DELETE /:id
   if (method === "DELETE" && !action) {
-    if (hostEvent.status !== "draft") {
-      return withCors({ error: "Can only delete draft events" }, { status: 400 });
+    // A draft is removed outright. Anything that has been live is ended (if it still is live) and
+    // marked deleted, so people's sprays and giveaways keep their event (see _shared/eventDelete.ts).
+    const plan = deletePlan(hostEvent.status);
+    if (plan.remove) {
+      const { error } = await supabase.from("events").delete().eq("id", eventId);
+      if (!error) return withCors({ ok: true, deleted: "removed" });
+      // Something is attached after all: keep the records and mark it deleted instead.
+      const now = new Date().toISOString();
+      const { error: markErr } = await supabase.from("events").update({ status: "ended", ended_at: now, deleted_at: now }).eq("id", eventId);
+      if (markErr) return withCors({ error: "Delete failed" }, { status: 500 });
+      return withCors({ ok: true, deleted: "hidden" });
     }
-    const { error } = await supabase.from("events").delete().eq("id", eventId);
+    const { error } = await supabase.from("events").update(plan.patch).eq("id", eventId);
     if (error) return withCors({ error: "Delete failed" }, { status: 500 });
-    return withCors({ ok: true });
+    return withCors({ ok: true, deleted: "hidden", ended: plan.patch.status === "ended" });
   }
 
   return withCors({ error: "Not found" }, { status: 404 });

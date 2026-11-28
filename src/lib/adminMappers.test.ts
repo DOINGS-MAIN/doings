@@ -6,6 +6,8 @@ describe("admin mappers", () => {
     expect(mapEvent({ id: "1", status: "scheduled" }).status).toBe("upcoming");
     expect(mapEvent({ id: "1", status: "draft" }).status).toBe("upcoming");
     expect(mapEvent({ id: "1", status: "live" }).status).toBe("live");
+    expect(mapEvent({ id: "1", status: "ended", deleted_at: "2026-11-30T10:00:00Z" }).deletedByHost).toBe(true);
+    expect(mapEvent({ id: "1", status: "ended", deleted_at: null }).deletedByHost).toBe(false);
     expect(mapEvent({ id: "1", status: "ended", event_code: "AB12CD", host_name: "Ada" })).toMatchObject({ status: "ended", code: "AB12CD", hostName: "Ada" });
   });
   it("converts stats kobo to naira and keeps counts", () => {

@@ -189,6 +189,8 @@ export interface AdminEvent {
   createdAt: Date;
   scheduledAt?: Date;
   endedAt?: Date;
+  /** The host deleted it: gone from the app's lists and links, kept here with its records. */
+  deletedByHost?: boolean;
   flagged?: boolean;
   flagReason?: string;
   isPrivate?: boolean;
